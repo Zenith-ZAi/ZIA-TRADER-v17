@@ -1,0 +1,251 @@
+# Regras de Alerta do Prometheus - RoboTrader 2.0
+groups:
+  - name: robotrader.system
+    rules:
+      - alert: HighCPUUsage
+        expr: robotrader_cpu_usage_percent > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: robotrader
+        annotations:
+          summary: "High CPU usage detected"
+          description: "CPU usage is above 80% for more than 5 minutes. Current value: {{ $value }}%"
+          
+      - alert: HighMemoryUsage
+        expr: robotrader_memory_usage_bytes / (1024^3) > 8
+        for: 5m
+        labels:
+          severity: warning
+          service: robotrader
+        annotations:
+          summary: "High memory usage detected"
+          description: "Memory usage is above 8GB for more than 5 minutes. Current value: {{ $value }}GB"
+          
+      - alert: HighDiskUsage
+        expr: robotrader_disk_usage_percent > 85
+        for: 10m
+        labels:
+          severity: critical
+          service: robotrader
+        annotations:
+          summary: "High disk usage detected"
+          description: "Disk usage is above 85% for more than 10 minutes. Current value: {{ $value }}%"
+          
+      - alert: ServiceDown
+        expr: up{job="robotrader-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: robotrader
+        annotations:
+          summary: "RoboTrader API is down"
+          description: "The RoboTrader API service has been down for more than 1 minute"
+
+  - name: robotrader.trading
+    rules:
+      - alert: HighDrawdown
+        expr: max(robotrader_drawdown_current) > 10
+        for: 5m
+        labels:
+          severity: critical
+          service: robotrader
+        annotations:
+          summary: "High portfolio drawdown detected"
+          description: "Portfolio drawdown exceeded 10%. Current value: {{ $value }}%"
+          
+      - alert: LowWinRate
+        expr: |
+          (
+            rate(robotrader_trades_total{status="executed",pnl="positive"}[1h]) / 
+            rate(robotrader_trades_total{status="executed"}[1h])
+          ) * 100 < 30
+        for: 30m
+        labels:
+          severity: warning
+          service: robotrader
+        annotations:
+          summary: "Low win rate detected"
+          description: "Win rate has been below 30% for the last hour. Current value: {{ $value }}%"
+          
+      - alert: LargeLoss
+        expr: robotrader_trade_pnl < -1000
+        for: 0m
+        labels:
+          severity: critical
+          service: robotrader
+        annotations:
+          summary: "Large trading loss detected"
+          description: "A trade resulted in a loss greater than $1000. Loss amount: ${{ $value }}"
+          
+      - alert: TradingVolumeAnomaly
+        expr: |
+          (
+            rate(robotrader_trades_total[5m]) > 
+            avg_over_time(rate(robotrader_trades_total[5m])[1h:5m]) * 3
+          ) or (
+            rate(robotrader_trades_total[5m]) < 
+            avg_over_time(rate(robotrader_trades_total[5m])[1h:5m]) * 0.1
+          )
+        for: 10m
+        labels:
+          severity: warning
+          service: robotrader
+        annotations:
+          summary: "Trading volume anomaly detected"
+          description: "Trading volume is significantly different from normal patterns"
+
+  - name: robotrader.ai
+    rules:
+      - alert: LowAIConfidence
+        expr: avg(robotrader_ai_confidence) < 0.5
+        for: 15m
+        labels:
+          severity: warning
+          service: robotrader
+        annotations:
+          summary: "Low AI model confidence"
+          description: "Average AI model confidence has been below 50% for 15 minutes. Current value: {{ $value }}"
+          
+      - alert: AIModelTrainingFailed
+        expr: increase(robotrader_model_training_failures_total[1h]) > 0
+        for: 0m
+        labels:
+          severity: error
+          service: robotrader
+        annotations:
+          summary: "AI model training failed"
+          description: "AI model training has failed {{ $value }} times in the last hour"
+          
+      - alert: StaleAIPredictions
+        expr: time() - robotrader_ai_last_prediction_timestamp > 300
+        for: 5m
+        labels:
+          severity: warning
+          service: robotrader
+        annotations:
+          summary: "Stale AI predictions"
+          description: "No AI predictions have been made for more than 5 minutes"
+
+  - name: robotrader.api
+    rules:
+      - alert: HighAPIErrorRate
+        expr: |
+          (
+            rate(robotrader_api_requests_total{status=~"4..|5.."}[5m]) / 
+            rate(robotrader_api_requests_total[5m])
+          ) * 100 > 5
+        for: 10m
+        labels:
+          severity: error
+          service: robotrader
+        annotations:
+          summary: "High API error rate"
+          description: "API error rate is above 5% for more than 10 minutes. Current rate: {{ $value }}%"
+          
+      - alert: HighAPILatency
+        expr: histogram_quantile(0.95, robotrader_api_request_duration_seconds) > 2
+        for: 10m
+        labels:
+          severity: warning
+          service: robotrader
+        annotations:
+          summary: "High API latency"
+          description: "95th percentile API latency is above 2 seconds. Current value: {{ $value }}s"
+          
+      - alert: TooManyWebSocketConnections
+        expr: robotrader_websocket_connections > 1000
+        for: 5m
+        labels:
+          severity: warning
+          service: robotrader
+        annotations:
+          summary: "Too many WebSocket connections"
+          description: "WebSocket connections exceeded 1000. Current value: {{ $value }}"
+
+  - name: robotrader.market_data
+    rules:
+      - alert: HighMarketDataLatency
+        expr: histogram_quantile(0.95, robotrader_market_data_latency_seconds) > 1
+        for: 5m
+        labels:
+          severity: warning
+          service: robotrader
+        annotations:
+          summary: "High market data latency"
+          description: "95th percentile market data latency is above 1 second. Current value: {{ $value }}s"
+          
+      - alert: MarketDataStale
+        expr: time() - robotrader_market_data_last_update_timestamp > 60
+        for: 2m
+        labels:
+          severity: error
+          service: robotrader
+        annotations:
+          summary: "Stale market data"
+          description: "Market data has not been updated for more than 1 minute"
+          
+      - alert: MarketDataSourceDown
+        expr: rate(robotrader_market_data_updates_total[5m]) == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: robotrader
+        annotations:
+          summary: "Market data source is down"
+          description: "No market data updates received for more than 5 minutes from {{ $labels.source }}"
+
+  - name: robotrader.risk
+    rules:
+      - alert: RiskLimitViolation
+        expr: increase(robotrader_risk_violations_total{severity="critical"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          service: robotrader
+        annotations:
+          summary: "Critical risk limit violation"
+          description: "Critical risk limit has been violated {{ $value }} times in the last 5 minutes"
+          
+      - alert: HighPortfolioConcentration
+        expr: robotrader_portfolio_concentration_ratio > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          service: robotrader
+        annotations:
+          summary: "High portfolio concentration"
+          description: "Portfolio concentration ratio is above 50%. Current value: {{ $value }}"
+          
+      - alert: ExcessiveLeverage
+        expr: robotrader_portfolio_leverage > 3
+        for: 5m
+        labels:
+          severity: error
+          service: robotrader
+        annotations:
+          summary: "Excessive leverage detected"
+          description: "Portfolio leverage exceeded 3x. Current value: {{ $value }}x"
+
+  - name: robotrader.database
+    rules:
+      - alert: DatabaseConnectionsHigh
+        expr: robotrader_database_connections{database="postgres"} > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: robotrader
+        annotations:
+          summary: "High database connections"
+          description: "PostgreSQL connections are above 80. Current value: {{ $value }}"
+          
+      - alert: DatabaseQuerySlow
+        expr: histogram_quantile(0.95, robotrader_database_query_duration_seconds) > 5
+        for: 10m
+        labels:
+          severity: warning
+          service: robotrader
+        annotations:
+          summary: "Slow database queries"
+          description: "95th percentile database query time is above 5 seconds. Current value: {{ $value }}s"
+
