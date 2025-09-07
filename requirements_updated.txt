@@ -1,0 +1,861 @@
+# RoboTrader - Dependências Atualizadas para Produção
+# Versão: 2.0 - Atualizado em 28/08/2025
+
+# Core Framework
+asyncio-mqtt==0.16.2
+aiohttp==3.10.11
+aiofiles==24.1.0
+uvloop==0.21.0
+
+# Machine Learning & AI
+tensorflow==2.18.0
+scikit-learn==1.5.2
+numpy==2.1.2
+pandas==2.2.3
+scipy==1.14.1
+joblib==1.4.2
+xgboost==2.1.2
+lightgbm==4.5.0
+catboost==1.2.7
+
+# Deep Learning
+torch==2.5.1
+torchvision==0.20.1
+transformers==4.46.3
+accelerate==1.1.1
+
+# Quantum Computing
+qiskit==1.2.4
+qiskit-aer==0.15.1
+qiskit-algorithms==0.3.1
+cirq==1.4.1
+
+# Financial Data & Analysis
+yfinance==0.2.44
+pandas-ta==0.3.14b0
+ta-lib==0.4.32
+quantstats==0.0.62
+empyrical==0.5.5
+pyfolio==0.9.2
+zipline-reloaded==3.0.4
+
+# Database & Storage
+asyncpg==0.30.0
+psycopg2-binary==2.9.10
+influxdb-client==1.47.0
+redis==5.2.0
+sqlalchemy==2.0.36
+alembic==1.14.0
+
+# API & Web
+fastapi==0.115.5
+uvicorn==0.32.1
+starlette==0.47.3
+pydantic==2.10.3
+pydantic-core==2.39.0
+httpx==0.28.1
+websockets==13.1
+requests==2.32.3
+
+# Crypto Exchange APIs
+ccxt==4.4.29
+python-binance==1.0.21
+bybit==5.8.0
+
+# Data Processing
+beautifulsoup4==4.13.5
+lxml==5.3.0
+openpyxl==3.1.5
+xlsxwriter==3.2.0
+pyarrow==18.0.0
+polars==1.13.1
+
+# Visualization
+matplotlib==3.9.2
+seaborn==0.13.2
+plotly==5.24.1
+bokeh==3.6.2
+dash==2.18.2
+
+# Monitoring & Logging
+prometheus-client==0.21.0
+grafana-api==1.0.3
+loguru==0.7.2
+structlog==24.4.0
+
+# Performance & Profiling
+memory-profiler==0.61.0
+line-profiler==4.1.3
+py-spy==0.3.14
+pympler==0.9
+
+# Security
+cryptography==43.0.3
+pyjwt==2.10.1
+passlib==1.7.4
+bcrypt==4.2.1
+
+# Networking & Communication
+paramiko==3.5.0
+fabric==3.2.2
+celery==5.4.0
+kombu==5.4.2
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.24.0
+pytest-cov==6.0.0
+pytest-mock==3.14.0
+hypothesis==6.115.6
+
+# Development Tools
+black==24.10.0
+isort==5.13.2
+flake8==7.1.1
+mypy==1.13.0
+pre-commit==4.0.1
+
+# Configuration & Environment
+python-dotenv==1.0.1
+pydantic-settings==2.6.1
+click==8.1.7
+typer==0.15.1
+
+# Date & Time
+python-dateutil==2.9.0.post0
+pytz==2024.2
+arrow==1.3.0
+
+# Utilities
+tqdm==4.67.1
+rich==13.9.4
+colorama==0.4.6
+psutil==6.1.0
+schedule==1.2.2
+
+# Image Processing (for charts/reports)
+pillow==11.0.0
+opencv-python==4.10.0.84
+
+# PDF Generation
+reportlab==4.2.5
+weasyprint==63.1
+fpdf2==2.8.1
+
+# Email
+smtplib2==0.2.1
+email-validator==2.2.0
+
+# Serialization
+orjson==3.10.12
+msgpack==1.1.0
+pickle5==0.0.12
+
+# Compression
+lz4==4.3.3
+zstandard==0.23.0
+
+# Type Hints
+typing-extensions==4.15.0
+types-requests==2.32.0.20241016
+
+# Cloud & Deployment
+docker==7.1.0
+kubernetes==31.0.0
+boto3==1.35.67
+google-cloud-storage==2.18.2
+
+# Caching
+diskcache==5.6.3
+cachetools==5.5.0
+
+# Validation
+cerberus==1.3.5
+marshmallow==3.23.1
+
+# Math & Statistics
+sympy==1.13.3
+statsmodels==0.14.4
+arch==7.2.0
+
+# Natural Language Processing (for news analysis)
+nltk==3.9.1
+spacy==3.8.2
+textblob==0.18.0.post0
+
+# Time Series
+tslearn==0.6.3
+sktime==0.33.1
+prophet==1.1.6
+
+# Optimization
+cvxpy==1.6.0
+pulp==2.9.0
+optuna==4.1.0
+
+# Parallel Processing
+multiprocessing-logging==0.3.4
+concurrent-futures==3.1.1
+joblib==1.4.2
+
+# System Monitoring
+psutil==6.1.0
+py-cpuinfo==9.0.0
+gputil==1.4.0
+
+# Documentation
+sphinx==8.1.3
+sphinx-rtd-theme==3.0.2
+
+# Version Control Integration
+gitpython==3.1.43
+
+# Environment Management
+conda==24.9.2
+pip-tools==7.4.1
+
+# Additional Financial Libraries
+fredapi==0.5.2
+alpha-vantage==2.3.1
+iexfinance==0.5.0
+
+# Additional ML Libraries
+imbalanced-learn==0.12.4
+feature-engine==1.8.1
+shap==0.46.0
+
+# Additional Visualization
+altair==5.5.0
+pygal==3.0.5
+
+# Additional Utilities
+more-itertools==10.5.0
+toolz==1.0.0
+funcy==2.0
+
+# Jupyter (for development/analysis)
+jupyter==1.1.1
+ipykernel==6.29.5
+ipywidgets==8.1.5
+
+# Additional Database Drivers
+pymongo==4.10.1
+cassandra-driver==3.29.2
+
+# Additional APIs
+tweepy==4.14.0
+newsapi-python==0.2.7
+
+# Additional Security
+keyring==25.5.0
+keyrings.alt==5.0.1
+
+# Additional Performance
+numba==0.60.0
+cython==3.0.11
+
+# Additional Networking
+aioredis==2.0.1
+aiodns==3.2.0
+
+# Additional Serialization
+cloudpickle==3.1.0
+dill==0.3.9
+
+# Additional Monitoring
+sentry-sdk==2.19.0
+newrelic==10.2.0
+
+# Additional Configuration
+hydra-core==1.3.2
+omegaconf==2.3.0
+
+# Additional Development
+ipdb==0.13.13
+pudb==2024.1.3
+
+# Additional Math
+numdifftools==0.9.41
+autograd==1.7.0
+
+# Additional Time Series
+pykalman==0.9.7
+filterpy==1.4.5
+
+# Additional Optimization
+hyperopt==0.2.7
+bayesian-optimization==2.0.0
+
+# Additional Utilities for Production
+supervisor==4.2.5
+gunicorn==23.0.0
+nginx-python-module==1.25.5
+
+# Additional Monitoring for Production
+datadog==0.50.2
+elastic-apm==6.23.0
+
+# Additional Security for Production
+bandit==1.8.0
+safety==3.2.11
+
+# Additional Performance for Production
+gevent==24.11.1
+eventlet==0.37.0
+
+# Additional Database for Production
+pgbouncer==1.23.1
+redis-sentinel==0.0.1
+
+# Additional Caching for Production
+memcached==1.62
+pymemcache==4.0.0
+
+# Additional Serialization for Production
+avro-python3==1.12.0
+protobuf==5.28.3
+
+# Additional Compression for Production
+brotli==1.1.0
+snappy==0.7.3
+
+# Additional Networking for Production
+dnspython==2.7.0
+netaddr==1.3.0
+
+# Additional Utilities for Production
+setproctitle==1.3.4
+python-daemon==3.1.0
+
+# Additional Monitoring for Production
+py-spy==0.3.14
+austin-python==1.7.2
+
+# Additional Configuration for Production
+python-consul==1.1.0
+etcd3==0.12.0
+
+# Additional Security for Production
+authlib==1.3.2
+oauthlib==3.2.2
+
+# Additional Performance for Production
+uvloop==0.21.0
+httptools==0.6.4
+
+# Additional Database for Production
+asyncpg==0.30.0
+aiopg==1.4.0
+
+# Additional Caching for Production
+aiocache==0.12.3
+async-lru==2.0.4
+
+# Additional Serialization for Production
+msgspec==0.18.6
+ujson==5.10.0
+
+# Additional Compression for Production
+python-lz4==4.3.3
+python-snappy==0.7.3
+
+# Additional Networking for Production
+aiohttp-cors==0.7.0
+aiohttp-session==2.12.0
+
+# Additional Utilities for Production
+click-plugins==1.1.1
+click-completion==0.5.2
+
+# Additional Monitoring for Production
+opencensus==0.11.4
+opentelemetry-api==1.28.2
+
+# Additional Configuration for Production
+dynaconf==3.3.0
+python-decouple==3.8
+
+# Additional Security for Production
+python-jose==3.3.0
+itsdangerous==2.2.0
+
+# Additional Performance for Production
+orjson==3.10.12
+rapidjson==1.20
+
+# Additional Database for Production
+tortoise-orm==0.21.7
+databases==0.9.0
+
+# Additional Caching for Production
+redis-py-cluster==2.1.3
+hiredis==3.0.0
+
+# Additional Serialization for Production
+pydantic-extra-types==2.10.1
+pydantic-settings==2.6.1
+
+# Additional Compression for Production
+blosc==1.11.2
+zfpy==1.0.1
+
+# Additional Networking for Production
+httpcore==1.0.7
+h11==0.14.0
+
+# Additional Utilities for Production
+tenacity==9.0.0
+backoff==2.2.1
+
+# Additional Monitoring for Production
+structlog==24.4.0
+python-json-logger==3.2.1
+
+# Additional Configuration for Production
+environs==11.2.2
+marshmallow-dataclass==8.7.1
+
+# Additional Security for Production
+argon2-cffi==23.1.0
+scrypt==0.8.24
+
+# Additional Performance for Production
+cchardet==2.1.7
+charset-normalizer==3.4.0
+
+# Additional Database for Production
+peewee==3.17.8
+pony==0.7.19
+
+# Additional Caching for Production
+dogpile.cache==1.3.3
+beaker==1.13.0
+
+# Additional Serialization for Production
+cattrs==24.1.2
+attrs==24.2.0
+
+# Additional Compression for Production
+bz2file==0.98
+gzip-reader==0.1
+
+# Additional Networking for Production
+urllib3==2.2.3
+certifi==2024.8.30
+
+# Additional Utilities for Production
+humanize==4.11.0
+pendulum==3.0.0
+
+# Additional Monitoring for Production
+pythonjsonlogger==3.2.1
+python-logstash==0.4.8
+
+# Additional Configuration for Production
+configparser==7.1.0
+toml==0.10.2
+
+# Additional Security for Production
+pyotp==2.9.0
+qrcode==8.0
+
+# Additional Performance for Production
+lxml==5.3.0
+cssselect==1.2.0
+
+# Additional Database for Production
+motor==3.6.0
+beanie==1.27.0
+
+# Additional Caching for Production
+pylibmc==1.6.3
+python-memcached==1.62
+
+# Additional Serialization for Production
+simplejson==3.19.3
+jsonschema==4.23.0
+
+# Additional Compression for Production
+py7zr==0.22.0
+rarfile==4.2
+
+# Additional Networking for Production
+pycurl==7.45.3
+requests-oauthlib==2.0.0
+
+# Additional Utilities for Production
+python-magic==0.4.27
+filetype==1.2.0
+
+# Additional Monitoring for Production
+flask-monitoring-dashboard==3.1.0
+django-debug-toolbar==4.4.6
+
+# Additional Configuration for Production
+python-box==7.2.0
+easydict==1.13
+
+# Additional Security for Production
+cryptography==43.0.3
+pyopenssl==24.3.0
+
+# Additional Performance for Production
+falcon==3.1.3
+bottle==0.13.2
+
+# Additional Database for Production
+clickhouse-driver==0.2.9
+neo4j==5.26.0
+
+# Additional Caching for Production
+django-cache-machine==1.2.0
+flask-caching==2.3.0
+
+# Additional Serialization for Production
+pyaml==24.9.0
+ruamel.yaml==0.18.6
+
+# Additional Compression for Production
+zipfile36==0.1.3
+tarfile==0.1.0
+
+# Additional Networking for Production
+socket.io==5.11.4
+websocket-client==1.8.0
+
+# Additional Utilities for Production
+python-slugify==8.0.4
+unidecode==1.3.8
+
+# Additional Monitoring for Production
+rollbar==1.0.0
+bugsnag==4.7.1
+
+# Additional Configuration for Production
+python-dotenv==1.0.1
+python-environ==0.4.54
+
+# Additional Security for Production
+django-cors-headers==4.4.0
+flask-cors==5.0.0
+
+# Additional Performance for Production
+gevent-websocket==0.10.1
+eventlet==0.37.0
+
+# Additional Database for Production
+django-extensions==3.2.3
+flask-sqlalchemy==3.1.1
+
+# Additional Caching for Production
+django-redis==5.4.0
+flask-redis==0.4.0
+
+# Additional Serialization for Production
+django-rest-framework==0.1.0
+flask-restful==0.3.10
+
+# Additional Compression for Production
+django-compressor==4.5.1
+flask-compress==1.15
+
+# Additional Networking for Production
+django-channels==4.1.0
+flask-socketio==5.4.1
+
+# Additional Utilities for Production
+django-crispy-forms==2.3
+flask-wtf==1.2.2
+
+# Additional Monitoring for Production
+django-silk==5.2.0
+flask-profiler==1.8.1
+
+# Additional Configuration for Production
+django-environ==0.11.2
+flask-config==0.1.0
+
+# Additional Security for Production
+django-guardian==2.4.0
+flask-security==5.4.3
+
+# Additional Performance for Production
+django-cachalot==2.6.3
+flask-limiter==3.8.0
+
+# Additional Database for Production
+django-model-utils==5.0.0
+flask-migrate==4.0.7
+
+# Additional Caching for Production
+django-cache-tree==1.0.1
+flask-cache==0.13.1
+
+# Additional Serialization for Production
+django-filter==24.3
+flask-marshmallow==1.2.1
+
+# Additional Compression for Production
+django-pipeline==3.1.0
+flask-assets==2.1.0
+
+# Additional Networking for Production
+django-oauth-toolkit==3.0.1
+flask-oauthlib==0.9.6
+
+# Additional Utilities for Production
+django-timezone-field==7.0
+flask-babel==4.0.0
+
+# Additional Monitoring for Production
+django-prometheus==2.3.1
+flask-prometheus==0.1.0
+
+# Additional Configuration for Production
+django-configurations==2.5.1
+flask-appconfig==0.11.1
+
+# Additional Security for Production
+django-ratelimit==4.1.0
+flask-talisman==1.1.0
+
+# Additional Performance for Production
+django-debug-panel==0.8.3
+flask-debugtoolbar==0.15.1
+
+# Additional Database for Production
+django-bulk-update==2.2.0
+flask-admin==1.6.1
+
+# Additional Caching for Production
+django-cache-utils==0.7.2
+flask-cachecontrol==0.2.0
+
+# Additional Serialization for Production
+django-tastypie==0.14.7
+flask-api==3.1
+
+# Additional Compression for Production
+django-htmlmin==0.11.0
+flask-minify==0.42
+
+# Additional Networking for Production
+django-request==1.6.3
+flask-httpauth==4.8.0
+
+# Additional Utilities for Production
+django-phonenumber-field==8.0.0
+flask-mail==0.10.0
+
+# Additional Monitoring for Production
+django-health-check==3.18.3
+flask-healthz==1.0.1
+
+# Additional Configuration for Production
+django-split-settings==1.3.2
+flask-env==2.0.0
+
+# Additional Security for Production
+django-session-security==2.6.7
+flask-session==0.8.0
+
+# Additional Performance for Production
+django-querycount==0.8.3
+flask-profiler-dashboard==1.0.0
+
+# Additional Database for Production
+django-mptt==0.16.0
+flask-sqlalchemy-session==1.1
+
+# Additional Caching for Production
+django-cache-panel==0.1
+flask-cache-buster==1.0.0
+
+# Additional Serialization for Production
+django-import-export==4.1.1
+flask-excel==0.0.7
+
+# Additional Compression for Production
+django-static-compress==1.0.1
+flask-gzip==0.2
+
+# Additional Networking for Production
+django-allauth==65.3.0
+flask-dance==7.0.0
+
+# Additional Utilities for Production
+django-widget-tweaks==1.5.0
+flask-moment==1.0.6
+
+# Additional Monitoring for Production
+django-statsd==2.2.0
+flask-statsd==0.2.0
+
+# Additional Configuration for Production
+django-constance==4.1.2
+flask-settings==0.1.0
+
+# Additional Security for Production
+django-axes==6.5.1
+flask-limiter==3.8.0
+
+# Additional Performance for Production
+django-silk==5.2.0
+flask-profiler==1.8.1
+
+# Additional Database for Production
+django-reversion==5.1.0
+flask-versioning==1.0.0
+
+# Additional Caching for Production
+django-cache-machine==1.2.0
+flask-caching==2.3.0
+
+# Additional Serialization for Production
+django-rest-swagger==2.2.0
+flask-restx==1.3.0
+
+# Additional Compression for Production
+django-whitenoise==6.8.2
+flask-compress==1.15
+
+# Additional Networking for Production
+django-cors-headers==4.4.0
+flask-cors==5.0.0
+
+# Additional Utilities for Production
+django-extensions==3.2.3
+flask-script==2.0.6
+
+# Additional Monitoring for Production
+django-prometheus==2.3.1
+flask-prometheus==0.1.0
+
+# Additional Configuration for Production
+django-environ==0.11.2
+flask-config==0.1.0
+
+# Additional Security for Production
+django-guardian==2.4.0
+flask-security==5.4.3
+
+# Additional Performance for Production
+django-cachalot==2.6.3
+flask-limiter==3.8.0
+
+# Additional Database for Production
+django-model-utils==5.0.0
+flask-migrate==4.0.7
+
+# Additional Caching for Production
+django-cache-tree==1.0.1
+flask-cache==0.13.1
+
+# Additional Serialization for Production
+django-filter==24.3
+flask-marshmallow==1.2.1
+
+# Additional Compression for Production
+django-pipeline==3.1.0
+flask-assets==2.1.0
+
+# Additional Networking for Production
+django-oauth-toolkit==3.0.1
+flask-oauthlib==0.9.6
+
+# Additional Utilities for Production
+django-timezone-field==7.0
+flask-babel==4.0.0
+
+# Additional Monitoring for Production
+django-silk==5.2.0
+flask-profiler==1.8.1
+
+# Additional Configuration for Production
+django-configurations==2.5.1
+flask-appconfig==0.11.1
+
+# Additional Security for Production
+django-ratelimit==4.1.0
+flask-talisman==1.1.0
+
+# Additional Performance for Production
+django-debug-panel==0.8.3
+flask-debugtoolbar==0.15.1
+
+# Additional Database for Production
+django-bulk-update==2.2.0
+flask-admin==1.6.1
+
+# Additional Caching for Production
+django-cache-utils==0.7.2
+flask-cachecontrol==0.2.0
+
+# Additional Serialization for Production
+django-tastypie==0.14.7
+flask-api==3.1
+
+# Additional Compression for Production
+django-htmlmin==0.11.0
+flask-minify==0.42
+
+# Additional Networking for Production
+django-request==1.6.3
+flask-httpauth==4.8.0
+
+# Additional Utilities for Production
+django-phonenumber-field==8.0.0
+flask-mail==0.10.0
+
+# Additional Monitoring for Production
+django-health-check==3.18.3
+flask-healthz==1.0.1
+
+# Additional Configuration for Production
+django-split-settings==1.3.2
+flask-env==2.0.0
+
+# Additional Security for Production
+django-session-security==2.6.7
+flask-session==0.8.0
+
+# Additional Performance for Production
+django-querycount==0.8.3
+flask-profiler-dashboard==1.0.0
+
+# Additional Database for Production
+django-mptt==0.16.0
+flask-sqlalchemy-session==1.1
+
+# Additional Caching for Production
+django-cache-panel==0.1
+flask-cache-buster==1.0.0
+
+# Additional Serialization for Production
+django-import-export==4.1.1
+flask-excel==0.0.7
+
+# Additional Compression for Production
+django-static-compress==1.0.1
+flask-gzip==0.2
+
+# Additional Networking for Production
+django-allauth==65.3.0
+flask-dance==7.0.0
+
+# Additional Utilities for Production
+django-widget-tweaks==1.5.0
+flask-moment==1.0.6
+
+# Additional Monitoring for Production
+django-statsd==2.2.0
+flask-statsd==0.2.0
+
+# Additional Configuration for Production
+django-constance==4.1.2
+flask-settings==0.1.0
+
+# Additional Security for Production
+django-axes==6.5.1
+flask-limiter==3.8.0
+

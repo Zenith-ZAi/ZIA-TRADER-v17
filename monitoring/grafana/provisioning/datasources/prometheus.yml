@@ -1,0 +1,46 @@
+# Configuração de Datasource do Prometheus para Grafana
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+    jsonData:
+      httpMethod: POST
+      queryTimeout: 60s
+      timeInterval: 15s
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: jaeger
+    secureJsonData: {}
+    
+  - name: InfluxDB
+    type: influxdb
+    access: proxy
+    url: http://influxdb:8086
+    database: robotrader
+    user: admin
+    secureJsonData:
+      password: ${INFLUXDB_PASSWORD}
+    jsonData:
+      version: Flux
+      organization: robotrader
+      defaultBucket: market_data
+      tlsSkipVerify: false
+    
+  - name: Elasticsearch
+    type: elasticsearch
+    access: proxy
+    url: http://elasticsearch:9200
+    database: "[robotrader-logs-]YYYY.MM.DD"
+    jsonData:
+      interval: Daily
+      timeField: "@timestamp"
+      esVersion: "8.8.0"
+      maxConcurrentShardRequests: 5
+      logMessageField: message
+      logLevelField: level
+
