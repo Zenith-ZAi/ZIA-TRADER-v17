@@ -6,6 +6,7 @@ from infra.redis_cache import redis_cache
 from ai.transformer_model import transformer_model
 from risk.risk_ai import risk_ai
 from execution.execution_engine import execution_engine
+from data.news_processor import news_processor
 
 class TradingEngine:
     """Motor de trading principal que coordena a análise e execução."""
@@ -31,7 +32,19 @@ class TradingEngine:
                     # 2. Análise de IA (Transformer)
                     analysis = transformer_model.predict(historical_data)
                     
-                    # 3. Gerenciamento de Risco
+                    # 3. Análise de Contexto de Mercado (Notícias e Volume)
+                    news_articles = await news_processor.fetch_latest_news(symbol)
+                    news_impact = news_processor.analyze_impact(news_articles)
+                    volume_analysis = risk_ai.analyze_volume_flow(historical_data)
+                    
+                    market_context = {
+                        "news_impact": news_impact,
+                        "volume_analysis": volume_analysis,
+                        "candle_pattern": self._detect_candle_pattern(historical_data),
+                        "atr": self._calculate_atr(historical_data)
+                    }
+                    
+                    # 4. Gerenciamento de Risco Cirúrgico
                     if analysis['prediction'] != "hold":
                         order_data = {
                             "symbol": symbol,
@@ -40,9 +53,9 @@ class TradingEngine:
                             "price": current_price
                         }
                         
-                        risk_validation = risk_ai.validate_order(order_data, self.account_balance)
+                        risk_validation = risk_ai.validate_order(order_data, self.account_balance, market_context)
                         
-                        # 4. Execução de Ordem
+                        # 5. Execução de Ordem
                         if risk_validation['valid']:
                             print(f"Sinal validado para {symbol}: {analysis['prediction']} ({analysis['confidence']:.2f})")
                             execution_result = await execution_engine.execute_order(risk_validation)
@@ -64,10 +77,19 @@ class TradingEngine:
 
     def _get_historical_data(self, symbol: str) -> pd.DataFrame:
         """Simula a busca de dados históricos para análise."""
-        # Em produção, buscaríamos do banco de dados (ex: PostgreSQL/InfluxDB)
         import numpy as np
         dates = pd.date_range(end=pd.Timestamp.now(), periods=100, freq='H')
         prices = np.random.uniform(50000, 60000, 100)
-        return pd.DataFrame({'close': prices}, index=dates)
+        volumes = np.random.uniform(100, 1000, 100)
+        return pd.DataFrame({'close': prices, 'volume': volumes, 'open': prices*0.99, 'high': prices*1.01, 'low': prices*0.98}, index=dates)
+
+    def _detect_candle_pattern(self, df: pd.DataFrame) -> str:
+        """Detecta padrões de vela para confirmação cirúrgica."""
+        # Simulação de detecção de padrões (ex: TA-Lib)
+        return "strong_uptrend" if df['close'].iloc[-1] > df['close'].iloc[-2] else "neutral"
+
+    def _calculate_atr(self, df: pd.DataFrame) -> float:
+        """Calcula o Average True Range para Stop Loss dinâmico."""
+        return (df['high'] - df['low']).mean()
 
 trading_engine = TradingEngine()
