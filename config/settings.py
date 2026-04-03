@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     BINANCE_API_KEY: Optional[str] = os.getenv("BINANCE_API_KEY")
     BINANCE_SECRET_KEY: Optional[str] = os.getenv("BINANCE_SECRET_KEY")
     POLYGON_API_KEY: Optional[str] = os.getenv("POLYGON_API_KEY")
+    GNEWS_API_KEY: Optional[str] = os.getenv("GNEWS_API_KEY", "YOUR_GNEWS_API_KEY")
 
     class Config:
         env_file = ".env"
