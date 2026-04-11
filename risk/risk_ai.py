@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from config.settings import settings
 from utils import logger
+from ai.whale_detector import whale_detector
 
 class RiskAI:
     """Módulo de IA Avançado para Gerenciamento de Risco e Validação Cirúrgica de Ordens."""
@@ -12,6 +13,7 @@ class RiskAI:
         self.daily_loss_limit = 0.05  # 5% do capital total
         self.min_volume_surge = 1.5   # Volume deve ser 1.5x a média para confirmar entrada
         self.news_impact_threshold = 0.7 # Bloqueia trades se impacto de notícia > 0.7
+        self.whale_activity_threshold = 0.5 # Bloqueia trades se magnitude de baleia > 0.5 e não for na direção do trade
 
     def validate_order(self, order_data: Dict[str, Any], account_balance: float, market_context: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -20,6 +22,8 @@ class RiskAI:
         symbol = order_data.get("symbol")
         action = order_data.get("action")
         confidence = order_data.get("confidence", 0.0)
+        historical_data = market_context.get("historical_data", pd.DataFrame())
+        current_order_flow = market_context.get("current_order_flow", {})
         
         # 1. Filtro de Notícias de Alto Impacto (Calendário Econômico)
         news_impact = market_context.get("news_impact", 0.0)
@@ -27,21 +31,33 @@ class RiskAI:
             logger.warning(f"Bloqueio por Notícia de Alto Impacto para {symbol}. Impacto: {news_impact}")
             return {"valid": False, "reason": "Evento macroeconômico de alto impacto detectado."}
 
-        # 2. Confirmação de Volume (VSA - Volume Spread Analysis)
+        # 2. Filtro de Atividade de Baleia (Modo Whale)
+        whale_activity = whale_detector.detect_whale_activity(historical_data, current_order_flow)
+        if whale_activity["detected"] and whale_activity["magnitude"] > self.whale_activity_threshold:
+            # Se a baleia estiver movendo o mercado contra a nossa previsão, bloqueia
+            if (action == "buy" and whale_activity["reason"] == "Ordem grande de venda") or \
+               (action == "sell" and whale_activity["reason"] == "Ordem grande de compra"):
+                logger.warning(f"Bloqueio por Atividade de Baleia Contrária para {symbol}. Magnitude: {whale_activity['magnitude']}")
+                return {"valid": False, "reason": "Atividade de baleia contrária detectada."}
+            elif whale_activity["magnitude"] > 1.5 and confidence < 0.9: # Se for uma baleia muito grande, mas na nossa direção, aumenta a confiança
+                logger.info(f"Atividade de Baleia Favorável detectada para {symbol}. Magnitude: {whale_activity['magnitude']}")
+                order_data["confidence"] = min(1.0, confidence + (whale_activity["magnitude"] * 0.1)) # Aumenta confiança
+
+        # 3. Confirmação de Volume (VSA - Volume Spread Analysis)
         volume_data = market_context.get("volume_analysis", {})
         is_volume_confirmed = volume_data.get("is_confirmed", False)
         if not is_volume_confirmed and confidence < 0.9:
             logger.info(f"Volume não confirmado para {symbol}. Entrada descartada.")
             return {"valid": False, "reason": "Volume insuficiente para confirmar o movimento."}
 
-        # 3. Validação de "Estado Cirúrgico" (Confirmação de Vela)
+        # 5. Validação de "Estado Cirúrgico" (Confirmação de Vela)
         candle_pattern = market_context.get("candle_pattern", "neutral")
         if action == "buy" and candle_pattern not in ["bullish_engulfing", "hammer", "strong_uptrend"]:
             return {"valid": False, "reason": f"Padrão de vela {candle_pattern} não suporta compra."}
         if action == "sell" and candle_pattern not in ["bearish_engulfing", "shooting_star", "strong_downtrend"]:
             return {"valid": False, "reason": f"Padrão de vela {candle_pattern} não suporta venda."}
 
-        # 4. Cálculo de Risco e Tamanho de Posição
+        # 6. Cálculo de Risco e Tamanho de Posição
         risk_amount = account_balance * self.max_risk_per_trade
         entry_price = order_data.get("price", 0.0)
         
