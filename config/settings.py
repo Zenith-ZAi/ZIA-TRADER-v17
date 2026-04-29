@@ -32,12 +32,20 @@ class Settings(BaseSettings):
     SYMBOLS: List[str] = self.CRYPTO_PAIRS # Símbolos padrão para o TradingEngine
     TIMEFRAME: str = "1h"
     MAX_RISK_PER_TRADE: float = 0.02  # 2%
+    MIN_NEWS_SENTIMENT_FOR_BUY: float = 0.3  # Sentimento mínimo para autorizar compra
+    MAX_NEWS_SENTIMENT_FOR_SELL: float = -0.3 # Sentimento máximo para autorizar venda
+    MIN_AI_CONFIDENCE: float = 0.7 # Confiança mínima da IA para um sinal ser considerado válido
+    TRADING_LOOP_INTERVAL: int = 60  # Intervalo do loop de trading em segundos
+    ERROR_RETRY_INTERVAL: int = 300  # Intervalo de retry em caso de erro em segundos
     
     # API Keys (Placeholders for environment variables)
     BINANCE_API_KEY: Optional[str] = os.getenv("BINANCE_API_KEY")
     BINANCE_SECRET_KEY: Optional[str] = os.getenv("BINANCE_SECRET_KEY")
     POLYGON_API_KEY: Optional[str] = os.getenv("POLYGON_API_KEY")
+    ALPHA_VANTAGE_API_KEY: Optional[str] = os.getenv("ALPHA_VANTAGE_API_KEY", "YOUR_ALPHA_VANTAGE_API_KEY")
+    BENZINGA_API_KEY: Optional[str] = os.getenv("BENZINGA_API_KEY", "YOUR_BENZINGA_API_KEY")
     GNEWS_API_KEY: Optional[str] = os.getenv("GNEWS_API_KEY", "YOUR_GNEWS_API_KEY")
+
 
     class Config:
         env_file = ".env"
