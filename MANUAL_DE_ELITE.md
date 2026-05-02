@@ -1,86 +1,133 @@
-# 🦅 ZIA-TRADER-v17: WMM Edition (World Multi-Market)
-## Manual de Instrução de Elite - Produção & Cloud
+# MANUAL DE ELITE - ZIA-TRADER-v17 WMM Edition
 
-Bem-vindo à versão mais avançada do ecossistema **ZIA TRADER**. Este sistema foi reconstruído para performance institucional, integrando detecção de baleias, análise de sentimento em tempo real e execução multi-mercado.
+Este manual detalha a configuração e operação do ZIA-TRADER-v17 WMM Edition, um sistema de trading avançado com inteligência artificial real, execução via CCXT/APIs e backtesting completo.
 
----
+## 1. Visão Geral
 
-## 🚀 1. Arquitetura do Sistema
+O ZIA-TRADER-v17 WMM Edition é projetado para operar em mercados de criptomoedas e Forex, utilizando modelos de IA (Transformer e LSTM) para previsão de preços, um detector de atividade de "baleias" para identificar grandes movimentos de mercado, e um motor de risco cirúrgico para proteger o capital. A execução de ordens é realizada através de conectores de exchange reais (CCXT para cripto, OANDA para Forex).
 
-O ZIA-v17 opera em uma estrutura modular de alta performance:
-- **Core Engine**: Orquestração de ciclos de trading e sniper.
-- **Risk AI**: Validação cirúrgica baseada em VSA (Volume Spread Analysis) e Contexto de Vela.
-- **Whale Detector**: Rastreamento de ordens institucionais via fluxo de ordens e anomalias de volume.
-- **News Processor**: Integração premium com Alpha Vantage e Benzinga para análise de sentimento.
+## 2. Estrutura do Projeto
 
----
-
-## 🛠️ 2. Configuração e Instalação
-
-### Pré-requisitos
-- Python 3.10+
-- Redis (Cache de baixa latência)
-- Kafka (Opcional para processamento de eventos em larga escala)
-- Docker & Docker-Compose (Recomendado para Cloud)
-
-### Instalação Rápida
-```bash
-# Clone o repositório
-git clone https://github.com/Zenith-ZAi/ZIA-TRADER-v17.git
-cd ZIA-TRADER-v17
-
-# Instale as dependências
-pip install -r requirements.txt
-
-# Configure as variáveis de ambiente
-cp .env.example .env
+```
+zia_project/
+├── ZIA-TRADER-v17_review/ (código-fonte principal)
+│   ├── ai/ (modelos de IA: Transformer, LSTM, Whale Detector)
+│   ├── config/ (configurações do sistema)
+│   ├── core/ (motores de trading, sniper, backtest, manager)
+│   ├── data/ (processamento de notícias)
+│   ├── database/ (configuração do banco de dados)
+│   ├── execution/ (conectores de exchange, motor de execução)
+│   ├── infra/ (cache Redis)
+│   ├── risk/ (motor de gerenciamento de risco)
+│   └── main.py (ponto de entrada)
+└── sync_repo/ (repositório GitHub para sincronização)
+    └── MANUAL_DE_ELITE.md
 ```
 
----
+## 3. Configuração Inicial
 
-## 🔑 3. Configuração de APIs (Crucial)
+### 3.1. Variáveis de Ambiente (`.env`)
 
-Para o funcionamento 10/10, configure as seguintes chaves no seu arquivo `.env`:
+Crie um arquivo `.env` na raiz do projeto (`ZIA-TRADER-v17_review/`) com as seguintes variáveis:
 
-| Provedor | Função | Importância |
-| :--- | :--- | :--- |
-| **Binance/ByBit** | Execução de Crypto | Obrigatório |
-| **OANDA/IC Markets** | Execução de Forex/Indices | Obrigatório para WMM |
-| **Alpha Vantage** | Notícias e Sentimento Premium | Alta |
-| **Benzinga** | Notícias de Impacto em Tempo Real | Alta |
-| **OpenAI** | Refinamento de Decisão por LLM | Opcional (Modo Advanced) |
+```dotenv
+# Configurações Gerais
+PROJECT_NAME="ZIA-TRADER-v17 WMM Edition"
+VERSION="1.0.0"
+TRADING_LOOP_INTERVAL=5 # Segundos
+ERROR_RETRY_INTERVAL=10 # Segundos
 
----
+# Configurações de Banco de Dados (PostgreSQL recomendado)
+DATABASE_URL="postgresql+asyncpg://user:password@host:port/dbname"
 
-## 📊 4. Modos Operacionais
+# Configurações do Redis
+REDIS_URL="redis://localhost:6379/0"
 
-### A. Modo Standard (TradingEngine)
-Ciclos de análise técnica clássica com validação de IA. Ideal para Swing e Day Trade.
+# Símbolos de Trading (Ex: BTC/USDT, ETH/USDT, EUR/USD)
+SYMBOLS=["BTC/USDT", "ETH/USDT"]
+TIMEFRAME="1h"
 
-### B. Modo Sniper (SniperEngine)
-Alta frequência focada em scalping. Requer latência mínima e conexão direta com o servidor da Exchange.
+# Configurações da Exchange (CCXT para Cripto)
+CCXT_EXCHANGE_ID="binance" # Ex: binance, bybit, okx
+CCXT_API_KEY="SUA_API_KEY_CCXT"
+CCXT_SECRET_KEY="SUA_SECRET_KEY_CCXT"
 
-### C. Modo Arbitragem (ArbitrageEngine)
-Monitoramento de spreads entre diferentes exchanges/mercados.
+# Configurações da Exchange (OANDA para Forex - Opcional)
+OANDA_API_KEY="SUA_API_KEY_OANDA"
+OANDA_ACCOUNT_ID="SUA_ACCOUNT_ID_OANDA"
+OANDA_ENVIRONMENT="practice" # ou "live"
 
----
+# Configurações de Notícias (Alpha Vantage)
+ALPHA_VANTAGE_API_KEY="SUA_API_KEY_ALPHA_VANTAGE"
 
-## 🛡️ 5. Gerenciamento de Risco Cirúrgico
+# Configurações de Notícias (Benzinga - Opcional)
+BENZINGA_API_KEY="SUA_API_KEY_BENZINGA"
 
-O **RiskAI** não apenas calcula o tamanho da posição, mas bloqueia entradas se:
-1. **Notícia de Alto Impacto**: Bloqueio automático 15 min antes/depois de eventos macro.
-2. **Atividade de Baleia Contrária**: Se uma baleia entrar vendendo enquanto o sistema prevê compra, o trade é abortado.
-3. **Volume Inconsistente**: Entradas sem confirmação de volume real são descartadas.
+# Configurações de Risco
+MAX_RISK_PER_TRADE=0.01 # 1% do capital por trade
+DAILY_LOSS_LIMIT=0.05 # 5% de perda diária máxima
+WHALE_ACTIVITY_THRESHOLD=0.05 # Limiar para detecção de baleias
+MIN_NEWS_SENTIMENT_FOR_BUY=0.6 # Sentimento mínimo para compra
+MAX_NEWS_SENTIMENT_FOR_SELL=-0.6 # Sentimento máximo para venda
 
----
+# Configurações do Sniper Engine
+SNIPER_VOLATILITY_THRESHOLD=0.02 # 2% de variação em 1 minuto
+SNIPER_TRADE_QUANTITY=0.01 # Quantidade de trade para o sniper
+SNIPER_TIMEFRAME="1m"
+SNIPER_CYCLE_INTERVAL_SECONDS=1 # Ciclo de 1 segundo para o sniper
+SNIPER_PRICE_CACHE_EXPIRE=60 # Expiração do cache de preço do sniper em segundos
+WHALE_ACTIVITY_SNIPER_THRESHOLD=0.7 # Limiar de baleia para o sniper
+```
 
-## ☁️ 6. Recomendações de Deploy (Go-Live)
+### 3.2. Instalação de Dependências
 
-1. **VPS/Cloud**: Utilize instâncias com proximidade geográfica aos servidores da exchange (ex: AWS Tokyo para Binance).
-2. **Monitoramento**: O sistema gera logs detalhados em `logs/trading.log`. Utilize ferramentas como Grafana para visualizar a performance.
-3. **Backtesting**: Sempre valide novas estratégias no módulo de backtest antes de alocar capital real.
+```bash
+pip install -r requirements.txt
+```
 
----
+Certifique-se de que `requirements.txt` contenha:
 
-**Desenvolvido por Zenith-ZAi & Manus AI**
-*Status: Production Ready | Version: 17.0.0 WMM*
+```
+asyncio
+pandas
+numpy
+torch
+torchvision
+torchaudio
+sqlalchemy
+asyncpg
+redis
+python-dotenv
+ccxt
+aiohttp
+```
+
+## 4. Operação
+
+### 4.1. Inicialização do Banco de Dados
+
+Certifique-se de que seu banco de dados PostgreSQL esteja rodando e acessível. O `init_db()` em `database.py` criará as tabelas necessárias.
+
+### 4.2. Execução do Trader
+
+Para iniciar o motor de trading principal:
+
+```bash
+python main.py
+```
+
+O `main.py` utiliza o `TradingManager` para orquestrar os motores. Você pode alternar entre `start_trading()`, `start_sniper()` ou `run_backtest()` no `main.py` conforme sua necessidade.
+
+## 5. Modos Operacionais
+
+- **Trading Principal**: `trading_manager.start_trading()` - Utiliza IA e gerenciamento de risco para trades de médio/longo prazo.
+- **Sniper**: `trading_manager.start_sniper()` - Focado em eventos de alta volatilidade para execução rápida.
+- **Backtesting**: `trading_manager.run_backtest(symbol, historical_data, strategy_name)` - Para validar estratégias com dados históricos.
+
+## 6. Considerações Finais
+
+- **Segurança**: Mantenha suas chaves de API seguras e nunca as exponha publicamente.
+- **Monitoramento**: Monitore o desempenho do trader e os logs para identificar e resolver problemas rapidamente.
+- **Otimização**: Ajuste os parâmetros em `config/settings.py` e as estratégias em `core/strategies/manager.py` para otimizar o desempenho.
+
+**Desenvolvido por Manus AI para Zenith-ZAi**
