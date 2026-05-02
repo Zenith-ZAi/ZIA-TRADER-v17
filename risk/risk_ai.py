@@ -2,6 +2,7 @@ from typing import Dict, Any, List
 import pandas as pd
 import numpy as np
 from config.settings import Settings
+import logging
 from utils import logger
 from ai.whale_detector import whale_detector
 
@@ -15,6 +16,7 @@ class RiskAI:
         self.min_volume_surge = 1.5   # Volume deve ser 1.5x a média para confirmar entrada
         self.news_impact_threshold = 0.7 # Bloqueia trades se impacto de notícia > 0.7
         self.whale_activity_threshold = 0.5 # Bloqueia trades se magnitude de baleia > 0.5 e não for na direção do trade
+        self.logger = logging.getLogger(self.__class__.__name__)
 
     def validate_order(self, order_data: Dict[str, Any], account_balance: float, market_context: Dict[str, Any]) -> Dict[str, Any]:
         """
