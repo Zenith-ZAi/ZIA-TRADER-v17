@@ -1,8 +1,10 @@
 import logging
 import ccxt
 import asyncio
+import pandas as pd
+import requests
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timedelta
 from config.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -175,6 +177,56 @@ class ExchangeConnector:
         except Exception as e:
             logger.error(f"Erro ao obter dados de mercado para {symbol}: {e}")
             return None
+
+    async def get_historical_data(self, symbol: str, timeframe: str, limit: int = 100) -> pd.DataFrame:
+        """Obtém dados históricos usando Polygon.io ou CCXT como fallback."""
+        market_type = self._detect_market_type(symbol)
+        
+        # Tentar Polygon.io primeiro se a chave estiver disponível
+        if self.settings.POLYGON_API_KEY:
+            try:
+                # Mapeamento de timeframe para Polygon
+                multiplier = 1
+                timespan = "hour"
+                if timeframe == "1m":
+                    timespan = "minute"
+                elif timeframe == "1d":
+                    timespan = "day"
+                
+                # Formatar símbolo para Polygon (ex: X:BTCUSD para crypto)
+                poly_symbol = symbol.replace("/", "")
+                if market_type == "crypto":
+                    poly_symbol = f"X:{poly_symbol}"
+                elif market_type == "forex":
+                    poly_symbol = f"C:{poly_symbol}"
+                
+                end_date = datetime.now().strftime('%Y-%m-%d')
+                start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d') # Ajustar conforme necessário
+                
+                url = f"https://api.polygon.io/v2/aggs/ticker/{poly_symbol}/range/{multiplier}/{timespan}/{start_date}/{end_date}?adjusted=true&sort=asc&limit={limit}&apiKey={self.settings.POLYGON_API_KEY}"
+                
+                response = await asyncio.to_thread(requests.get, url)
+                data = response.json()
+                
+                if data.get("results"):
+                    df = pd.DataFrame(data["results"])
+                    df.rename(columns={'v': 'volume', 'vw': 'vwap', 'o': 'open', 'c': 'close', 'h': 'high', 'l': 'low', 't': 'timestamp', 'n': 'transactions'}, inplace=True)
+                    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+                    return df
+            except Exception as e:
+                logger.warning(f"Falha ao obter dados do Polygon.io para {symbol}: {e}. Tentando fallback.")
+
+        # Fallback para CCXT se for crypto
+        if market_type == "crypto" and self.crypto_exchange:
+            try:
+                ohlcv = await asyncio.to_thread(self.crypto_exchange.fetch_ohlcv, symbol, timeframe, limit=limit)
+                df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+                return df
+            except Exception as e:
+                logger.error(f"Erro ao obter dados históricos via CCXT para {symbol}: {e}")
+                
+        return pd.DataFrame()
 
     async def close(self):
         """Fecha as conexões com as exchanges."""

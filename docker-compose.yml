@@ -8,15 +8,30 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=sqlite:///./zia_trader.db
+      - DATABASE_URL=postgresql+asyncpg://user:password@db:5432/zia_trader_db
       - REDIS_URL=redis://redis:6379/0
       - KAFKA_SERVERS=kafka:9092
       - BINANCE_API_KEY=${BINANCE_API_KEY}
       - BINANCE_SECRET_KEY=${BINANCE_SECRET_KEY}
       - POLYGON_API_KEY=${POLYGON_API_KEY}
     depends_on:
+      - db
       - redis
       - kafka
+    restart: always
+
+  # Banco de Dados PostgreSQL
+  db:
+    image: postgres:13-alpine
+    container_name: zia-postgres
+    environment:
+      POSTGRES_DB: zia_trader_db
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
     restart: always
 
   # Cache Redis para estado em tempo real
@@ -50,6 +65,9 @@ services:
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+volumes:
+  postgres_data:
 
 networks:
   default:

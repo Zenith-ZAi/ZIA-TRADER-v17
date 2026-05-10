@@ -1,17 +1,18 @@
 import pandas as pd
 import numpy as np
-from typing import Dict, Any, List
-from config.settings import settings
+from typing import Dict, Any, List, Optional
+from config.settings import settings as default_settings
 from utils import logger
 
 class WhaleDetector:
     """Detecta movimentos de 'baleias' e ordens institucionais (Block Trades) no mercado.
     Utiliza anomalias de volume, tamanho de ordem e desequilíbrio de fluxo para identificar grandes players.
     """
-    def __init__(self):
-        self.volume_std_multiplier = settings.WHALE_VOLUME_STD_MULTIPLIER # Ex: 2.0 para 2 desvios padrão
-        self.large_order_threshold_usd = settings.WHALE_LARGE_ORDER_THRESHOLD_USD # Ex: 100_000 USD
-        self.order_flow_lookback_seconds = settings.WHALE_ORDER_FLOW_LOOKBACK_SECONDS # Ex: 60 segundos
+    def __init__(self, settings: Optional[Any] = None):
+        self.settings = settings or default_settings
+        self.volume_std_multiplier = self.settings.WHALE_VOLUME_STD_MULTIPLIER # Ex: 2.0 para 2 desvios padrão
+        self.large_order_threshold_usd = self.settings.WHALE_LARGE_ORDER_THRESHOLD_USD # Ex: 100_000 USD
+        self.order_flow_lookback_seconds = self.settings.WHALE_ORDER_FLOW_LOOKBACK_SECONDS # Ex: 60 segundos
 
     def detect_whale_activity(self, historical_data: pd.DataFrame, current_order_flow: Dict[str, Any]) -> Dict[str, Any]:
         """Analisa dados históricos e fluxo de ordens atual para detectar atividade de baleias de forma mais robusta.
@@ -31,7 +32,7 @@ class WhaleDetector:
 
         # 1. Detecção de Anomalia de Volume (baseado em desvio padrão)
         # Assume que historical_data já está ordenado por tempo
-        recent_volumes = historical_data['volume'].tail(settings.WHALE_VOLUME_LOOKBACK_PERIOD)
+        recent_volumes = historical_data['volume'].tail(self.settings.WHALE_VOLUME_LOOKBACK_PERIOD)
         if len(recent_volumes) < 2:
             logger.debug(f"[{symbol}] Volume histórico insuficiente para cálculo de desvio padrão.")
             mean_volume = recent_volumes.iloc[-1] if not recent_volumes.empty else 0

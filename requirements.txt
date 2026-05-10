@@ -3,6 +3,7 @@ uvicorn
 pydantic
 pydantic-settings
 sqlalchemy
+asyncpg
 redis
 aiokafka
 ccxt
@@ -10,6 +11,7 @@ talib-binary
 pandas
 numpy
 requests
+aiohttp
 python-dotenv
 python-multipart
 jose
