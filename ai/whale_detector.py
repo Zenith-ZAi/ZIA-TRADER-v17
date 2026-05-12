@@ -90,5 +90,3 @@ class WhaleDetector:
             return {"detected": True, "magnitude": magnitude_order_flow, "reason": reason}
         
         return {"detected": False, "magnitude": 0.0, "reason": "Nenhuma atividade de baleia detectada."}
-
-whale_detector = WhaleDetector()

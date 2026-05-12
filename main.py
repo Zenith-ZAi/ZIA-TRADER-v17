@@ -46,11 +46,11 @@ async def lifespan(app: FastAPI):
 
     # 3. Injeta TradingManager nas sessões do agente
     api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    session_manager.get_or_create("default", api_key, trading_manager, settings)
     if api_key:
-        session_manager.get_or_create("default", api_key, trading_manager, settings)
-        logger.info("✅ Agente ZIA inicializado com TradingManager")
+        logger.info("Agente ZIA inicializado com TradingManager")
     else:
-        logger.warning("⚠️  ANTHROPIC_API_KEY não configurada — agente rodará sem IA")
+        logger.warning("ANTHROPIC_API_KEY não configurada — agente rodará sem IA")
 
     # 4. Inicia motor de trading em background
     trading_task = asyncio.create_task(trading_manager.start_trading())

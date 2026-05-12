@@ -1,32 +1,40 @@
 import json
-import asyncio
-from aiokafka import AIOKafkaProducer
+import logging
+
 from config.settings import settings
-from infra.redis_cache import redis_cache
+
+logger = logging.getLogger(__name__)
+
 
 class MarketDataProducer:
     """Produtor Kafka para dados de mercado em tempo real."""
-    def __init__(self):
-        self.producer = AIOKafkaProducer(
-            bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
-            value_serializer=lambda v: json.dumps(v).encode('utf-8')
-        )
+
+    def __init__(self, redis_cache=None):
+        self._producer = None
+        self._redis_cache = redis_cache
 
     async def start(self):
-        """Inicia o produtor Kafka."""
-        await self.producer.start()
+        try:
+            from aiokafka import AIOKafkaProducer
+
+            self._producer = AIOKafkaProducer(
+                bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
+                value_serializer=lambda v: json.dumps(v).encode("utf-8"),
+            )
+            await self._producer.start()
+            logger.info("Kafka producer started.")
+        except Exception as e:
+            logger.warning("Kafka producer unavailable: %s", e)
 
     async def stop(self):
-        """Para o produtor Kafka."""
-        await self.producer.stop()
+        if self._producer:
+            await self._producer.stop()
 
     async def send_market_data(self, symbol: str, data: dict):
-        """Envia dados de mercado para o tópico Kafka e atualiza o cache Redis."""
-        # Atualiza o cache Redis para acesso rápido
-        if 'price' in data:
-            redis_cache.update_price(symbol, data['price'])
-        
-        # Envia para o Kafka para processamento assíncrono
-        await self.producer.send_and_wait(settings.KAFKA_TOPIC_MARKET_DATA, data)
+        if self._redis_cache and "price" in data:
+            self._redis_cache.update_price(symbol, data["price"])
 
-market_producer = MarketDataProducer()
+        if self._producer:
+            await self._producer.send_and_wait(
+                settings.KAFKA_TOPIC_MARKET_DATA, data
+            )
