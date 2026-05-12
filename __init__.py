@@ -1,2 +1,3 @@
-from learning.adaptive_trainer import AdaptiveTrainer
+from adaptive_trainer import AdaptiveTrainer
+
 __all__ = ["AdaptiveTrainer"]
