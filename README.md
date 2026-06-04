@@ -132,4 +132,3 @@ O `main.py` utiliza o `TradingManager` para orquestrar os motores. Você pode al
 - **Monitoramento**: Monitore o desempenho do trader e os logs para identificar e resolver problemas rapidamente.
 - **Otimização**: Ajuste os parâmetros em `config/settings.py` e as estratégias em `core/strategies/manager.py` para otimizar o desempenho.
 
-**Desenvolvido por Manus AI para Zenith-ZAi**
