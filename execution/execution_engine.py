@@ -31,7 +31,7 @@ class ExecutionEngine:
             order_id = order_result["order_id"]
             
             # Atualiza o estado da posição no cache Redis
-            self.redis_cache.set_state(f"position_{symbol}", {
+            await self.redis_cache.set_state(f"position_{symbol}", {
                 "symbol": symbol,
                 "action": action,
                 "quantity": quantity,

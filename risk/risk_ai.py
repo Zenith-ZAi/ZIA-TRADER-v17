@@ -10,9 +10,14 @@ class RiskAI:
         self.db_manager = db_manager
         self.account_id = "default_account" # Pode ser dinâmico em um sistema real
         self.max_risk_per_trade = settings.MAX_RISK_PER_TRADE
-        self.    daily_loss_limit = settings.DAILY_LOSS_LIMIT_PERCENT
+        self.daily_loss_limit = settings.DAILY_LOSS_LIMIT_PERCENT
 
-    def validate_order(self, order_data: Dict[str, Any], account_balance: float) -> Dict[str, Any]:
+    def analyze_volume_flow(self, historical_data: Any) -> Dict[str, Any]:
+        """Analisa o fluxo de volume para identificar tendências ou anomalias."""
+        # Implementação simplificada
+        return {"trend": "neutral", "anomaly": False}
+
+    def validate_order(self, order_data: Dict[str, Any], account_balance: float, market_context: Dict[str, Any] = None) -> Dict[str, Any]:
         """Valida se uma ordem está dentro dos parâmetros de risco."""
         symbol = order_data.get("symbol")
         action = order_data.get("action")
