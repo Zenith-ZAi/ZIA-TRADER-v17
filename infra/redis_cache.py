@@ -1,40 +1,29 @@
 import redis
 import json
-import logging
 from typing import Any, Optional
-
-logger = logging.getLogger(__name__)
+from config.settings import settings
 
 class RedisCache:
-    def __init__(self, redis_url: str):
-        self.redis_client = redis.from_url(redis_url, decode_responses=True)
-        logger.info(f"RedisCache inicializado com URL: {redis_url}")
+    """Gerenciador de cache Redis para estado em tempo real."""
+    def __init__(self):
+        self.client = redis.from_url(settings.REDIS_URL, decode_responses=True)
 
-    async def set_state(self, key: str, value: Any, expire: Optional[int] = None):
-        try:
-            if isinstance(value, dict) or isinstance(value, list):
-                value = json.dumps(value)
-            self.redis_client.set(key, value)
-            if expire:
-                self.redis_client.expire(key, expire)
-        except Exception as e:
-            logger.error(f"Erro ao definir estado no Redis para a chave {key}: {e}")
+    def set_state(self, key: str, value: Any, expire: int = 3600):
+        """Armazena um estado serializado em JSON."""
+        self.client.set(key, json.dumps(value), ex=expire)
 
-    async def get_state(self, key: str) -> Optional[Any]:
-        try:
-            value = self.redis_client.get(key)
-            if value:
-                try:
-                    return json.loads(value)
-                except json.JSONDecodeError:
-                    return value # Retorna como string se não for JSON
-            return None
-        except Exception as e:
-            logger.error(f"Erro ao obter estado do Redis para a chave {key}: {e}")
-            return None
+    def get_state(self, key: str) -> Optional[Any]:
+        """Recupera um estado e desserializa do JSON."""
+        data = self.client.get(key)
+        return json.loads(data) if data else None
 
-    async def delete_state(self, key: str):
-        try:
-            self.redis_client.delete(key)
-        except Exception as e:
-            logger.error(f"Erro ao deletar estado do Redis para a chave {key}: {e}")
+    def update_price(self, symbol: str, price: float):
+        """Atualiza o preço atual de um ativo."""
+        self.client.hset("current_prices", symbol, price)
+
+    def get_price(self, symbol: str) -> float:
+        """Recupera o último preço conhecido de um ativo."""
+        price = self.client.hget("current_prices", symbol)
+        return float(price) if price else 0.0
+
+redis_cache = RedisCache()
