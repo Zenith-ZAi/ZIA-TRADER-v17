@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import pandas as pd
 from typing import Dict, Any, List, Optional
 from config.settings import Settings
 from datetime import datetime, timedelta
@@ -29,7 +30,7 @@ class ExchangeConnector:
         logger.info("Conexão com a exchange simulada fechada.")
 
     async def get_historical_data(self, symbol: str, timeframe: str, limit: int = 100) -> pd.DataFrame:
-        """Simula a obtenção de dados históricos."
+        """Simula a obtenção de dados históricos."""
         # Em um ambiente real, buscaria dados da API da exchange.
         # Para simulação, geramos dados aleatórios.
         data = {

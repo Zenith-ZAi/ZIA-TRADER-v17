@@ -32,7 +32,8 @@ class WhaleDetector:
             self.db_manager.create_system_log("INFO", f"Atividade de baleia detectada para {current_order_flow.get('symbol')}. Sentimento: {sentiment}", "WhaleDetector")
 
         return {
-            "whale_present": is_whale_present,
+            "detected": is_whale_present,
+            "magnitude": (len(large_buys) + len(large_sells)) / 10.0, # Magnitude simulada
             "sentiment": sentiment,
             "large_buys_count": len(large_buys),
             "large_sells_count": len(large_sells)
