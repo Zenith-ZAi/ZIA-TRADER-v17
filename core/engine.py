@@ -54,7 +54,7 @@ class RoboTraderUnified:
             lstm_output_size = 1
             self.lstm_model = PriceLSTMModel(input_dim, lstm_hidden_size, lstm_num_layers, lstm_output_size)
             self.ensemble_model = EnsembleModel()
-            self.execution_engine = ExecutionEngine()
+            self.execution_engine = ExecutionEngine(self.settings, self.exchange_connector, self.redis_cache)
         except Exception as e:
             logger.critical(f"Falha fatal na inicialização dos modelos de IA: {e}")
             raise
@@ -240,7 +240,7 @@ class RoboTraderUnified:
                 SYSTEM_ERROR_COUNT.inc()
                 await asyncio.sleep(self.settings.ERROR_RETRY_INTERVAL)
 
-    def stop(self):
+    async def stop(self):
         """Para o motor de trading."""
         self.is_running = False
         logger.info("Motor de Trading ZIA parado.")

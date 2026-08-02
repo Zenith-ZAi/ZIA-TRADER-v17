@@ -1,0 +1,591 @@
+PROMPT — MODO AUTÔNOMO (BACKEND TERMINAL + CORE IA)
+
+Modo de Execução
+
+Atue como um Engenheiro de Software Sênior especializado em:
+
+- Python
+- Arquitetura Modular
+- Segurança
+- Mercado Financeiro
+- Inteligência Artificial
+- Sistemas Distribuídos
+- Trading Automatizado
+
+Seu comportamento deve ser totalmente autônomo.
+
+Não faça perguntas durante o desenvolvimento.
+
+Analise o projeto existente, identifique sua arquitetura, implemente as melhorias necessárias, teste internamente a lógica, corrija erros encontrados e entregue o código funcionando.
+
+Caso existam múltiplas soluções, escolha automaticamente a mais robusta.
+
+Sempre preserve compatibilidade com o projeto atual.
+
+---
+
+Objetivo Principal
+
+Criar um Terminal Administrativo (CLI) profissional para gerenciamento completo do sistema.
+
+Este terminal será utilizado para configurar toda a IA sem necessidade de editar arquivos manualmente.
+
+O terminal será o painel administrativo do Backend.
+
+---
+
+Requisitos
+
+1. Login Seguro
+
+Ao iniciar o sistema:
+
+=========================================
+      ZIA TRADER - ADMIN CONSOLE
+=========================================
+
+Usuário:
+Senha:
+
+A senha deve ficar oculta.
+
+Utilizar:
+
+getpass
+
+Nunca mostrar caracteres digitados.
+
+Após autenticação:
+
+Autenticado com sucesso.
+
+Caso falhe:
+
+Usuário inválido.
+
+Registrar tentativa em log.
+
+---
+
+2. Dashboard Principal
+
+Após login:
+
+=========================================
+            MENU PRINCIPAL
+=========================================
+
+[1] Exchange APIs
+
+[2] Usuários
+
+[3] Estratégias
+
+[4] IA
+
+[5] Algoritmos
+
+[6] Configurações
+
+[7] Logs
+
+[8] Atualizações
+
+[9] Segurança
+
+[10] Testes
+
+[0] Sair
+
+Tudo organizado.
+
+---
+
+Módulo Exchange
+
+Permitir:
+
+Adicionar Exchange
+
+Editar
+
+Excluir
+
+Ativar
+
+Desativar
+
+Visualizar
+
+Exemplo:
+
+Binance
+
+Bybit
+
+OKX
+
+KuCoin
+
+Bitget
+
+Gate.io
+
+Cada Exchange deve possuir:
+
+API KEY
+
+SECRET KEY
+
+PASSPHRASE (quando existir)
+
+Nome da conta
+
+Descrição
+
+Modo Testnet
+
+Modo Produção
+
+Status
+
+Data de cadastro
+
+---
+
+Nunca exibir a Secret Key.
+
+Mostrar apenas:
+
+********************
+
+As chaves devem permanecer criptografadas.
+
+---
+
+Segurança
+
+Utilizar:
+
+AES-256
+
+ou
+
+Fernet
+
+Nunca salvar senhas em texto puro.
+
+Utilizar:
+
+.env
+
+Vault
+
+arquivo criptografado
+
+---
+
+Usuários
+
+Criar sistema de usuários.
+
+Permitir:
+
+Administrador
+
+Operador
+
+Leitura
+
+Convidado
+
+Controle de permissões.
+
+Alterar senha.
+
+Criar usuário.
+
+Excluir.
+
+Bloquear.
+
+Desbloquear.
+
+---
+
+Estratégias
+
+Criar menu:
+
+[ ] VWAP
+
+[ ] MACD
+
+[ ] RSI
+
+[ ] SuperTrend
+
+[ ] Heikin Ashi
+
+[ ] Order Flow
+
+[ ] Volume Profile
+
+[ ] Smart Money
+
+[ ] Fibonacci
+
+[ ] Liquidez
+
+[ ] Breakout
+
+[ ] Scalping
+
+[ ] Swing
+
+[ ] Grid
+
+[ ] IA Adaptativa
+
+Cada estratégia:
+
+Ativar
+
+Desativar
+
+Editar parâmetros
+
+Prioridade
+
+Peso
+
+Timeframes
+
+Stop
+
+Take
+
+Trailing
+
+---
+
+Algoritmos
+
+Criar menu:
+
+Algoritmo Conservador
+
+Algoritmo Moderado
+
+Algoritmo Agressivo
+
+Institucional
+
+Scalper
+
+Day Trade
+
+Swing
+
+Alta Frequência
+
+IA Adaptativa
+
+Personalizado
+
+Cada algoritmo possuirá:
+
+Descrição
+
+Indicadores
+
+Peso
+
+Confluência
+
+Gestão de risco
+
+Score
+
+---
+
+IA
+
+Criar menu:
+
+Atualizar IA
+
+Treinar Modelo
+
+Recalcular Pesos
+
+Reindexar Dados
+
+Atualizar Features
+
+Carregar Modelo
+
+Salvar Modelo
+
+Exportar Modelo
+
+Importar Modelo
+
+Benchmark
+
+Reforço (RL)
+
+Auto Learning
+
+Cada processo mostrar barra de progresso.
+
+---
+
+Configurações
+
+Editar:
+
+Timeframes
+
+Moedas
+
+Corretoras
+
+Limite diário
+
+Limite semanal
+
+Drawdown
+
+Stop Global
+
+Take Global
+
+Modo Simulação
+
+Modo Produção
+
+Quantidade máxima de operações
+
+Latência máxima
+
+Servidor
+
+Proxy
+
+Logs
+
+Banco de Dados
+
+Cache
+
+Workers
+
+Threads
+
+---
+
+Logs
+
+Visualizar:
+
+Operações
+
+Erros
+
+Autenticação
+
+IA
+
+Treinamentos
+
+Exchange
+
+API
+
+Banco
+
+Segurança
+
+Exportar logs.
+
+---
+
+Atualizações
+
+Verificar novas versões.
+
+Atualizar dependências.
+
+Migrar banco.
+
+Executar scripts.
+
+Backup automático.
+
+Rollback.
+
+---
+
+Segurança
+
+Gerar nova chave AES.
+
+Trocar senha master.
+
+Revogar tokens.
+
+Bloquear IP.
+
+Logs de acesso.
+
+Sessões ativas.
+
+Tempo de expiração.
+
+---
+
+Testes
+
+Executar automaticamente:
+
+Teste do Core
+
+Teste IA
+
+Teste Banco
+
+Teste Exchange
+
+Teste APIs
+
+Teste Estratégias
+
+Teste Segurança
+
+Teste Performance
+
+Teste Latência
+
+Teste de Stress
+
+Mostrar:
+
+✔ OK
+
+✖ Erro
+
+Tempo
+
+Detalhes
+
+---
+
+Interface
+
+Interface limpa.
+
+Colorida.
+
+Compatível com:
+
+Windows
+
+Linux
+
+Docker
+
+Render
+
+Ubuntu
+
+Servidor dedicado
+
+Sem interface gráfica.
+
+Somente Terminal.
+
+Utilizar bibliotecas modernas para CLI (por exemplo, Rich, Textual ou equivalente), mantendo compatibilidade com modo texto quando necessário.
+
+---
+
+Arquitetura
+
+Organizar em módulos separados.
+
+Exemplo:
+
+core/
+
+security/
+
+exchange/
+
+users/
+
+algorithms/
+
+strategies/
+
+ai/
+
+database/
+
+cli/
+
+config/
+
+logs/
+
+tests/
+
+Evitar arquivos grandes.
+
+Seguir princípios SOLID.
+
+Código limpo.
+
+Tipagem.
+
+Documentação.
+
+---
+
+Integração
+
+Integrar automaticamente com:
+
+Core IA
+
+Sistema de Estratégias
+
+Banco de Dados
+
+Sistema de Configuração
+
+APIs
+
+Logs
+
+Autenticação
+
+Treinamento IA
+
+Sem quebrar funcionalidades existentes.
+
+---
+
+Execução Automática
+
+Ao concluir:
+
+- Verificar dependências.
+- Corrigir imports.
+- Executar testes automatizados.
+- Validar arquitetura.
+- Corrigir inconsistências.
+- Atualizar documentação.
+- Garantir ausência de erros críticos.
+- Validar integração completa com o sistema existente.
+
+Não interromper a execução para solicitar confirmação. Resolver automaticamente o que for possível e produzir uma implementação consistente, segura e pronta para evolução.

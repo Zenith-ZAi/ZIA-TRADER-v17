@@ -6,14 +6,14 @@ from config.settings import Settings
 logger = logging.getLogger(__name__)
 
 class NewsProcessor:
-    """Processador de notícias simulado para análise de sentimento."
-    """
+    """Processador de notícias simulado para análise de sentimento."""
+
     def __init__(self, settings: Settings):
         self.settings = settings
         logger.info("NewsProcessor inicializado em modo de simulação.")
 
     async def fetch_alpha_vantage_news(self, tickers: List[str]) -> List[Dict[str, Any]]:
-        """Simula a busca de notícias da Alpha Vantage."
+        """Simula a busca de notícias da Alpha Vantage."""
         await asyncio.sleep(0.1)
         mock_news = []
         for ticker in tickers:
@@ -27,7 +27,7 @@ class NewsProcessor:
         return mock_news
 
     async def fetch_benzinga_news(self, symbols: List[str]) -> List[Dict[str, Any]]:
-        """Simula a busca de notícias da Benzinga."
+        """Simula a busca de notícias da Benzinga."""
         await asyncio.sleep(0.1)
         mock_news = []
         for symbol in symbols:
@@ -41,7 +41,7 @@ class NewsProcessor:
         return mock_news
 
     async def process_news_sentiment(self, news_articles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Simula o processamento de sentimento de notícias."
+        """Simula o processamento de sentimento de notícias."""
         await asyncio.sleep(0.05)
         for article in news_articles:
             # Em um cenário real, um modelo de NLP processaria o sentimento

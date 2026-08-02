@@ -109,7 +109,7 @@ class SniperEngine:
                 self.db_manager.create_system_log("ERROR", f"Erro no loop do motor Sniper: {e}", "SniperEngine")
                 await asyncio.sleep(self.settings.ERROR_RETRY_INTERVAL)
 
-    def stop(self):
+    async def stop(self):
         """Para o motor Sniper."""
         self.is_running = False
         logger.info("Motor Sniper ZIA parado.")

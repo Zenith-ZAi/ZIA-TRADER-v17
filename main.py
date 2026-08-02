@@ -15,6 +15,7 @@ from database_manager import DatabaseManager
 from monitoring.telemetry.telemetry_setup import setup_telemetry
 
 db_manager = DatabaseManager(settings.DATABASE_URL)
+db_manager.create_tables()
 
 # Inicialização do Rate Limiter
 rate_limiter = RateLimiter(rate_limit=settings.API_RATE_LIMIT, interval=settings.API_RATE_LIMIT_INTERVAL)
