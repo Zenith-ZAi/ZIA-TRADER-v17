@@ -132,6 +132,33 @@ class WhaleActivity(Base):
     sentiment = Column(String)
     timestamp = Column(DateTime, default=utc_now)
 
+class NewsArticle(Base):
+    __tablename__ = 'news_articles'
+    id = Column(Integer, primary_key=True)
+    external_id = Column(String, unique=True, nullable=False)
+    provider = Column(String, nullable=False)
+    symbol = Column(String, nullable=True)
+    title = Column(String, nullable=False)
+    summary = Column(String)
+    url = Column(String)
+    published_at = Column(DateTime)
+    sentiment_score = Column(Float, default=0.0)
+    metadata_json = Column(JSON)
+    created_at = Column(DateTime, default=utc_now)
+
+
+class TrendSnapshot(Base):
+    __tablename__ = 'trend_snapshots'
+    id = Column(Integer, primary_key=True)
+    provider = Column(String, nullable=False)
+    symbol = Column(String, nullable=False)
+    trend_score = Column(Float, default=0.0)
+    market_cap_rank = Column(Integer)
+    price_change_24h = Column(Float)
+    observed_at = Column(DateTime, default=utc_now)
+    metadata_json = Column(JSON)
+
+
 class SystemLog(Base):
     __tablename__ = 'system_logs'
     id = Column(Integer, primary_key=True)

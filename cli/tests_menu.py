@@ -13,17 +13,11 @@ from cli.console import (
 )
 
 # Test suite registry: (label, runner_fn)
-_TEST_SUITES: list[tuple[str, str | None]] = [
-    ("Core",        "tests/test_core.py"),
-    ("IA",          "tests/test_ai.py"),
-    ("Banco",       "tests/test_database_manager.py"),
-    ("Exchange",    "tests/test_exchange.py"),
-    ("APIs",        "tests/test_api.py"),
-    ("Estratégias", "tests/test_strategies.py"),
-    ("Segurança",   "tests/test_security.py"),
-    ("Performance", "tests/test_performance.py"),
-    ("Latência",    "tests/test_latency.py"),
-    ("Stress",      "tests/test_stress.py"),
+_TEST_SUITES: list[tuple[str, str]] = [
+    ("Banco", "tests/test_database_manager.py"),
+    ("APIs", "tests/test_api.py"),
+    ("Stress", "tests/test_stress.py"),
+    ("Notícias", "tests/test_news_persistence.py"),
 ]
 
 
@@ -111,15 +105,10 @@ def _run_pytest(test_file: str | None) -> tuple[bool, str]:
     from pathlib import Path
 
     if test_file is None:
-        return True, "Simulado"
+        return False, "Suíte sem arquivo de teste configurado"
 
     if not Path(test_file).exists():
-        # File not present — simulate the test result
-        time.sleep(0.1)
-        import random
-        ok = random.random() > 0.15   # ~85 % pass rate in simulation
-        return ok, ("Arquivo não encontrado — simulado" if ok else
-                    f"SIMULADO: {test_file} não existe")
+        return False, f"Arquivo de teste não encontrado: {test_file}"
 
     result = subprocess.run(
         ["python", "-m", "pytest", test_file, "-v", "--tb=short", "-q"],

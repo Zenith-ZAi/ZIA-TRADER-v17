@@ -1,10 +1,12 @@
 from sqlalchemy.orm import Session
+import hashlib
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict
 
-from database import Base, AccountState, Position, DailyPNL, WeeklyPNL, MonthlyPNL, Drawdown, OrderHistory, ExecutionHistory, Trade, WhaleActivity, SystemLog, MarketType, OrderStatus, utc_now
+from database import Base, AccountState, Position, DailyPNL, WeeklyPNL, MonthlyPNL, Drawdown, OrderHistory, ExecutionHistory, Trade, WhaleActivity, NewsArticle, TrendSnapshot, SystemLog, MarketType, OrderStatus, utc_now
 
 class DatabaseManager:
     def __init__(self, database_url: str):
@@ -84,9 +86,15 @@ class DatabaseManager:
         return position
 
     # PnL Operations
+    @staticmethod
+    def _day_bounds(timestamp: datetime) -> tuple[datetime, datetime]:
+        start = datetime.combine(timestamp.date(), datetime.min.time())
+        return start, start + timedelta(days=1)
+
     def create_pnl(self, account_id: str, symbol: str, pnl_value: float, timestamp: datetime) -> DailyPNL:
         db = self.SessionLocal()
-        pnl_entry = DailyPNL(account_id=account_id, date=timestamp.date(), pnl=pnl_value)
+        day_start, _ = self._day_bounds(timestamp)
+        pnl_entry = DailyPNL(account_id=account_id, date=day_start, pnl=pnl_value)
         db.add(pnl_entry)
         db.commit()
         db.refresh(pnl_entry)
@@ -118,12 +126,17 @@ class DatabaseManager:
     # PNL Operations
     def create_or_update_daily_pnl(self, account_id: str, date: datetime, pnl: float, drawdown: float) -> DailyPNL:
         db = self.SessionLocal()
-        daily_pnl = db.query(DailyPNL).filter(DailyPNL.account_id == account_id, DailyPNL.date == date.date()).first()
+        day_start, day_end = self._day_bounds(date)
+        daily_pnl = db.query(DailyPNL).filter(
+            DailyPNL.account_id == account_id,
+            DailyPNL.date >= day_start,
+            DailyPNL.date < day_end,
+        ).first()
         if daily_pnl:
             daily_pnl.pnl = pnl
             daily_pnl.drawdown = drawdown
         else:
-            daily_pnl = DailyPNL(account_id=account_id, date=date.date(), pnl=pnl, drawdown=drawdown)
+            daily_pnl = DailyPNL(account_id=account_id, date=day_start, pnl=pnl, drawdown=drawdown)
             db.add(daily_pnl)
         db.commit()
         db.refresh(daily_pnl)
@@ -132,9 +145,67 @@ class DatabaseManager:
 
     def get_daily_pnl(self, account_id: str, date: datetime) -> Optional[DailyPNL]:
         db = self.SessionLocal()
-        daily_pnl = db.query(DailyPNL).filter(DailyPNL.account_id == account_id, DailyPNL.date == date.date()).first()
+        day_start, day_end = self._day_bounds(date)
+        daily_pnl = db.query(DailyPNL).filter(
+            DailyPNL.account_id == account_id,
+            DailyPNL.date >= day_start,
+            DailyPNL.date < day_end,
+        ).first()
         db.close()
         return daily_pnl
+
+    # News and trend persistence
+    def create_news_article(self, article: Dict[str, object], symbol: Optional[str] = None) -> NewsArticle:
+        db = self.SessionLocal()
+        provider = str(article.get("provider") or article.get("source") or "unknown")
+        title = str(article.get("title") or "Untitled")
+        url = str(article.get("url") or "")
+        external_id = hashlib.sha256(f"{provider}|{url}|{title}".encode("utf-8")).hexdigest()
+        existing = db.query(NewsArticle).filter(NewsArticle.external_id == external_id).first()
+        if existing:
+            existing.sentiment_score = float(article.get("sentiment_score") or 0.0)
+            db.commit()
+            db.refresh(existing)
+            db.close()
+            return existing
+        published_at = article.get("time_published")
+        if isinstance(published_at, str):
+            try:
+                published_at = datetime.fromisoformat(published_at.replace("Z", "+00:00")).replace(tzinfo=None)
+            except ValueError:
+                published_at = None
+        news_article = NewsArticle(
+            external_id=external_id,
+            provider=provider,
+            symbol=symbol or article.get("ticker"),
+            title=title,
+            summary=str(article.get("summary") or ""),
+            url=url,
+            published_at=published_at,
+            sentiment_score=float(article.get("sentiment_score") or 0.0),
+            metadata_json={key: value for key, value in article.items() if key not in {"title", "summary", "url", "sentiment_score"}},
+        )
+        db.add(news_article)
+        db.commit()
+        db.refresh(news_article)
+        db.close()
+        return news_article
+
+    def create_trend_snapshot(self, trend: Dict[str, object]) -> TrendSnapshot:
+        db = self.SessionLocal()
+        snapshot = TrendSnapshot(
+            provider=str(trend.get("provider") or trend.get("source") or "unknown"),
+            symbol=str(trend.get("symbol") or "unknown"),
+            trend_score=float(trend.get("trend_score") or 0.0),
+            market_cap_rank=trend.get("market_cap_rank"),
+            price_change_24h=trend.get("price_change_24h"),
+            metadata_json=dict(trend),
+        )
+        db.add(snapshot)
+        db.commit()
+        db.refresh(snapshot)
+        db.close()
+        return snapshot
 
     # OrderHistory Operations
     def create_order_history(self, account_id: str, order_id: str, symbol: str, market_type: MarketType, action: str, order_type: str, price: Optional[float], quantity: Optional[float], status: OrderStatus, metadata_json: Optional[dict] = None) -> OrderHistory:

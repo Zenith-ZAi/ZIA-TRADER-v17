@@ -1,0 +1,70 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-zia_trader}
+      POSTGRES_USER: ${POSTGRES_USER:-zia}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the environment}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    command: ["python", "main.py"]
+    environment:
+      ENVIRONMENT: production
+      AUTO_START_ENGINES: "false"
+      DEMO_AUTH_ENABLED: "false"
+      AUTH_MODE: env
+      AUTH_USERNAME: ${AUTH_USERNAME:?set AUTH_USERNAME in the environment}
+      AUTH_PASSWORD: ${AUTH_PASSWORD:?set AUTH_PASSWORD in the environment}
+      DATABASE_URL: postgresql+psycopg2://zia:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-zia_trader}
+      REDIS_URL: redis://redis:6379/0
+      API_PORT: "8000"
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in the environment}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: .
+    command: ["python", "worker.py"]
+    environment:
+      ENVIRONMENT: production
+      AUTO_START_ENGINES: "false"
+      DEMO_AUTH_ENABLED: "false"
+      AUTH_MODE: env
+      AUTH_USERNAME: ${AUTH_USERNAME:?set AUTH_USERNAME in the environment}
+      AUTH_PASSWORD: ${AUTH_PASSWORD:?set AUTH_PASSWORD in the environment}
+      DATABASE_URL: postgresql+psycopg2://zia:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-zia_trader}
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in the environment}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:

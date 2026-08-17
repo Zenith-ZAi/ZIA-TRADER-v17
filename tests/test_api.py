@@ -13,6 +13,10 @@ def test_demo_login_and_public_user(monkeypatch, tmp_path):
 
     module = importlib.import_module("main")
     with TestClient(module.app) as client:
+        health_response = client.get("/healthz")
+        assert health_response.status_code == 200
+        assert health_response.json()["status"] == "ok"
+
         token_response = client.post(
             "/token",
             data={"username": "admin", "password": "admin"},

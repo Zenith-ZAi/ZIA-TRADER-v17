@@ -20,7 +20,7 @@ class TradingManager:
 
     def __init__(self, settings: Settings, db_manager):
         self.settings = settings
-        self.news_processor = NewsProcessor(settings)
+        self.news_processor = NewsProcessor(settings, db_manager)
         self.exchange_connector = ExchangeConnector(settings)
         
         self.redis_cache = RedisCache(settings.REDIS_URL)

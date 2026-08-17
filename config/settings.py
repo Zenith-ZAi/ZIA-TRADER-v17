@@ -8,12 +8,15 @@ class Settings(BaseSettings):
     # API & Server
     PROJECT_NAME: str = "ZIA Trader"
     VERSION: str = "1.1.0"
-    API_PORT: int = 8000
+    API_PORT: int = int(os.getenv("API_PORT", os.getenv("PORT", "8000")))
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     AUTO_START_ENGINES: bool = os.getenv("AUTO_START_ENGINES", "false").lower() == "true"
     DEMO_AUTH_ENABLED: bool = os.getenv("DEMO_AUTH_ENABLED", "true").lower() == "true"
     DEMO_USER_PASSWORD: str = os.getenv("DEMO_USER_PASSWORD", "password")
     DEMO_ADMIN_PASSWORD: str = os.getenv("DEMO_ADMIN_PASSWORD", "admin")
+    AUTH_MODE: str = os.getenv("AUTH_MODE", "demo")
+    AUTH_USERNAME: str = os.getenv("AUTH_USERNAME", "")
+    AUTH_PASSWORD: str = os.getenv("AUTH_PASSWORD", "")
     
     # Database & Cache
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./data/zia_trader.db")
@@ -31,6 +34,8 @@ class Settings(BaseSettings):
     SYMBOLS: List[str] = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
     TIMEFRAME: str = "1h"
     MAX_RISK_PER_TRADE: float = float(os.getenv("MAX_RISK_PER_TRADE", "0.02"))
+    STOP_LOSS_PCT: float = float(os.getenv("STOP_LOSS_PCT", "0.02"))
+    TAKE_PROFIT_PCT: float = float(os.getenv("TAKE_PROFIT_PCT", "0.05"))
     MIN_CONFIDENCE_THRESHOLD: float = float(os.getenv("MIN_CONFIDENCE_THRESHOLD", "0.7"))
     PRICE_CHANGE_THRESHOLD: float = float(os.getenv("PRICE_CHANGE_THRESHOLD", "0.001"))
     TRADING_LOOP_INTERVAL: int = int(os.getenv("TRADING_LOOP_INTERVAL", "5"))
@@ -135,6 +140,28 @@ class Settings(BaseSettings):
     # API Rate Limiting
     API_RATE_LIMIT: int = int(os.getenv("API_RATE_LIMIT", "100")) # requests per interval
     API_RATE_LIMIT_INTERVAL: int = int(os.getenv("API_RATE_LIMIT_INTERVAL", "60")) # seconds
+
+    # Backtest and stress validation
+    BACKTEST_INITIAL_CAPITAL: float = float(os.getenv("BACKTEST_INITIAL_CAPITAL", "10000"))
+    BACKTEST_FEE_RATE: float = float(os.getenv("BACKTEST_FEE_RATE", "0.001"))
+    BACKTEST_STOP_LOSS_PCT: float = float(os.getenv("BACKTEST_STOP_LOSS_PCT", "0.02"))
+    BACKTEST_TAKE_PROFIT_PCT: float = float(os.getenv("BACKTEST_TAKE_PROFIT_PCT", "0.05"))
+    BACKTEST_MAX_VOLATILITY: float = float(os.getenv("BACKTEST_MAX_VOLATILITY", "0.08"))
+
+    # News and trend providers
+    NEWS_HTTP_TIMEOUT_SECONDS: float = float(os.getenv("NEWS_HTTP_TIMEOUT_SECONDS", "8"))
+    NEWS_CACHE_TTL_SECONDS: int = int(os.getenv("NEWS_CACHE_TTL_SECONDS", "300"))
+    NEWS_MAX_ARTICLES: int = int(os.getenv("NEWS_MAX_ARTICLES", "20"))
+    GDELT_BASE_URL: str = os.getenv("GDELT_BASE_URL", "https://api.gdeltproject.org/api/v2/doc/doc")
+    NEWS_RSS_URL_TEMPLATE: str = os.getenv("NEWS_RSS_URL_TEMPLATE", "https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en")
+    COINGECKO_BASE_URL: str = os.getenv("COINGECKO_BASE_URL", "https://api.coingecko.com/api/v3")
+    COINGECKO_API_KEY: Optional[str] = os.getenv("COINGECKO_API_KEY")
+    BENZINGA_NEWS_URL: str = os.getenv("BENZINGA_NEWS_URL", "https://api.benzinga.com/api/v2/news")
+    BENZINGA_TRENDS_URL: str = os.getenv("BENZINGA_TRENDS_URL", "https://api.benzinga.com/api/v1/trending-tickers")
+    NEWSAPI_API_KEY: Optional[str] = os.getenv("NEWSAPI_API_KEY")
+    NEWSAPI_BASE_URL: str = os.getenv("NEWSAPI_BASE_URL", "https://newsapi.org/v2/everything")
+    CRYPTOPANIC_API_KEY: Optional[str] = os.getenv("CRYPTOPANIC_API_KEY")
+    CRYPTOPANIC_BASE_URL: str = os.getenv("CRYPTOPANIC_BASE_URL", "https://cryptopanic.com/api/GROWTH/v2/posts/")
 
     model_config = ConfigDict(env_file=".env", extra="ignore")
 

@@ -82,16 +82,31 @@ def _demo_auth_available() -> bool:
     return settings.DEMO_AUTH_ENABLED and settings.ENVIRONMENT.lower() != "production"
 
 
+def _auth_users() -> Dict[str, Dict[str, Any]]:
+    if settings.AUTH_MODE.lower() == "env":
+        if not settings.AUTH_USERNAME or not settings.AUTH_PASSWORD:
+            return {}
+        return {
+            settings.AUTH_USERNAME: {
+                "username": settings.AUTH_USERNAME,
+                "password": settings.AUTH_PASSWORD,
+                "roles": ["admin", "trader"],
+            }
+        }
+    return FAKE_USERS_DB if _demo_auth_available() else {}
+
+
 async def get_current_user(token: str = Depends(oauth2_scheme)) -> Dict[str, Any]:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    if not _demo_auth_available():
+    users = _auth_users()
+    if not users:
         raise credentials_exception
     username = verify_token(token, credentials_exception)
-    user = FAKE_USERS_DB.get(username)
+    user = users.get(username)
     if user is None:
         raise credentials_exception
     return user
@@ -146,6 +161,23 @@ async def _stop_engine_tasks() -> None:
     engine_tasks.clear()
 
 
+@app.get("/healthz")
+async def healthz() -> Dict[str, Any]:
+    """Liveness sem autenticação; não expõe segredos ou dados de conta."""
+    try:
+        db_manager.get_account_state("default_account")
+        return {
+            "status": "ok",
+            "service": settings.PROJECT_NAME,
+            "version": settings.VERSION,
+            "exchange_connected": trading_manager.exchange_connector.is_connected,
+            "news_providers": trading_manager.news_processor.health(),
+        }
+    except Exception as exc:
+        logger.error("Falha no healthcheck: %s", exc)
+        raise HTTPException(status_code=503, detail="service_unhealthy") from exc
+
+
 @app.get("/metrics")
 async def metrics() -> Response:
     return Response(generate_latest(), media_type="text/plain")
@@ -155,12 +187,13 @@ async def metrics() -> Response:
 async def login_for_access_token(
     form_data: OAuth2PasswordRequestForm = Depends(),
 ) -> Dict[str, str]:
-    if not _demo_auth_available():
+    users = _auth_users()
+    if not users:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Demo authentication is disabled; configure the user service.",
+            detail="Authentication is not configured.",
         )
-    user = FAKE_USERS_DB.get(form_data.username)
+    user = users.get(form_data.username)
     if not user or not secrets.compare_digest(user["password"], form_data.password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

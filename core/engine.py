@@ -17,6 +17,7 @@ from risk.risk_ai import RiskAI
 from execution.execution_engine import ExecutionEngine
 from data.news_processor import NewsProcessor
 from execution.exchange_connector import ExchangeConnector
+from core.market_signals import calculate_market_signal
 
 
 logger = logging.getLogger(__name__)
@@ -169,28 +170,54 @@ class RoboTraderUnified:
                     final_action = max(scores, key=scores.get)
                     final_confidence = scores[final_action] / sum(p["weight"] for p in predictions)
                     
+                    # 3. Contexto de Mercado e gate de confluência
+                    try:
+                        processed_news = await self.news_processor.fetch_all([symbol])
+                        trends = await self.news_processor.fetch_trending([symbol])
+                        avg_sentiment = self.news_processor.aggregate_sentiment(processed_news)
+                        trend_score = float(trends[0].get("trend_score", 0.0)) if trends else 0.0
+                    except Exception as e:
+                        logger.warning(f"Falha ao processar notícias/tendências para {symbol}: {e}")
+                        processed_news = []
+                        avg_sentiment = 0.0
+                        trend_score = 0.0
+
+                    market_signal = calculate_market_signal(
+                        historical_data,
+                        news_sentiment=avg_sentiment,
+                        trend_score=trend_score,
+                        min_confidence=float(self.settings.MIN_CONFIDENCE_THRESHOLD),
+                        max_volatility=float(self.settings.BACKTEST_MAX_VOLATILITY),
+                    )
+                    model_action = final_action
+                    model_confidence = final_confidence
+                    if market_signal.action in {"buy", "sell"} and market_signal.action == model_action:
+                        final_action = model_action
+                        final_confidence = min(1.0, (model_confidence + market_signal.confidence) / 2.0)
+                    else:
+                        final_action = "hold"
+                        final_confidence = min(model_confidence, market_signal.confidence)
                     final_prediction = {"prediction": final_action, "confidence": final_confidence}
                     AI_PREDICTION_CONFIDENCE.set(final_confidence)
-                    
-                    logger.info(f"[{symbol}] Previsão FINAL: {final_prediction['prediction']} (Conf: {final_prediction['confidence']:.2f})")
+                    logger.info(
+                        "[%s] Sinal=%s candidato=%s confiança=%.2f regime=%s motivos=%s",
+                        symbol,
+                        market_signal.action,
+                        market_signal.candidate_action,
+                        market_signal.confidence,
+                        market_signal.regime,
+                        "; ".join(market_signal.reasons),
+                    )
                     analysis = final_prediction
-
-                    # 3. Contexto de Mercado
-                    try:
-                        alpha_news = await self.news_processor.fetch_alpha_vantage_news(tickers=[symbol])
-                        benzinga_news = await self.news_processor.fetch_benzinga_news(symbols=[symbol])
-                        all_news = alpha_news + benzinga_news
-                        processed_news = await self.news_processor.process_news_sentiment(all_news)
-                        avg_sentiment = sum([n['sentiment_score'] for n in processed_news]) / len(processed_news) if processed_news else 0.0
-                    except Exception as e:
-                        logger.warning(f"Falha ao processar notícias para {symbol}: {e}")
-                        avg_sentiment = 0.0
 
                     volume_analysis = self.risk_ai.analyze_volume_flow(historical_data)
                     market_context = {
                         "historical_data": historical_data,
                         "current_order_flow": current_order_flow,
                         "news_sentiment": avg_sentiment,
+                        "trend_score": trend_score,
+                        "news_count": len(processed_news),
+                        "market_signal": market_signal.to_dict(),
                         "volume_analysis": volume_analysis
                     }
                     

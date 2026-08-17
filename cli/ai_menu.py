@@ -144,14 +144,17 @@ def _train(user: AdminUser) -> None:
     model_map = {"1": "Transformer", "2": "LSTM", "3": "XGBoost",
                  "4": "RandomForest", "5": "Ensemble Completo"}
     model_name = model_map.get(choice, "Ensemble Completo")
+    dataset_files = list(Path("data").glob("*.csv")) + list(Path("data").glob("*.parquet"))
+    if not dataset_files:
+        error("Treinamento cancelado: nenhum dataset OHLCV real foi encontrado em data/.")
+        info("Adicione um dataset validado e execute o treinamento fora do modo simulado.")
+        pause()
+        return
     _run_task(f"Treinando {model_name}", [
-        f"Carregando dados históricos para {model_name}…",
-        "Dividindo treino/validação…",
-        "Executando épocas de treinamento…",
-        "Avaliando métricas de validação…",
-        "Salvando pesos do modelo…",
-        f"{model_name} treinado com sucesso.",
-    ], user, steps_count=80)
+        f"Carregando dados históricos de {dataset_files[0].name}…",
+        "Dividindo treino/validação sem look-ahead…",
+        "Treinamento ainda requer pipeline de features configurado.",
+    ], user, steps_count=40)
 
 
 def _load_model(user: AdminUser) -> None:
@@ -211,23 +214,24 @@ def _benchmark(user: AdminUser) -> None:
     if not _check_perm(user):
         return
     header("BENCHMARK DE MODELOS")
-    models = ["Transformer", "LSTM", "XGBoost", "RandomForest", "Ensemble"]
     from cli.console import make_table
-    t = make_table("Modelo", "Acurácia", "Precisão", "Recall", "F1", "Latência (ms)",
-                   title="Benchmark")
-    pb = progress_bar("Executando benchmark…", 100)
-    with pb:
-        task = pb.add_task("Benchmark", total=len(models) * 20)
-        for m in models:
-            pb.update(task, description=f"[cyan]Avaliando {m}…[/cyan]")
-            for _ in range(20):
-                time.sleep(0.03)
-                pb.advance(task, 1)
-            acc  = random.uniform(0.55, 0.72)
-            prec = random.uniform(0.55, 0.72)
-            rec  = random.uniform(0.50, 0.70)
-            f1   = 2 * prec * rec / (prec + rec)
-            lat  = random.uniform(0.5, 5.0)
-            t.add_row(m, f"{acc:.2%}", f"{prec:.2%}", f"{rec:.2%}", f"{f1:.2%}", f"{lat:.1f}")
+    from ai.ensemble_model import EnsembleModel
+    from time import perf_counter
+
+    model = EnsembleModel()
+    t = make_table("Modelo", "Estado", "Latência (ms)", "Observação", title="Benchmark")
+    if not model.is_trained:
+        t.add_row("Ensemble", "N/D", "N/D", "Treine com dataset OHLCV real antes de medir")
+        console.print(t)
+        warn("Benchmark não executado: não há artefatos treinados.")
+        pause()
+        return
+
+    import pandas as pd
+    features = pd.DataFrame([{"open": 1.0, "high": 1.01, "low": 0.99, "close": 1.0, "volume": 1.0}])
+    started = perf_counter()
+    action, confidence = model.predict(features)
+    latency_ms = (perf_counter() - started) * 1000
+    t.add_row("Ensemble", "OK", f"{latency_ms:.2f}", f"ação={action}, confiança={confidence:.2%}")
     console.print(t)
     pause()
