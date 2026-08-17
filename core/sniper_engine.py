@@ -11,6 +11,7 @@ from infra.redis_cache import RedisCache
 from execution.execution_engine import ExecutionEngine
 from ai.whale_detector import WhaleDetector
 from execution.exchange_connector import ExchangeConnector
+from risk.risk_ai import RiskAI
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,7 @@ class SniperEngine:
         self.redis_cache = redis_cache
         self.db_manager = db_manager
         self.account_id = "default_account" # Pode ser dinâmico em um sistema real
+        self.risk_ai = RiskAI(settings, db_manager)
         self.is_running = False
         self.symbols = self.settings.SYMBOLS
         self.volatility_threshold = self.settings.SNIPER_VOLATILITY_THRESHOLD  # Ex: 2% de variação em 1 minuto
@@ -81,12 +83,20 @@ class SniperEngine:
                             }
                             
                             # 4. Execução de Ordem Sniper
-                            # A validação de risco para sniper pode ser mais leve ou pré-aprovada, mas ainda deve ser registrada.
-                            # Para simplificar, vamos assumir que a ordem é válida para execução rápida, mas o db_manager será usado para registrar.
-                            execution_result = await self.execution_engine.execute_order(order_data)
-                            
-                            if execution_result["status"] == "success":
-                                logger.info(f"Sniper: Ordem executada com sucesso: {execution_result["order_id"]}")
+                            account_state = self.db_manager.get_account_state(self.account_id)
+                            risk_validation = self.risk_ai.validate_order(
+                                order_data,
+                                account_state.balance if account_state else 0.0,
+                                {"historical_data": historical_data},
+                            )
+                            if not risk_validation["valid"]:
+                                logger.warning("Sniper: ordem rejeitada por risco para %s: %s", symbol, risk_validation["reason"])
+                            else:
+                                execution_order = {**order_data, **risk_validation}
+                                execution_result = await self.execution_engine.execute_order(execution_order)
+
+                            if risk_validation["valid"] and execution_result["status"] == "success":
+                                logger.info("Sniper: Ordem executada com sucesso: %s", execution_result["order_id"])
                                 # Registrar execução no banco de dados
                                 self.db_manager.create_execution_history(
                                     account_id=self.account_id,

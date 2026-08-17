@@ -1,10 +1,15 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, JSON, Enum, Boolean
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-from datetime import datetime
+from sqlalchemy import Boolean, Column, DateTime, Enum, Float, Integer, JSON, String, create_engine
+from sqlalchemy.orm import DeclarativeBase
+from datetime import datetime, timezone
 import enum
 
-Base = declarative_base()
+class Base(DeclarativeBase):
+    pass
+
+
+def utc_now() -> datetime:
+    """Retorna UTC sem tzinfo para compatibilidade com DateTime legado do schema."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 class MarketType(enum.Enum):
     CRYPTO = "crypto"
@@ -25,7 +30,7 @@ class AccountState(Base):
     account_id = Column(String, unique=True, nullable=False)
     balance = Column(Float, default=0.0)
     initial_capital = Column(Float, default=0.0)
-    last_updated = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_updated = Column(DateTime, default=utc_now, onupdate=utc_now)
 
 class Position(Base):
     __tablename__ = 'positions'
@@ -39,7 +44,7 @@ class Position(Base):
     unrealized_pnl = Column(Float, default=0.0)
     realized_pnl = Column(Float, default=0.0)
     is_open = Column(Boolean, default=True)
-    open_time = Column(DateTime, default=datetime.utcnow)
+    open_time = Column(DateTime, default=utc_now)
     close_time = Column(DateTime)
 
 class DailyPNL(Base):
@@ -70,7 +75,7 @@ class Drawdown(Base):
     __tablename__ = 'drawdowns'
     id = Column(Integer, primary_key=True)
     account_id = Column(String, nullable=False)
-    start_time = Column(DateTime, default=datetime.utcnow)
+    start_time = Column(DateTime, default=utc_now)
     end_time = Column(DateTime)
     peak_balance = Column(Float, nullable=False)
     trough_balance = Column(Float, nullable=False)
@@ -89,7 +94,7 @@ class OrderHistory(Base):
     price = Column(Float)
     quantity = Column(Float)
     status = Column(Enum(OrderStatus), nullable=False)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=utc_now)
     metadata_json = Column(JSON)
 
 class ExecutionHistory(Base):
@@ -104,7 +109,7 @@ class ExecutionHistory(Base):
     filled_price = Column(Float, nullable=False)
     filled_quantity = Column(Float, nullable=False)
     commission = Column(Float, default=0.0)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=utc_now)
     metadata_json = Column(JSON)
 
 class Trade(Base):
@@ -116,7 +121,7 @@ class Trade(Base):
     price = Column(Float, nullable=False)
     quantity = Column(Float, nullable=False)
     confidence = Column(Float)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=utc_now)
     metadata_json = Column(JSON)
 
 class WhaleActivity(Base):
@@ -125,7 +130,7 @@ class WhaleActivity(Base):
     symbol = Column(String, nullable=False)
     volume = Column(Float, nullable=False)
     sentiment = Column(String)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=utc_now)
 
 class SystemLog(Base):
     __tablename__ = 'system_logs'
@@ -134,7 +139,7 @@ class SystemLog(Base):
     account_id = Column(String, nullable=True)
     message = Column(String)
     module = Column(String)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=utc_now)
 
 def get_engine(database_url: str):
     return create_engine(database_url)

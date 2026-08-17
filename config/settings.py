@@ -1,12 +1,19 @@
 import os
+
+from pydantic import ConfigDict
 from pydantic_settings import BaseSettings
 from typing import List, Optional, Dict
 
 class Settings(BaseSettings):
     # API & Server
     PROJECT_NAME: str = "ZIA Trader"
-    VERSION: str = "1.0.0"
+    VERSION: str = "1.1.0"
     API_PORT: int = 8000
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
+    AUTO_START_ENGINES: bool = os.getenv("AUTO_START_ENGINES", "false").lower() == "true"
+    DEMO_AUTH_ENABLED: bool = os.getenv("DEMO_AUTH_ENABLED", "true").lower() == "true"
+    DEMO_USER_PASSWORD: str = os.getenv("DEMO_USER_PASSWORD", "password")
+    DEMO_ADMIN_PASSWORD: str = os.getenv("DEMO_ADMIN_PASSWORD", "admin")
     
     # Database & Cache
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./data/zia_trader.db")
@@ -43,7 +50,7 @@ class Settings(BaseSettings):
     LSTM_SEQ_LEN: int = int(os.getenv("LSTM_SEQ_LEN", "30"))
 
     # Security Settings
-    SECRET_KEY: str = os.getenv("SECRET_KEY", "super-secret-key")
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-only-change-me")
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
@@ -129,8 +136,6 @@ class Settings(BaseSettings):
     API_RATE_LIMIT: int = int(os.getenv("API_RATE_LIMIT", "100")) # requests per interval
     API_RATE_LIMIT_INTERVAL: int = int(os.getenv("API_RATE_LIMIT_INTERVAL", "60")) # seconds
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    model_config = ConfigDict(env_file=".env", extra="ignore")
 
 settings = Settings()

@@ -1,7 +1,8 @@
-from typing import Dict, Any
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional
+
 from config.settings import Settings
 from database_manager import DatabaseManager
-from datetime import datetime
 
 class RiskAI:
     """Módulo de IA para gerenciamento de risco e validação de ordens."""
@@ -22,7 +23,12 @@ class RiskAI:
         symbol = order_data.get("symbol")
         action = order_data.get("action")
         confidence = order_data.get("confidence", 0.0)
-        
+
+        if not symbol or action not in {"buy", "sell"}:
+            return {"valid": False, "reason": "Símbolo ou ação inválidos."}
+        if account_balance <= 0:
+            return {"valid": False, "reason": "Saldo da conta inválido."}
+
         # 1. Verificação de Confiança Mínima
         if confidence < 0.7:
             return {"valid": False, "reason": f"Confiança insuficiente: {confidence:.2f}"}
@@ -43,7 +49,7 @@ class RiskAI:
         
         # 4. Verificação de Limite de Perda Diária (Simulado)
         # Em produção, buscaríamos o PnL diário do banco de dados
-        daily_pnl_obj = self.db_manager.get_daily_pnl(self.account_id, datetime.now())
+        daily_pnl_obj = self.db_manager.get_daily_pnl(self.account_id, datetime.now(timezone.utc).replace(tzinfo=None))
         daily_pnl = daily_pnl_obj.pnl if daily_pnl_obj else 0.0
         if daily_pnl < -self.daily_loss_limit * account_balance:
             return {"valid": False, "reason": "Limite de perda diária atingido."}
@@ -55,7 +61,9 @@ class RiskAI:
             "quantity": risk_amount / (entry_price * stop_loss_pct),
             "stop_loss": stop_loss,
             "take_profit": take_profit,
-            "risk_amount": risk_amount
+            "risk_amount": risk_amount,
+            "price": entry_price,
+            "confidence": confidence,
         }
 
 

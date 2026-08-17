@@ -43,15 +43,15 @@ class RoboTraderUnified:
         
         # Inicialização de modelos com tratamento de erro
         try:
-            input_dim = 10
-            d_model = 64
-            nhead = 4
-            num_encoder_layers = 2
+            input_dim = self.settings.TRANSFORMER_INPUT_DIM
+            d_model = self.settings.TRANSFORMER_D_MODEL
+            nhead = self.settings.TRANSFORMER_NHEAD
+            num_encoder_layers = self.settings.TRANSFORMER_NUM_ENCODER_LAYERS
             self.transformer_model = PriceTransformerModel(input_dim, d_model, nhead, num_encoder_layers)
             
-            lstm_hidden_size = 128
-            lstm_num_layers = 2
-            lstm_output_size = 1
+            lstm_hidden_size = self.settings.LSTM_HIDDEN_DIM
+            lstm_num_layers = self.settings.LSTM_NUM_LAYERS
+            lstm_output_size = self.settings.LSTM_OUTPUT_DIM
             self.lstm_model = PriceLSTMModel(input_dim, lstm_hidden_size, lstm_num_layers, lstm_output_size)
             self.ensemble_model = EnsembleModel()
             self.execution_engine = ExecutionEngine(self.settings, self.exchange_connector, self.redis_cache)
@@ -89,7 +89,7 @@ class RoboTraderUnified:
                     }
                     
                     # 2. Pipeline de IA
-                    input_dim = 10
+                    input_dim = self.settings.TRANSFORMER_INPUT_DIM
                     if not historical_data.empty:
                         features = historical_data.select_dtypes(include=[np.number]).tail(30)
                         if features.shape[1] < input_dim:
@@ -121,7 +121,7 @@ class RoboTraderUnified:
                         if features_lstm.shape[1] < input_dim:
                             input_tensor_lstm = torch.zeros(1, 30, input_dim)
                         else:
-                            input_tensor_lstm = torch.tensor(features.values[-30:, :input_dim], dtype=torch.float32).unsqueeze(0)
+                            input_tensor_lstm = torch.tensor(features_lstm.values[-30:, :input_dim], dtype=torch.float32).unsqueeze(0)
                     else:
                         input_tensor_lstm = torch.zeros(1, 30, input_dim)
 
@@ -207,7 +207,8 @@ class RoboTraderUnified:
                         
                         if risk_validation["valid"]:
                             try:
-                                execution_result = await self.execution_engine.execute_order(risk_validation)
+                                execution_order = {**order_data, **risk_validation}
+                                execution_result = await self.execution_engine.execute_order(execution_order)
                                 if execution_result["status"] == "success":
                                     # Atualizar saldo e registrar execução
                                     current_balance = self.db_manager.get_account_state(self.account_id).balance
@@ -227,7 +228,7 @@ class RoboTraderUnified:
                                         filled_quantity=execution_result["filled_quantity"],
                                         commission=execution_result.get("commission", 0.0)
                                     )
-                                    logger.info(f"Ordem executada: {execution_result["order_id"]}")
+                                    logger.info("Ordem executada: %s", execution_result["order_id"])
                                     TRADING_OPEN_POSITIONS.inc() if order_data["action"] == "buy" else TRADING_OPEN_POSITIONS.dec()
                             except Exception as e:
                                 logger.error(f"Falha crítica na execução da ordem para {symbol}: {e}")

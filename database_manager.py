@@ -4,7 +4,7 @@ from sqlalchemy.orm import sessionmaker
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict
 
-from database import Base, AccountState, Position, DailyPNL, WeeklyPNL, MonthlyPNL, Drawdown, OrderHistory, ExecutionHistory, Trade, WhaleActivity, SystemLog, MarketType, OrderStatus
+from database import Base, AccountState, Position, DailyPNL, WeeklyPNL, MonthlyPNL, Drawdown, OrderHistory, ExecutionHistory, Trade, WhaleActivity, SystemLog, MarketType, OrderStatus, utc_now
 
 class DatabaseManager:
     def __init__(self, database_url: str):
@@ -77,7 +77,7 @@ class DatabaseManager:
         position = db.query(Position).filter(Position.account_id == account_id, Position.symbol == symbol, Position.is_open == True).first()
         if position:
             position.is_open = False
-            position.close_time = datetime.utcnow()
+            position.close_time = utc_now()
             db.commit()
             db.refresh(position)
         db.close()

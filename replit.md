@@ -10,7 +10,7 @@ The workflow **"Start application"** starts the FastAPI server:
 python main.py
 ```
 
-The API is available on **port 8000**.
+The API is available on **port 8000**. Background trading engines are **not started automatically by default**; set `AUTO_START_ENGINES=true` only for an intentional simulation or controlled deployment.
 
 ## Key endpoints
 
@@ -20,6 +20,9 @@ The API is available on **port 8000**.
 | GET | `/users/me` | Current authenticated user |
 | GET | `/admin/dashboard` | Admin-only dashboard |
 | GET | `/metrics` | Prometheus metrics |
+| POST | `/trading/start` | Start the trading engine once |
+| POST | `/sniper/start` | Start the Sniper engine once |
+| POST | `/trading/stop` | Stop all engines and background tasks |
 | GET | `/docs` | Interactive Swagger UI |
 
 **Demo credentials** (defined in `main.py` → `FAKE_USERS_DB`):
@@ -69,10 +72,14 @@ Defined in `.env` (loaded automatically by pydantic-settings):
 
 | Variable | Default | Notes |
 |----------|---------|-------|
-| `DATABASE_URL` | Replit Postgres | Set automatically |
+| `DATABASE_URL` | SQLite fallback | Set a managed database URL in deployment |
 | `REDIS_URL` | `redis://localhost:6379/0` | Falls back to in-memory |
-| `SECRET_KEY` | `replace-with-a-secure-key-in-production` | **Change for production** |
-| `BINANCE_API_KEY` / `BINANCE_SECRET_KEY` | — | Needed for live trading |
+| `ENVIRONMENT` | `development` | `production` disables demo authentication |
+| `AUTO_START_ENGINES` | `false` | Explicit opt-in for background engines |
+| `DEMO_AUTH_ENABLED` | `true` | Development-only authentication switch |
+| `DEMO_USER_PASSWORD` / `DEMO_ADMIN_PASSWORD` | — | Configure demo passwords locally |
+| `SECRET_KEY` | `dev-only-change-me` | **Replace with a long random value outside development** |
+| `BINANCE_API_KEY` / `BINANCE_SECRET_KEY` | — | Needed for live trading integrations |
 
 ## Admin Console
 
