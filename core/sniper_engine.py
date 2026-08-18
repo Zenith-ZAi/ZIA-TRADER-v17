@@ -10,6 +10,7 @@ from config.settings import Settings
 from infra.redis_cache import RedisCache
 from execution.execution_engine import ExecutionEngine
 from ai.whale_detector import WhaleDetector
+from core.market_signals import calculate_market_signal
 from execution.exchange_connector import ExchangeConnector
 from risk.risk_ai import RiskAI
 
@@ -63,52 +64,85 @@ class SniperEngine:
                             "last_update_id": order_book.get("last_update_id"),
                         }
                         whale_activity = self.whale_detector.detect_whale_activity(historical_data, current_order_flow)
-                        if whale_activity["detected"] and whale_activity["magnitude"] > self.settings.WHALE_ACTIVITY_SNIPER_THRESHOLD:
-                            logger.info(f"Sniper: Atividade de Baleia detectada para {symbol}. Magnitude: {whale_activity['magnitude']}")
-                            # Ajustar a confiança ou o limiar de entrada/saída com base na baleia
-                            # Por exemplo, se a baleia está comprando e o sniper detecta um sinal de compra, aumenta a confiança
+                        whale_detected = bool(
+                            whale_activity.get("detected")
+                            and whale_activity.get("magnitude", 0.0) >= self.settings.WHALE_ACTIVITY_SNIPER_THRESHOLD
+                        )
+                        if whale_detected:
+                            logger.info("Sniper: baleia detectada para %s; magnitude=%.3f", symbol, whale_activity["magnitude"])
 
-                        # 2.2. Detecção de Evento de Volatilidade
+                        # 2.2. Volatilidade só vira entrada quando há confluência real.
                         if price_change > self.volatility_threshold:
-                            logger.info(f"Sniper: Evento de alta volatilidade detectado para {symbol}: Variação de {price_change:.2%}")
-                            
-                            # 3. Execução Rápida (Exemplo: Scalping)
                             action = "buy" if current_price > float(previous_price) else "sell"
-                            order_data = {
-                                "symbol": symbol,
-                                "action": action,
-                                "quantity": self.settings.SNIPER_TRADE_QUANTITY,  # Quantidade configurável
-                                "price": current_price,
-                                "confidence": 0.95  # Alta confiança em eventos de volatilidade
-                            }
-                            
-                            # 4. Execução de Ordem Sniper
-                            account_state = self.db_manager.get_account_state(self.account_id)
-                            risk_validation = self.risk_ai.validate_order(
-                                order_data,
-                                account_state.balance if account_state else 0.0,
-                                {"historical_data": historical_data},
+                            market_signal = calculate_market_signal(
+                                historical_data,
+                                min_confidence=float(self.settings.MIN_CONFIDENCE_THRESHOLD),
+                                max_volatility=float(self.settings.BACKTEST_MAX_VOLATILITY),
                             )
-                            if not risk_validation["valid"]:
-                                logger.warning("Sniper: ordem rejeitada por risco para %s: %s", symbol, risk_validation["reason"])
-                            else:
-                                execution_order = {**order_data, **risk_validation}
-                                execution_result = await self.execution_engine.execute_order(execution_order)
-
-                            if risk_validation["valid"] and execution_result["status"] == "success":
-                                logger.info("Sniper: Ordem executada com sucesso: %s", execution_result["order_id"])
-                                # Registrar execução no banco de dados
-                                self.db_manager.create_execution_history(
-                                    account_id=self.account_id,
-                                    execution_id=execution_result["order_id"],
-                                    order_id=execution_result["order_id"],
-                                    symbol=order_data["symbol"],
-                                    market_type=MarketType.CRYPTO, # Assumindo crypto por enquanto
-                                    action=order_data["action"],
-                                    filled_price=execution_result["filled_price"],
-                                    filled_quantity=execution_result["filled_quantity"],
-                                    commission=execution_result.get("commission", 0.0)
+                            whale_direction_matches = (
+                                (action == "buy" and whale_activity.get("sentiment") == "bullish")
+                                or (action == "sell" and whale_activity.get("sentiment") == "bearish")
+                            )
+                            confirmed_event = bool(
+                                self.settings.AUTONOMOUS_TRADING_ENABLED
+                                and whale_detected
+                                and whale_direction_matches
+                                and market_signal.action == action
+                                and market_signal.confidence >= float(self.settings.MIN_CONFIDENCE_THRESHOLD)
+                            )
+                            logger.info(
+                                "Sniper: evento=%s ação=%s sinal=%s confiança=%.2f confirmado=%s",
+                                symbol,
+                                action,
+                                market_signal.action,
+                                market_signal.confidence,
+                                confirmed_event,
+                            )
+                            if confirmed_event:
+                                order_data = {
+                                    "symbol": symbol,
+                                    "action": action,
+                                    "quantity": self.settings.SNIPER_TRADE_QUANTITY,
+                                    "price": current_price,
+                                    "confidence": min(float(market_signal.confidence), float(whale_activity.get("confidence", 0.0))),
+                                }
+                                account_state = self.db_manager.get_account_state(self.account_id)
+                                try:
+                                    exchange_balances = await self.exchange_connector.get_account_balance()
+                                except Exception as exc:
+                                    logger.warning("Sniper: saldo privado indisponível para %s: %s", symbol, exc)
+                                    exchange_balances = {}
+                                account_balance = self.risk_ai.quote_equivalent_balance(exchange_balances, symbol, current_price) or (account_state.balance if account_state else 0.0)
+                                risk_context = {
+                                    "historical_data": historical_data,
+                                    "exchange_balances": exchange_balances,
+                                    "market_signal": market_signal.to_dict(),
+                                    "whale_activity": whale_activity,
+                                    "current_order_flow": current_order_flow,
+                                }
+                                risk_validation = self.risk_ai.validate_order(
+                                    order_data,
+                                    account_balance,
+                                    risk_context,
                                 )
+                                if not risk_validation["valid"]:
+                                    logger.warning("Sniper: ordem rejeitada por risco para %s: %s", symbol, risk_validation["reason"])
+                                else:
+                                    execution_order = {**order_data, **risk_validation}
+                                    execution_result = await self.execution_engine.execute_order(execution_order)
+                                    if execution_result["status"] == "success":
+                                        logger.info("Sniper: Ordem executada com sucesso: %s", execution_result["order_id"])
+                                        self.db_manager.create_execution_history(
+                                            account_id=self.account_id,
+                                            execution_id=execution_result["order_id"],
+                                            order_id=execution_result["order_id"],
+                                            symbol=order_data["symbol"],
+                                            market_type=MarketType.CRYPTO,
+                                            action=order_data["action"],
+                                            filled_price=execution_result["filled_price"],
+                                            filled_quantity=execution_result["filled_quantity"],
+                                            commission=execution_result.get("commission", 0.0),
+                                        )
                                 
                     # 5. Atualiza o preço anterior no cache Redis
                     await self.redis_cache.set_state(previous_price_key, str(current_price), expire=self.settings.SNIPER_PRICE_CACHE_EXPIRE)

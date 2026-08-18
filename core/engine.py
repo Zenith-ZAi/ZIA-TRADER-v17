@@ -2,6 +2,7 @@ import asyncio
 import pandas as pd
 import numpy as np
 import logging
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 from monitoring.metrics import TRADING_PNL, TRADING_BALANCE, TRADING_OPEN_POSITIONS, TRADING_ORDER_COUNT, TRADING_EXECUTION_LATENCY, AI_PREDICTION_CONFIDENCE, SYSTEM_ERROR_COUNT, SYSTEM_LOG_COUNT
 from database import MarketType
@@ -12,6 +13,7 @@ from infra.redis_cache import RedisCache
 from ai.price_transformer_model import PriceTransformerModel
 from ai.price_lstm_model import PriceLSTMModel
 from ai.ensemble_model import EnsembleModel
+from ai.feature_pipeline import build_feature_frame
 import torch
 from risk.risk_ai import RiskAI
 from execution.execution_engine import ExecutionEngine
@@ -54,11 +56,37 @@ class RoboTraderUnified:
             lstm_num_layers = self.settings.LSTM_NUM_LAYERS
             lstm_output_size = self.settings.LSTM_OUTPUT_DIM
             self.lstm_model = PriceLSTMModel(input_dim, lstm_hidden_size, lstm_num_layers, lstm_output_size)
+            self.neural_models_ready = self._load_neural_weights()
             self.ensemble_model = EnsembleModel()
             self.execution_engine = ExecutionEngine(self.settings, self.exchange_connector, self.redis_cache)
         except Exception as e:
             logger.critical(f"Falha fatal na inicialização dos modelos de IA: {e}")
             raise
+
+    def _load_neural_weights(self) -> bool:
+        if not self.settings.NEURAL_MODELS_ENABLED:
+            return False
+        transformer_path = Path(self.settings.TRANSFORMER_WEIGHTS_PATH)
+        lstm_path = Path(self.settings.LSTM_WEIGHTS_PATH)
+        if not transformer_path.exists() or not lstm_path.exists():
+            logger.warning("Pesos Transformer/LSTM ausentes; redes neurais permanecerão desativadas.")
+            return False
+        try:
+            self.transformer_model.load_state_dict(torch.load(transformer_path, map_location="cpu"))
+            self.lstm_model.load_state_dict(torch.load(lstm_path, map_location="cpu"))
+            logger.info("Pesos Transformer/LSTM carregados com sucesso.")
+            return True
+        except Exception as exc:
+            logger.error("Pesos neurais rejeitados: %s", exc)
+            return False
+
+    @staticmethod
+    def _price_change_to_signal(value: float) -> tuple[str, float]:
+        if value > 0.001:
+            return "buy", min(1.0, abs(value) * 100)
+        if value < -0.001:
+            return "sell", min(1.0, abs(value) * 100)
+        return "hold", 0.0
 
     async def start(self):
         """Inicia o motor de trading com resiliência a falhas de rede/API."""
@@ -91,87 +119,61 @@ class RoboTraderUnified:
                         "last_update_id": order_book.get("last_update_id"),
                     }
                     
-                    # 2. Pipeline de IA
+                    # 2. Pipeline de IA com features causais compartilhadas
                     input_dim = self.settings.TRANSFORMER_INPUT_DIM
-                    if not historical_data.empty:
-                        features = historical_data.select_dtypes(include=[np.number]).tail(30)
-                        if features.shape[1] < input_dim:
-                            input_tensor = torch.zeros(30, 1, input_dim)
+                    model_features = pd.DataFrame()
+                    try:
+                        model_features = build_feature_frame(historical_data).dropna()
+                    except (TypeError, ValueError) as exc:
+                        logger.warning("[%s] Features de modelo indisponíveis: %s", symbol, exc)
+
+                    prediction_action = "hold"
+                    confidence = 0.0
+                    prediction_action_lstm = "hold"
+                    confidence_lstm = 0.0
+                    if self.neural_models_ready and len(model_features) >= self.settings.TRANSFORMER_SEQ_LEN:
+                        sequence = model_features.tail(self.settings.TRANSFORMER_SEQ_LEN).to_numpy(dtype=np.float32)
+                        if sequence.shape[1] != input_dim:
+                            logger.error("[%s] Schema neural incompatível: %s != %s", symbol, sequence.shape[1], input_dim)
                         else:
-                            input_tensor = torch.tensor(features.values[-30:, :input_dim], dtype=torch.float32).unsqueeze(1)
-                    else:
-                        input_tensor = torch.zeros(30, 1, input_dim)
+                            input_tensor = torch.tensor(sequence, dtype=torch.float32).unsqueeze(1)
+                            input_tensor_lstm = input_tensor.transpose(0, 1)
+                            self.transformer_model.eval()
+                            self.lstm_model.eval()
+                            with torch.no_grad():
+                                prediction_output = self.transformer_model(input_tensor)
+                                prediction_output_lstm = self.lstm_model(input_tensor_lstm)
+                            predicted_price_change = float(prediction_output[-1, 0, 0].item())
+                            predicted_price_change_lstm = float(prediction_output_lstm[0, 0].item())
+                            prediction_action, confidence = self._price_change_to_signal(predicted_price_change)
+                            prediction_action_lstm, confidence_lstm = self._price_change_to_signal(predicted_price_change_lstm)
 
-                    with torch.no_grad():
-                        prediction_output = self.transformer_model(input_tensor)
-                    
-                    predicted_price_change = prediction_output[-1, 0, 0].item()
-                    if predicted_price_change > 0.001:
-                        prediction_action = "buy"
-                        confidence = min(1.0, abs(predicted_price_change) * 100)
-                    elif predicted_price_change < -0.001:
-                        prediction_action = "sell"
-                        confidence = min(1.0, abs(predicted_price_change) * 100)
-                    else:
-                        prediction_action = "hold"
-                        confidence = 0.5
+                    ensemble_action, ensemble_confidence = "hold", 0.0
+                    if self.ensemble_model.is_trained and not model_features.empty:
+                        try:
+                            ensemble_action, ensemble_confidence = self.ensemble_model.predict(model_features.tail(1))
+                        except Exception as exc:
+                            logger.warning("Erro ao prever com Ensemble: %s", exc)
 
-                    analysis = {"prediction": prediction_action, "confidence": confidence}
+                    predictions = []
+                    if self.neural_models_ready:
+                        predictions.extend([
+                            {"action": prediction_action, "confidence": confidence, "weight": 0.3},
+                            {"action": prediction_action_lstm, "confidence": confidence_lstm, "weight": 0.3},
+                        ])
+                    if self.ensemble_model.is_trained:
+                        predictions.append({"action": ensemble_action, "confidence": ensemble_confidence, "weight": 0.4})
 
-                    # 2.1. LSTM Analysis
-                    if not historical_data.empty:
-                        features_lstm = historical_data.select_dtypes(include=[np.number]).tail(30)
-                        if features_lstm.shape[1] < input_dim:
-                            input_tensor_lstm = torch.zeros(1, 30, input_dim)
-                        else:
-                            input_tensor_lstm = torch.tensor(features_lstm.values[-30:, :input_dim], dtype=torch.float32).unsqueeze(0)
+                    if not predictions:
+                        final_action, final_confidence = "hold", 0.0
                     else:
-                        input_tensor_lstm = torch.zeros(1, 30, input_dim)
+                        scores = {"buy": 0.0, "sell": 0.0, "hold": 0.0}
+                        total_weight = sum(p["weight"] for p in predictions)
+                        for prediction in predictions:
+                            scores[prediction["action"]] += prediction["confidence"] * prediction["weight"]
+                        final_action = max(scores, key=scores.get)
+                        final_confidence = scores[final_action] / total_weight
 
-                    with torch.no_grad():
-                        prediction_output_lstm = self.lstm_model(input_tensor_lstm)
-                    
-                    predicted_price_change_lstm = prediction_output_lstm[0, 0].item()
-                    if predicted_price_change_lstm > 0.001:
-                        prediction_action_lstm = "buy"
-                        confidence_lstm = min(1.0, abs(predicted_price_change_lstm) * 100)
-                    elif predicted_price_change_lstm < -0.001:
-                        prediction_action_lstm = "sell"
-                        confidence_lstm = min(1.0, abs(predicted_price_change_lstm) * 100)
-                    else:
-                        prediction_action_lstm = "hold"
-                        confidence_lstm = 0.5
-                    
-                    # 2.2. Ensemble Analysis
-                    ensemble_action, ensemble_confidence = "hold", 0.5
-                    if not historical_data.empty:
-                        # Preparar features para o ensemble (simplificado)
-                        # Em produção, isso usaria um pipeline de feature engineering robusto
-                        features_ensemble = historical_data.select_dtypes(include=[np.number]).tail(1)
-                        # Preencher NaNs para evitar erros no predict
-                        features_ensemble = features_ensemble.fillna(0)
-                        
-                        # Garantir que temos as features corretas (mock para evitar erro se não treinado)
-                        if self.ensemble_model.is_trained:
-                            try:
-                                ensemble_action, ensemble_confidence = self.ensemble_model.predict(features_ensemble)
-                            except Exception as e:
-                                logger.warning(f"Erro ao prever com Ensemble: {e}")
-                    
-                    # Lógica de combinação final (votação ponderada simplificada)
-                    predictions = [
-                        {"action": analysis["prediction"], "confidence": analysis["confidence"], "weight": 0.3},
-                        {"action": prediction_action_lstm, "confidence": confidence_lstm, "weight": 0.3},
-                        {"action": ensemble_action, "confidence": ensemble_confidence, "weight": 0.4}
-                    ]
-                    
-                    scores = {"buy": 0.0, "sell": 0.0, "hold": 0.0}
-                    for p in predictions:
-                        scores[p["action"]] += p["confidence"] * p["weight"]
-                    
-                    final_action = max(scores, key=scores.get)
-                    final_confidence = scores[final_action] / sum(p["weight"] for p in predictions)
-                    
                     # 3. Contexto de Mercado e gate de confluência
                     try:
                         processed_news = await self.news_processor.fetch_all([symbol])
@@ -220,9 +222,17 @@ class RoboTraderUnified:
                     analysis = final_prediction
 
                     volume_analysis = self.risk_ai.analyze_volume_flow(historical_data)
+                    try:
+                        exchange_balances = await self.exchange_connector.get_account_balance()
+                    except Exception as exc:
+                        logger.warning("[%s] Saldo privado indisponível para sizing: %s", symbol, exc)
+                        exchange_balances = {}
+                    account_state = self.db_manager.get_account_state(self.account_id)
+                    account_balance = self.risk_ai.quote_equivalent_balance(exchange_balances, symbol, current_price) or (account_state.balance if account_state else 0.0)
                     market_context = {
                         "historical_data": historical_data,
                         "current_order_flow": current_order_flow,
+                        "exchange_balances": exchange_balances,
                         "news_sentiment": avg_sentiment,
                         "trend_score": trend_score,
                         "news_count": len(processed_news),
@@ -232,15 +242,15 @@ class RoboTraderUnified:
                     }
                     
                     # 4. Risco e Execução
-                    if analysis["prediction"] != "hold":
+                    if analysis["prediction"] != "hold" and self.settings.AUTONOMOUS_TRADING_ENABLED:
                         order_data = {
                             "symbol": symbol,
                             "action": analysis["prediction"],
                             "confidence": analysis["confidence"],
-                            "price": current_price
+                            "price": current_price,
                         }
                         
-                        risk_validation = self.risk_ai.validate_order(order_data, self.db_manager.get_account_state(self.account_id).balance, market_context)
+                        risk_validation = self.risk_ai.validate_order(order_data, account_balance, market_context)
                         
                         if risk_validation["valid"]:
                             try:

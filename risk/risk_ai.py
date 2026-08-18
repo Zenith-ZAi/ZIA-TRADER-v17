@@ -50,6 +50,19 @@ class RiskAI:
             by_symbol[position.symbol] = by_symbol.get(position.symbol, 0.0) + notional
         return total, by_symbol
 
+    @staticmethod
+    def quote_equivalent_balance(balances: Dict[str, float], symbol: str, reference_price: float) -> float:
+        """Estima capital em moeda de cotação sem contar ativos não conversíveis."""
+        try:
+            base, quote = symbol.replace("-", "/").split("/", 1)
+            price = float(reference_price)
+            stable_assets = {quote, "USDT", "USDC", "BUSD", "FDUSD"}
+            total = sum(float(balances.get(asset, 0.0)) for asset in stable_assets)
+            total += float(balances.get(base, 0.0)) * price
+            return max(0.0, total)
+        except (AttributeError, TypeError, ValueError):
+            return 0.0
+
     def validate_order(
         self,
         order_data: Dict[str, Any],
@@ -106,6 +119,17 @@ class RiskAI:
             if available_symbol_notional <= 0:
                 return {"valid": False, "reason": "Limite de exposição por símbolo excedido."}
             return {"valid": False, "reason": "Limite de exposição total excedido."}
+
+        exchange_balances = (market_context or {}).get("exchange_balances", {})
+        if isinstance(exchange_balances, dict) and exchange_balances:
+            try:
+                base_asset, quote_asset = symbol.replace("-", "/").split("/", 1)
+                available_asset = float(exchange_balances.get(quote_asset if action == "buy" else base_asset, 0.0))
+                required_asset = proposed_notional if action == "buy" else quantity
+                if available_asset < required_asset:
+                    return {"valid": False, "reason": "Saldo disponível na exchange insuficiente para a ordem."}
+            except (TypeError, ValueError):
+                return {"valid": False, "reason": "Saldo da exchange inválido para o símbolo."}
 
         stop_loss = entry_price * (1 - stop_loss_pct) if action == "buy" else entry_price * (1 + stop_loss_pct)
         take_profit = entry_price * (1 + take_profit_pct) if action == "buy" else entry_price * (1 - take_profit_pct)

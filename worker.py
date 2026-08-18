@@ -18,10 +18,11 @@ async def run_worker() -> None:
     db_manager.create_tables()
     manager = TradingManager(settings, db_manager)
     await manager.exchange_connector.connect()
-    tasks = [
-        asyncio.create_task(manager.start_trading(), name="zia-worker-trading"),
-        asyncio.create_task(manager.start_sniper(), name="zia-worker-sniper"),
-    ]
+    tasks = [asyncio.create_task(manager.start_trading(), name="zia-worker-trading")]
+    if settings.SNIPER_ENABLED:
+        tasks.append(asyncio.create_task(manager.start_sniper(), name="zia-worker-sniper"))
+    else:
+        logger.info("Sniper desativado por configuração; apenas o motor principal foi iniciado.")
     try:
         await asyncio.gather(*tasks)
     except asyncio.CancelledError:

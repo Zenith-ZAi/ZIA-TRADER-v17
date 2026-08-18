@@ -13,7 +13,7 @@ from cli.console import (
     pause, menu, confirm, progress_bar,
 )
 
-MODEL_DIR = Path("data/models")
+MODEL_DIR = Path("models")
 
 
 def run(db: Session, current_user: AdminUser) -> None:
@@ -131,39 +131,42 @@ def _train(user: AdminUser) -> None:
     if not _check_perm(user):
         return
     header("TREINAR MODELO")
-    info("Modelos disponíveis: Transformer, LSTM, XGBoost, RandomForest, Ensemble")
-    console.print(
-        "  [cyan][1][/cyan]  Transformer\n"
-        "  [cyan][2][/cyan]  LSTM\n"
-        "  [cyan][3][/cyan]  XGBoost\n"
-        "  [cyan][4][/cyan]  RandomForest\n"
-        "  [cyan][5][/cyan]  Ensemble Completo\n"
-    )
-    from rich.prompt import Prompt
-    choice = Prompt.ask("Modelo").strip()
-    model_map = {"1": "Transformer", "2": "LSTM", "3": "XGBoost",
-                 "4": "RandomForest", "5": "Ensemble Completo"}
-    model_name = model_map.get(choice, "Ensemble Completo")
+    info("O pipeline supervisionado implementado e auditável é o Ensemble XGBoost + RandomForest.")
+    info("Transformer e LSTM só devem ser ativados após pipeline próprio de pesos e validação fora da amostra.")
     dataset_files = list(Path("data").glob("*.csv")) + list(Path("data").glob("*.parquet"))
     if not dataset_files:
         error("Treinamento cancelado: nenhum dataset OHLCV real foi encontrado em data/.")
-        info("Adicione um dataset validado e execute o treinamento fora do modo simulado.")
+        info("Adicione candles reais com open, high, low, close e volume; nenhum dado será inventado pelo menu.")
         pause()
         return
-    _run_task(f"Treinando {model_name}", [
-        f"Carregando dados históricos de {dataset_files[0].name}…",
-        "Dividindo treino/validação sem look-ahead…",
-        "Treinamento ainda requer pipeline de features configurado.",
-    ], user, steps_count=40)
+    from rich.prompt import Prompt
+    choice = Prompt.ask("Digite 5 para Ensemble Completo ou 0 para cancelar", default="5").strip()
+    if choice == "0":
+        return
+    if choice != "5":
+        warn("Esse modelo ainda não possui um treinador supervisionado integrado neste repositório.")
+        info("Use Ensemble Completo para o pipeline real ou implemente o treinador neural antes de habilitar NEURAL_MODELS_ENABLED.")
+        pause()
+        return
+    from ai.train_ensemble import train_from_ohlcv
+    source = dataset_files[0]
+    try:
+        metadata = train_from_ohlcv(source, model_dir=MODEL_DIR)
+        metrics = metadata.get("validation_metrics", {})
+        success(f"Ensemble treinado e salvo em {MODEL_DIR}/")
+        console.print(f"Validação: accuracy={metrics.get('accuracy', 0):.2%}, balanced_accuracy={metrics.get('balanced_accuracy', 0):.2%}, F1={metrics.get('f1_macro', 0):.2%}")
+    except Exception as exc:
+        error(f"Treinamento não aprovado: {exc}")
+    pause()
 
 
 def _load_model(user: AdminUser) -> None:
     if not _check_perm(user):
         return
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    models = list(MODEL_DIR.glob("*.pt")) + list(MODEL_DIR.glob("*.pkl"))
+    models = list(MODEL_DIR.glob("*.joblib")) + list(MODEL_DIR.glob("ensemble_metadata.json"))
     if not models:
-        warn("Nenhum modelo salvo encontrado em data/models/")
+        warn(f"Nenhum artefato Ensemble encontrado em {MODEL_DIR}/")
         pause()
         return
     for i, m in enumerate(models, 1):
@@ -180,21 +183,31 @@ def _load_model(user: AdminUser) -> None:
 def _save_model(user: AdminUser) -> None:
     if not _check_perm(user):
         return
-    MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    import datetime
-    filename = f"ensemble_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pkl"
-    (MODEL_DIR / filename).touch()
-    success(f"Modelo salvo em data/models/{filename}")
+    from ai.ensemble_model import EnsembleModel
+    model = EnsembleModel(str(MODEL_DIR))
+    if not model.is_trained:
+        error("Nenhum Ensemble treinado e aprovado está disponível para salvar.")
+    else:
+        success(f"Artefatos já persistidos em {MODEL_DIR}/rf_model.joblib e {MODEL_DIR}/xgb_model.joblib")
     pause()
 
 
 def _export_model(user: AdminUser) -> None:
     if not _check_perm(user):
         return
-    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    from ai.ensemble_model import EnsembleModel
+    model = EnsembleModel(str(MODEL_DIR))
+    if not model.is_trained:
+        error("Exportação cancelada: não há artefatos treinados e validados.")
+        pause()
+        return
     import datetime
-    filename = f"export_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
-    success(f"Modelo exportado para data/models/{filename}")
+    from zipfile import ZipFile
+    filename = MODEL_DIR / f"ensemble_export_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+    with ZipFile(filename, "w") as archive:
+        for artifact in (MODEL_DIR / "rf_model.joblib", MODEL_DIR / "xgb_model.joblib", MODEL_DIR / "ensemble_metadata.json"):
+            archive.write(artifact, artifact.name)
+    success(f"Modelo exportado para {filename}")
     pause()
 
 
@@ -203,10 +216,16 @@ def _import_model(user: AdminUser) -> None:
         return
     from rich.prompt import Prompt
     path = Prompt.ask("Caminho do arquivo de modelo").strip()
-    if Path(path).exists():
-        success(f"Modelo importado de '{path}'.")
-    else:
+    source = Path(path)
+    if not source.exists():
         error(f"Arquivo não encontrado: {path}")
+        pause()
+        return
+    if source.suffix.lower() != ".zip":
+        error("Importação exige um pacote .zip com os três artefatos do Ensemble.")
+        pause()
+        return
+    info("Pacote encontrado. Extraia-o em models/ e use Carregar Modelo para validar schema e classes.")
     pause()
 
 

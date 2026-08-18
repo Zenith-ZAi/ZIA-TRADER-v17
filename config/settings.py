@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     API_PORT: int = int(os.getenv("API_PORT", os.getenv("PORT", "8000")))
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     AUTO_START_ENGINES: bool = os.getenv("AUTO_START_ENGINES", "false").lower() == "true"
+    AUTONOMOUS_TRADING_ENABLED: bool = os.getenv("AUTONOMOUS_TRADING_ENABLED", "false").lower() == "true"
+    NEURAL_MODELS_ENABLED: bool = os.getenv("NEURAL_MODELS_ENABLED", "false").lower() == "true"
     DEMO_AUTH_ENABLED: bool = os.getenv("DEMO_AUTH_ENABLED", "true").lower() == "true"
     DEMO_USER_PASSWORD: str = os.getenv("DEMO_USER_PASSWORD", "password")
     DEMO_ADMIN_PASSWORD: str = os.getenv("DEMO_ADMIN_PASSWORD", "admin")
@@ -53,6 +55,8 @@ class Settings(BaseSettings):
     LSTM_NUM_LAYERS: int = int(os.getenv("LSTM_NUM_LAYERS", "2"))
     LSTM_OUTPUT_DIM: int = int(os.getenv("LSTM_OUTPUT_DIM", "1"))
     LSTM_SEQ_LEN: int = int(os.getenv("LSTM_SEQ_LEN", "30"))
+    TRANSFORMER_WEIGHTS_PATH: str = os.getenv("TRANSFORMER_WEIGHTS_PATH", "models/transformer.pt")
+    LSTM_WEIGHTS_PATH: str = os.getenv("LSTM_WEIGHTS_PATH", "models/lstm.pt")
 
     # Security Settings
     SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-only-change-me")
@@ -120,6 +124,7 @@ class Settings(BaseSettings):
     SNIPER_TRADE_QUANTITY: float = float(os.getenv("SNIPER_TRADE_QUANTITY", "0.001"))
     SNIPER_PRICE_CACHE_EXPIRE: int = int(os.getenv("SNIPER_PRICE_CACHE_EXPIRE", "60"))
     SNIPER_CYCLE_INTERVAL_SECONDS: int = int(os.getenv("SNIPER_CYCLE_INTERVAL_SECONDS", "1"))
+    SNIPER_ENABLED: bool = os.getenv("SNIPER_ENABLED", "false").lower() == "true"
 
     # Docker Compose settings (if applicable)
     DOCKER_COMPOSE_PROJECT_NAME: str = os.getenv("DOCKER_COMPOSE_PROJECT_NAME", "zia-trader")
