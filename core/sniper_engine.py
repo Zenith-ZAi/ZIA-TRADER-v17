@@ -4,13 +4,14 @@ import numpy as np
 import logging
 from typing import List, Dict, Any
 from database import MarketType, OrderStatus
-from datetime import datetime
+from datetime import datetime, timezone
 
 from config.settings import Settings
 from infra.redis_cache import RedisCache
 from execution.execution_engine import ExecutionEngine
 from ai.whale_detector import WhaleDetector
 from core.market_signals import calculate_market_signal
+from core.event_guard import EconomicEventGuard
 from execution.exchange_connector import ExchangeConnector
 from risk.risk_ai import RiskAI
 
@@ -27,6 +28,11 @@ class SniperEngine:
         self.db_manager = db_manager
         self.account_id = "default_account" # Pode ser dinâmico em um sistema real
         self.risk_ai = RiskAI(settings, db_manager)
+        self.event_guard = EconomicEventGuard(
+            settings.ECONOMIC_EVENTS_FILE,
+            settings.EVENT_BLOCK_BEFORE_SECONDS,
+            settings.EVENT_BLOCK_AFTER_SECONDS,
+        )
         self.is_running = False
         self.symbols = self.settings.SYMBOLS
         self.volatility_threshold = self.settings.SNIPER_VOLATILITY_THRESHOLD  # Ex: 2% de variação em 1 minuto
@@ -41,7 +47,11 @@ class SniperEngine:
                 for symbol in self.symbols:
                     # 1. Monitoramento de Volatilidade em Tempo Real
                     current_market_data = await self.exchange_connector.get_market_data(symbol)
-                    historical_data = await self.exchange_connector.get_historical_data(symbol, self.settings.SNIPER_TIMEFRAME)
+                    historical_data = await self.exchange_connector.get_historical_data(
+                        symbol,
+                        self.settings.SNIPER_TIMEFRAME,
+                        limit=max(250, int(self.settings.PULLBACK_EMA_PERIOD) + 30),
+                    )
                     current_price = current_market_data.get("last") if current_market_data else None
                     
                     if current_price is None:
@@ -78,17 +88,29 @@ class SniperEngine:
                                 historical_data,
                                 min_confidence=float(self.settings.MIN_CONFIDENCE_THRESHOLD),
                                 max_volatility=float(self.settings.BACKTEST_MAX_VOLATILITY),
+                                pullback_kwargs={
+                                    "ema_period": int(self.settings.PULLBACK_EMA_PERIOD),
+                                    "rsi_period": int(self.settings.PULLBACK_RSI_PERIOD),
+                                    "atr_period": int(self.settings.PULLBACK_ATR_PERIOD),
+                                    "volume_period": int(self.settings.PULLBACK_VOLUME_PERIOD),
+                                    "exhaustion_volume_ratio": float(self.settings.PULLBACK_EXHAUSTION_VOLUME_RATIO),
+                                    "trigger_volume_ratio": float(self.settings.PULLBACK_TRIGGER_VOLUME_RATIO),
+                                },
                             )
                             whale_direction_matches = (
                                 (action == "buy" and whale_activity.get("sentiment") == "bullish")
                                 or (action == "sell" and whale_activity.get("sentiment") == "bearish")
                             )
+                            pullback_ok = not self.settings.PULLBACK_STRATEGY_ENABLED or market_signal.pullback.get("action") == action
+                            event_status = self.event_guard.blocked(datetime.now(timezone.utc), symbol)
                             confirmed_event = bool(
                                 self.settings.AUTONOMOUS_TRADING_ENABLED
                                 and whale_detected
                                 and whale_direction_matches
                                 and market_signal.action == action
                                 and market_signal.confidence >= float(self.settings.MIN_CONFIDENCE_THRESHOLD)
+                                and pullback_ok
+                                and not event_status.get("blocked", False)
                             )
                             logger.info(
                                 "Sniper: evento=%s ação=%s sinal=%s confiança=%.2f confirmado=%s",

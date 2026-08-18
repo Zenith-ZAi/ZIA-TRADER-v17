@@ -159,6 +159,33 @@ class Settings(BaseSettings):
     API_RATE_LIMIT: int = int(os.getenv("API_RATE_LIMIT", "100")) # requests per interval
     API_RATE_LIMIT_INTERVAL: int = int(os.getenv("API_RATE_LIMIT_INTERVAL", "60")) # seconds
 
+    # Pullback LTA/LTB / softskill em três camadas
+    PULLBACK_STRATEGY_ENABLED: bool = os.getenv("PULLBACK_STRATEGY_ENABLED", "true").lower() == "true"
+    PULLBACK_EMA_PERIOD: int = int(os.getenv("PULLBACK_EMA_PERIOD", "200"))
+    PULLBACK_RSI_PERIOD: int = int(os.getenv("PULLBACK_RSI_PERIOD", "14"))
+    PULLBACK_ATR_PERIOD: int = int(os.getenv("PULLBACK_ATR_PERIOD", "14"))
+    PULLBACK_VOLUME_PERIOD: int = int(os.getenv("PULLBACK_VOLUME_PERIOD", "20"))
+    PULLBACK_EXHAUSTION_VOLUME_RATIO: float = float(os.getenv("PULLBACK_EXHAUSTION_VOLUME_RATIO", "0.80"))
+    PULLBACK_TRIGGER_VOLUME_RATIO: float = float(os.getenv("PULLBACK_TRIGGER_VOLUME_RATIO", "1.30"))
+    PULLBACK_STOP_ATR_MULTIPLE: float = float(os.getenv("PULLBACK_STOP_ATR_MULTIPLE", "1.5"))
+    PULLBACK_TARGET_ATR_MULTIPLE: float = float(os.getenv("PULLBACK_TARGET_ATR_MULTIPLE", "2.0"))
+    PULLBACK_BREAKEVEN_ATR_TRIGGER: float = float(os.getenv("PULLBACK_BREAKEVEN_ATR_TRIGGER", "0.5"))
+    ECONOMIC_EVENTS_FILE: str = os.getenv("ECONOMIC_EVENTS_FILE", "data/economic_events.json")
+    EVENT_BLOCK_BEFORE_SECONDS: int = int(os.getenv("EVENT_BLOCK_BEFORE_SECONDS", "60"))
+    EVENT_BLOCK_AFTER_SECONDS: int = int(os.getenv("EVENT_BLOCK_AFTER_SECONDS", "300"))
+
+    # Fricção de execução para Sandbox/backtest; não ativa produção por padrão
+    FRICTION_ENABLED: bool = os.getenv("FRICTION_ENABLED", "false").lower() == "true"
+    FRICTION_SLEEP_ENABLED: bool = os.getenv("FRICTION_SLEEP_ENABLED", "false").lower() == "true"
+    FRICTION_MIN_LATENCY_MS: float = float(os.getenv("FRICTION_MIN_LATENCY_MS", "150"))
+    FRICTION_MAX_LATENCY_MS: float = float(os.getenv("FRICTION_MAX_LATENCY_MS", "500"))
+    FRICTION_MIN_SLIPPAGE_TICKS: float = float(os.getenv("FRICTION_MIN_SLIPPAGE_TICKS", "0.5"))
+    FRICTION_MAX_SLIPPAGE_TICKS: float = float(os.getenv("FRICTION_MAX_SLIPPAGE_TICKS", "2.0"))
+    FRICTION_COMMISSION_RATE: float = float(os.getenv("FRICTION_COMMISSION_RATE", "0.0005"))
+    FRICTION_SPREAD_PRICE: float = float(os.getenv("FRICTION_SPREAD_PRICE", "0.0"))
+    FRICTION_TICK_SIZE: float = float(os.getenv("FRICTION_TICK_SIZE", "0.01"))
+    FRICTION_SEED: int = int(os.getenv("FRICTION_SEED", "42"))
+
     # Backtest and stress validation
     BACKTEST_INITIAL_CAPITAL: float = float(os.getenv("BACKTEST_INITIAL_CAPITAL", "10000"))
     BACKTEST_FEE_RATE: float = float(os.getenv("BACKTEST_FEE_RATE", "0.001"))

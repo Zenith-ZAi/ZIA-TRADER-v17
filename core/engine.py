@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 from monitoring.metrics import TRADING_PNL, TRADING_BALANCE, TRADING_OPEN_POSITIONS, TRADING_ORDER_COUNT, TRADING_EXECUTION_LATENCY, AI_PREDICTION_CONFIDENCE, SYSTEM_ERROR_COUNT, SYSTEM_LOG_COUNT
 from database import MarketType
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from config.settings import Settings
 from infra.redis_cache import RedisCache
@@ -20,6 +20,7 @@ from execution.execution_engine import ExecutionEngine
 from data.news_processor import NewsProcessor
 from execution.exchange_connector import ExchangeConnector
 from core.market_signals import calculate_market_signal, detect_reversal_signal
+from core.event_guard import EconomicEventGuard
 
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,11 @@ class RoboTraderUnified:
 
         self.risk_ai = RiskAI(self.settings, self.db_manager)
         self.redis_cache = RedisCache(self.settings.REDIS_URL)
+        self.event_guard = EconomicEventGuard(
+            self.settings.ECONOMIC_EVENTS_FILE,
+            self.settings.EVENT_BLOCK_BEFORE_SECONDS,
+            self.settings.EVENT_BLOCK_AFTER_SECONDS,
+        )
         
         # Inicialização de modelos com tratamento de erro
         try:
@@ -98,7 +104,11 @@ class RoboTraderUnified:
                 for symbol in self.symbols:
                     # 1. Busca de dados com tratamento de erro específico por símbolo
                     try:
-                        historical_data = await self.exchange_connector.get_historical_data(symbol, self.timeframe)
+                        historical_data = await self.exchange_connector.get_historical_data(
+                            symbol,
+                            self.timeframe,
+                            limit=max(250, int(self.settings.PULLBACK_EMA_PERIOD) + 30),
+                        )
                         current_market_data = await self.exchange_connector.get_market_data(symbol)
                         current_price = current_market_data.get("last") if current_market_data else None
                     except Exception as e:
@@ -192,6 +202,17 @@ class RoboTraderUnified:
                         trend_score=trend_score,
                         min_confidence=float(self.settings.MIN_CONFIDENCE_THRESHOLD),
                         max_volatility=float(self.settings.BACKTEST_MAX_VOLATILITY),
+                        pullback_kwargs={
+                            "ema_period": int(self.settings.PULLBACK_EMA_PERIOD),
+                            "rsi_period": int(self.settings.PULLBACK_RSI_PERIOD),
+                            "atr_period": int(self.settings.PULLBACK_ATR_PERIOD),
+                            "volume_period": int(self.settings.PULLBACK_VOLUME_PERIOD),
+                            "exhaustion_volume_ratio": float(self.settings.PULLBACK_EXHAUSTION_VOLUME_RATIO),
+                            "trigger_volume_ratio": float(self.settings.PULLBACK_TRIGGER_VOLUME_RATIO),
+                            "stop_atr_multiple": float(self.settings.PULLBACK_STOP_ATR_MULTIPLE),
+                            "target_atr_multiple": float(self.settings.PULLBACK_TARGET_ATR_MULTIPLE),
+                            "breakeven_atr_trigger": float(self.settings.PULLBACK_BREAKEVEN_ATR_TRIGGER),
+                        },
                     )
                     reversal_signal = detect_reversal_signal(
                         historical_data,
@@ -202,7 +223,11 @@ class RoboTraderUnified:
                     )
                     model_action = final_action
                     model_confidence = final_confidence
-                    if market_signal.action in {"buy", "sell"} and market_signal.action == model_action:
+                    pullback_action = market_signal.pullback.get("action", "hold")
+                    pullback_ok = not self.settings.PULLBACK_STRATEGY_ENABLED or pullback_action == model_action
+                    event_status = self.event_guard.blocked(datetime.now(timezone.utc), symbol)
+                    event_ok = not event_status.get("blocked", False)
+                    if market_signal.action in {"buy", "sell"} and market_signal.action == model_action and pullback_ok and event_ok:
                         final_action = model_action
                         final_confidence = min(1.0, (model_confidence + market_signal.confidence) / 2.0)
                     else:
@@ -238,6 +263,8 @@ class RoboTraderUnified:
                         "news_count": len(processed_news),
                         "market_signal": market_signal.to_dict(),
                         "reversal_signal": reversal_signal,
+                        "pullback_signal": market_signal.pullback,
+                        "event_guard": event_status,
                         "volume_analysis": volume_analysis
                     }
                     

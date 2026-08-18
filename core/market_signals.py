@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List
 
 import numpy as np
 import pandas as pd
+
+from core.pullback_strategy import calculate_pullback_signal
 
 
 @dataclass(frozen=True)
@@ -22,6 +24,7 @@ class MarketSignal:
     volatility: float
     indicators: Dict[str, float]
     reasons: List[str]
+    pullback: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -44,6 +47,7 @@ def calculate_market_signal(
     trend_score: float = 0.0,
     min_confidence: float = 0.70,
     max_volatility: float = 0.08,
+    pullback_kwargs: Dict[str, Any] | None = None,
 ) -> MarketSignal:
     """Calcula um sinal com motivos e indicadores, sem executar ordens.
 
@@ -197,6 +201,7 @@ def calculate_market_signal(
     )
     action = candidate_action if good_signal else "hold"
     status = "good" if good_signal else "rejected"
+    pullback_signal = calculate_pullback_signal(data, **(pullback_kwargs or {}))
     return MarketSignal(
         action=action,
         candidate_action=candidate_action,
@@ -207,6 +212,7 @@ def calculate_market_signal(
         volatility=float(volatility),
         indicators={"rsi": float(rsi.iloc[-1]), "atr_pct": float(volatility)},
         reasons=reasons,
+        pullback=pullback_signal.to_dict(),
     )
 
 
