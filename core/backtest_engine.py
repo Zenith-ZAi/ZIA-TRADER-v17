@@ -10,7 +10,7 @@ import pandas as pd
 
 from config.settings import Settings
 from core.market_signals import MarketSignal, MarketSignalCache
-from core.pullback_strategy import calculate_pullback_signal
+from core.pullback_strategy import PullbackSignalCache
 from core.event_guard import EconomicEventGuard
 from execution.friction import ExecutionFriction
 
@@ -127,7 +127,21 @@ class BacktestEngine:
         trades: List[Dict[str, Any]] = []
         equity_curve: List[float] = [capital]
         quality_counts = {"good": 0, "rejected": 0, "bad_data": 0}
+        blocked_event_bars = 0
+        blocked_event_candidates = 0
         signal_cache = MarketSignalCache(data)
+        pullback_cache = PullbackSignalCache(
+            data,
+            ema_period=int(self.settings.PULLBACK_EMA_PERIOD),
+            rsi_period=int(self.settings.PULLBACK_RSI_PERIOD),
+            atr_period=int(self.settings.PULLBACK_ATR_PERIOD),
+            volume_period=int(self.settings.PULLBACK_VOLUME_PERIOD),
+            exhaustion_volume_ratio=float(self.settings.PULLBACK_EXHAUSTION_VOLUME_RATIO),
+            trigger_volume_ratio=float(self.settings.PULLBACK_TRIGGER_VOLUME_RATIO),
+            stop_atr_multiple=float(self.settings.PULLBACK_STOP_ATR_MULTIPLE),
+            target_atr_multiple=float(self.settings.PULLBACK_TARGET_ATR_MULTIPLE),
+            breakeven_atr_trigger=float(self.settings.PULLBACK_BREAKEVEN_ATR_TRIGGER),
+        ) if self.settings.PULLBACK_STRATEGY_ENABLED else None
 
         for index in range(35, len(data)):
             row = data.iloc[index]
@@ -145,20 +159,28 @@ class BacktestEngine:
                 min_confidence=float(self.settings.MIN_CONFIDENCE_THRESHOLD),
                 max_volatility=float(self.settings.BACKTEST_MAX_VOLATILITY),
             )
-            if self.settings.PULLBACK_STRATEGY_ENABLED:
-                pullback = calculate_pullback_signal(
-                    data.iloc[: index + 1],
-                    ema_period=int(self.settings.PULLBACK_EMA_PERIOD),
-                    rsi_period=int(self.settings.PULLBACK_RSI_PERIOD),
-                    atr_period=int(self.settings.PULLBACK_ATR_PERIOD),
-                    volume_period=int(self.settings.PULLBACK_VOLUME_PERIOD),
-                    exhaustion_volume_ratio=float(self.settings.PULLBACK_EXHAUSTION_VOLUME_RATIO),
-                    trigger_volume_ratio=float(self.settings.PULLBACK_TRIGGER_VOLUME_RATIO),
-                    stop_atr_multiple=float(self.settings.PULLBACK_STOP_ATR_MULTIPLE),
-                    target_atr_multiple=float(self.settings.PULLBACK_TARGET_ATR_MULTIPLE),
-                    breakeven_atr_trigger=float(self.settings.PULLBACK_BREAKEVEN_ATR_TRIGGER),
-                )
-                if signal.action in {"buy", "sell"} and pullback.action != signal.action:
+            raw_signal_action = signal.action
+            event_status = self.event_guard.blocked(data.index[index], symbol)
+            if event_status.get("blocked"):
+                blocked_event_bars += 1
+                blocked_event_candidates += int(raw_signal_action in {"buy", "sell"})
+            if pullback_cache is not None:
+                pullback = pullback_cache.at(index)
+                if pullback.valid:
+                    pullback_score = pullback.confidence if pullback.action == "buy" else -pullback.confidence
+                    signal = MarketSignal(
+                        action=pullback.action,
+                        candidate_action=pullback.candidate_action,
+                        confidence=pullback.confidence,
+                        score=pullback_score,
+                        status="good",
+                        regime=pullback.macro_trend,
+                        volatility=float(pullback.atr / max(pullback.entry_price, 1e-9)),
+                        indicators={"rsi": 0.0, "atr_pct": float(pullback.atr / max(pullback.entry_price, 1e-9))},
+                        reasons=pullback.reasons,
+                        pullback=pullback.to_dict(),
+                    )
+                elif signal.action in {"buy", "sell"}:
                     signal = MarketSignal(
                         action="hold",
                         candidate_action=signal.candidate_action,
@@ -171,7 +193,9 @@ class BacktestEngine:
                         reasons=signal.reasons + ["pullback LTA/LTB não confirmou a entrada"],
                         pullback=pullback.to_dict(),
                     )
-            event_status = self.event_guard.blocked(data.index[index], symbol)
+            if event_status.get("blocked"):
+                if raw_signal_action not in {"buy", "sell"} and signal.action in {"buy", "sell"}:
+                    blocked_event_candidates += 1
             if event_status.get("blocked") and signal.action in {"buy", "sell"}:
                 signal = MarketSignal(
                     action="hold",
@@ -296,6 +320,8 @@ class BacktestEngine:
             "signal_quality": quality_counts,
             "friction_enabled": bool(self.settings.FRICTION_ENABLED),
             "total_fees": float(sum(trade.get("fees", 0.0) for trade in trades)),
+            "blocked_event_bars": blocked_event_bars,
+            "blocked_event_candidates": blocked_event_candidates,
             "trades": trades,
         }
         logger.info("Backtest para %s concluído: PNL=%.2f, trades=%s", symbol, result["total_pnl"], len(trades))

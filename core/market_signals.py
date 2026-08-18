@@ -268,23 +268,22 @@ class MarketSignalCache:
         if position < 0 or position >= len(self.close) or len(self.close) < 35:
             return MarketSignal("hold", "hold", 0.0, 0.0, "bad_data", "unknown", 0.0, {}, ["histórico insuficiente: são necessárias pelo menos 35 barras"])
 
-        close = self.close.iloc[: position + 1]
-        returns = self.returns[self.returns.index <= close.index[-1]]
-        if len(returns) < 30 or close.iloc[-1] <= 0:
+        current_close = float(self.close.iloc[position])
+        if position < 30 or current_close <= 0:
             return MarketSignal("hold", "hold", 0.0, 0.0, "bad_data", "unknown", 0.0, {}, ["retornos insuficientes para medir volatilidade"])
 
-        volatility_value = float(self.volatility.loc[close.index[-1]]) if close.index[-1] in self.volatility.index else 0.0
+        volatility_value = float(self.volatility.iloc[position]) if position < len(self.volatility) else 0.0
         volatility = max(0.0, volatility_value if np.isfinite(volatility_value) else 0.0)
         trend_component = _clamp((self.ema_fast.iloc[position] / self.ema_slow.iloc[position] - 1.0) * 40)
-        momentum_component = _clamp(float(returns.tail(5).sum()) * 20)
+        momentum_component = _clamp(float(self.returns.iloc[max(0, position - 5):position].sum()) * 20)
         rsi_component = _clamp((float(self.rsi.iloc[position]) - 50.0) / 20.0)
-        macd_scale = max(float(close.iloc[-1]) * max(volatility, 0.001), 1e-9)
+        macd_scale = max(current_close * max(volatility, 0.001), 1e-9)
         macd_component = _clamp(float((self.macd.iloc[position] - self.macd_signal.iloc[position]) / macd_scale) * 3)
 
         volume_component = 0.0
-        if self.volume is not None and len(self.volume) >= 20 and close.index[-1] in self.volume.index:
-            volume_until_now = self.volume[self.volume.index <= close.index[-1]]
-            average_volume = float(volume_until_now.tail(20).mean())
+        if self.volume is not None and position < len(self.volume) and position >= 19:
+            volume_until_now = self.volume.iloc[max(0, position + 1 - 20):position + 1]
+            average_volume = float(volume_until_now.mean())
             if average_volume > 0:
                 volume_ratio = float(volume_until_now.iloc[-1] / average_volume)
                 volume_component = _clamp(np.sign(momentum_component) * (volume_ratio - 1.0))

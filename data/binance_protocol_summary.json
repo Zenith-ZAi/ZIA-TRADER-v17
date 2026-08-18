@@ -1,0 +1,134 @@
+{
+  "rows": 43816,
+  "dataset": {
+    "first_timestamp": "2020-01-01T00:00:00+00:00",
+    "last_timestamp": "2024-12-31T23:00:00+00:00",
+    "duplicates": 0,
+    "missing_values": 0,
+    "ohlcv_valid": true,
+    "max_observed_gap_pct": 0.0018973905993231455
+  },
+  "full": {
+    "total_pnl": 95.23620694437523,
+    "return_pct": 0.009523620694437573,
+    "sharpe_ratio": 0.09280720892853807,
+    "max_drawdown": -0.003376623557494519,
+    "trades_executed": 8,
+    "win_rate": 0.875,
+    "profit_factor": 96.09369112245425,
+    "total_fees": 8.0158938427424,
+    "blocked_event_bars": 10,
+    "blocked_event_candidates": 2
+  },
+  "regimes": {
+    "range_baixa_volatilidade": {
+      "status": "ok",
+      "total_pnl": 6.867211279270123,
+      "sharpe_ratio": 0.07293843422665698,
+      "max_drawdown": -0.0007350404189058046,
+      "trades_executed": 2,
+      "win_rate": 0.5,
+      "profit_factor": 7.861026225533886
+    },
+    "turbulento_alta_volatilidade": {
+      "status": "ok",
+      "total_pnl": -9.633858986002451,
+      "sharpe_ratio": -0.032659289590794,
+      "max_drawdown": -0.002191317328505117,
+      "trades_executed": 3,
+      "win_rate": 0.3333333333333333,
+      "profit_factor": 0.5602594893877245
+    }
+  },
+  "gap": {
+    "injections": [
+      {
+        "entry_index": "2020-06-13 19:00:00+00:00",
+        "gap_index": "2020-06-13T20:00:00+00:00",
+        "action": "sell",
+        "gap_pct": 0.020000000000000018
+      },
+      {
+        "entry_index": "2020-07-11 09:00:00+00:00",
+        "gap_index": "2020-07-11T10:00:00+00:00",
+        "action": "sell",
+        "gap_pct": 0.020000000000000018
+      },
+      {
+        "entry_index": "2021-09-12 20:00:00+00:00",
+        "gap_index": "2021-09-12T21:00:00+00:00",
+        "action": "sell",
+        "gap_pct": 0.020000000000000018
+      },
+      {
+        "entry_index": "2022-04-23 23:00:00+00:00",
+        "gap_index": "2022-04-24T00:00:00+00:00",
+        "action": "sell",
+        "gap_pct": 0.020000000000000018
+      },
+      {
+        "entry_index": "2023-04-26 19:00:00+00:00",
+        "gap_index": "2023-04-26T20:00:00+00:00",
+        "action": "sell",
+        "gap_pct": 0.020000000000000018
+      }
+    ],
+    "metrics": {
+      "total_pnl": 58.07564850134986,
+      "sharpe_ratio": 0.05450348761448326,
+      "max_drawdown": -0.003376623557494591,
+      "trades_executed": 8,
+      "win_rate": 0.625,
+      "profit_factor": 3.661777857636828
+    }
+  },
+  "spoofing": {
+    "requested": 5,
+    "scenarios": [
+      {
+        "index": 253,
+        "candidate": "sell",
+        "result": "hold",
+        "filtered": true
+      },
+      {
+        "index": 254,
+        "candidate": "sell",
+        "result": "hold",
+        "filtered": true
+      },
+      {
+        "index": 255,
+        "candidate": "sell",
+        "result": "hold",
+        "filtered": true
+      },
+      {
+        "index": 263,
+        "candidate": "sell",
+        "result": "hold",
+        "filtered": true
+      },
+      {
+        "index": 264,
+        "candidate": "sell",
+        "result": "hold",
+        "filtered": true
+      }
+    ],
+    "pass": true
+  },
+  "tick_protocol": {
+    "status": "not_tested",
+    "reason": "A API pública usada fornece klines; o anexo exige replay tick-a-tick e 2,3 milhões de ticks, que não foram inventados."
+  },
+  "approval": {
+    "net_profit_positive": true,
+    "max_drawdown_under_15pct_full": true,
+    "max_drawdown_under_15pct_gap": true,
+    "sharpe_over_1_full": false,
+    "spoofing_filtered": true,
+    "dataset_integrity": true
+  },
+  "elapsed_seconds": 36.57957323899973
+}
