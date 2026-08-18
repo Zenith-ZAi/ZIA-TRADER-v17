@@ -85,7 +85,10 @@ Defined in `.env` (loaded automatically by pydantic-settings):
 | `AUTH_MODE` | `demo` | Use `env` in production |
 | `AUTH_USERNAME` / `AUTH_PASSWORD` | — | Required when `AUTH_MODE=env` |
 | `SECRET_KEY` | `dev-only-change-me` | **Replace with a long random value outside development** |
-| `BINANCE_API_KEY` / `BINANCE_SECRET_KEY` | — | Needed for live trading integrations |
+| `BINANCE_MODE` | `simulated` | Use `testnet` or `demo` only with sandbox credentials |
+| `BINANCE_BASE_URL` | `https://testnet.binance.vision/api` | Must remain a documented sandbox host |
+| `BINANCE_API_KEY` / `BINANCE_SECRET_KEY` | — | Testnet/Demo credentials; never production keys |
+| `BINANCE_TIMEOUT_SECONDS` / `BINANCE_RECV_WINDOW_MS` | `10` / `5000` | Network timeout and signed-request window |
 | `GDELT_BASE_URL` | Official GDELT DOC API | Free news fallback |
 | `COINGECKO_BASE_URL` / `COINGECKO_API_KEY` | Public API / optional Pro key | Trending assets with cache |
 | `ALPHA_VANTAGE_API_KEY` | — | Optional market news and sentiment |
@@ -97,7 +100,9 @@ Defined in `.env` (loaded automatically by pydantic-settings):
 
 The final validation command is `python -m pytest -q`; the current suite covers API authentication, database CRUD, market signal rejection, deterministic backtest, risk limits, provider fallback, and idempotent news/trend persistence. The production composition separates `main.py` (HTTP API) from `worker.py` (trading engines), uses PostgreSQL and Redis, and requires `SECRET_KEY` and `POSTGRES_PASSWORD` to be injected by the deployment environment. The GitHub Actions workflow compiles the code, runs the tests, and builds the container; it does not publish or activate live trading automatically.
 
-The repository launcher is `start.sh`. Use `ZIA_MODE=test ./start.sh` for the offline regression suite, `ZIA_MODE=api ./start.sh` for the HTTP service, or `ZIA_MODE=worker ./start.sh` for the persistent worker. The launcher intentionally contains no exchange credentials; inject them through the server secret manager or a local ignored `.env` file. The current exchange adapter remains simulation-only until a sandbox adapter is implemented.
+The repository launcher is `start.sh`. Use `ZIA_MODE=test ./start.sh` for the offline regression suite, `ZIA_MODE=api ./start.sh` for the HTTP service, or `ZIA_MODE=worker ./start.sh` for the persistent worker. The launcher intentionally contains no exchange credentials; inject them through the server secret manager or a local ignored `.env` file.
+
+The exchange facade supports `BINANCE_MODE=simulated` (default), `BINANCE_MODE=testnet` with `https://testnet.binance.vision/api`, and `BINANCE_MODE=demo` with `https://demo-api.binance.com/api`. The real adapter rejects unknown or production hosts, signs HMAC requests, loads `exchangeInfo`, applies symbol filters and fetches account/market data. Keep order calls disabled until the sandbox smoke test passes; this repository does not provide a production adapter.
 
 ## Admin Console
 

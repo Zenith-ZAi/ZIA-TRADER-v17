@@ -46,3 +46,11 @@
 - O índice oficial lista `https://docs.benzinga.com/api-reference/news-api/get-news-items.md` como endpoint de notícias estruturadas e recomenda limitar por tickers/data/canais ou usar `updatedSince` para deltas.
 - O mesmo índice lista `https://docs.benzinga.com/api-reference/ticker-trends-api/get-ticker-trend-data.md` e `get-ticker-trend-list-data.md` para tendências de tickers.
 - Fonte: https://docs.benzinga.com/llms.txt
+
+## Binance Spot Testnet/Demo — documentação oficial consultada
+
+A documentação oficial atual confirma que o Spot Testnet usa `https://testnet.binance.vision/api`, disponibiliza apenas endpoints `/api` e recomenda consultar `exchangeInfo` para filtros e limites atuais. Ela também confirma que o Demo Mode usa `https://demo-api.binance.com/api` e que Testnet e Demo são ambientes distintos: Demo Mode possui mercado mais realista, enquanto o Testnet tem saldo virtual e pode ser resetado periodicamente. Fontes: https://developers.binance.com/en/docs/products/spot/testnet/general-info ; https://developers.binance.com/en/docs/products/spot/demo-mode/general-info ; https://developers.binance.com/en/docs/products/spot/testnet/rest-api
+
+## Smoke test Binance Spot Testnet executado
+
+O endpoint público foi alcançado no host `testnet.binance.vision` e o adapter carregou os endpoints públicos antes de consultar a conta. A primeira chamada privada retornou `-2015 Invalid API-key, IP, or permissions for action`; nenhuma ordem foi enviada (`orders_sent=0`). O adapter passou a classificar esse caso como `BinanceAuthenticationError` e orientar a confirmação de chave criada no Spot Testnet, permissão `USER_DATA`, eventual `TRADE` somente para testes de ordem e whitelist de IP.

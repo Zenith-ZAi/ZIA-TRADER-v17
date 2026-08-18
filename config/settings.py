@@ -92,8 +92,12 @@ class Settings(BaseSettings):
     BENZINGA_API_KEY: Optional[str] = os.getenv("BENZINGA_API_KEY")
 
     # Exchange Connector Settings
+    BINANCE_MODE: str = os.getenv("BINANCE_MODE", "simulated")
+    BINANCE_BASE_URL: str = os.getenv("BINANCE_BASE_URL", "https://testnet.binance.vision/api")
     BINANCE_API_KEY: Optional[str] = os.getenv("BINANCE_API_KEY")
     BINANCE_SECRET_KEY: Optional[str] = os.getenv("BINANCE_SECRET_KEY")
+    BINANCE_TIMEOUT_SECONDS: float = float(os.getenv("BINANCE_TIMEOUT_SECONDS", "10"))
+    BINANCE_RECV_WINDOW_MS: int = int(os.getenv("BINANCE_RECV_WINDOW_MS", "5000"))
     POLYGON_API_KEY: Optional[str] = os.getenv("POLYGON_API_KEY")
 
     # Whale Detector Settings
