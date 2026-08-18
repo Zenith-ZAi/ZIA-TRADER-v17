@@ -93,11 +93,16 @@ class Settings(BaseSettings):
 
     # Exchange Connector Settings
     BINANCE_MODE: str = os.getenv("BINANCE_MODE", "simulated")
-    BINANCE_BASE_URL: str = os.getenv("BINANCE_BASE_URL", "https://testnet.binance.vision/api")
+    BINANCE_BASE_URL_DEMO: str = os.getenv("BINANCE_BASE_URL_DEMO", "https://demo-api.binance.com/api")
+    BINANCE_BASE_URL_TESTNET: str = os.getenv("BINANCE_BASE_URL_TESTNET", "https://testnet.binance.vision/api")
+    BINANCE_BASE_URL: str = os.getenv(
+        "BINANCE_BASE_URL"
+    ) or (BINANCE_BASE_URL_DEMO if BINANCE_MODE.lower() == "demo" else BINANCE_BASE_URL_TESTNET)
     BINANCE_API_KEY: Optional[str] = os.getenv("BINANCE_API_KEY")
     BINANCE_SECRET_KEY: Optional[str] = os.getenv("BINANCE_SECRET_KEY")
     BINANCE_TIMEOUT_SECONDS: float = float(os.getenv("BINANCE_TIMEOUT_SECONDS", "10"))
     BINANCE_RECV_WINDOW_MS: int = int(os.getenv("BINANCE_RECV_WINDOW_MS", "5000"))
+    BINANCE_PRELOAD_EXCHANGE_INFO: bool = os.getenv("BINANCE_PRELOAD_EXCHANGE_INFO", "false").lower() in {"1", "true", "yes"}
     POLYGON_API_KEY: Optional[str] = os.getenv("POLYGON_API_KEY")
 
     # Whale Detector Settings

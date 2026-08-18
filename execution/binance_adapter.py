@@ -142,8 +142,9 @@ class BinanceSpotAdapter:
     async def connect(self) -> None:
         server_time = await self._request("GET", "/v3/time")
         self.server_time_offset_ms = int(server_time["serverTime"]) - int(time.time() * 1000)
-        self.exchange_info = await self._request("GET", "/v3/exchangeInfo")
-        self._index_filters(self.exchange_info)
+        if self.settings.BINANCE_PRELOAD_EXCHANGE_INFO:
+            self.exchange_info = await self._request("GET", "/v3/exchangeInfo")
+            self._index_filters(self.exchange_info)
         self.is_connected = True
         logger.info("Binance Spot conectado em modo %s: %s", self.settings.BINANCE_MODE, self.base_url)
 

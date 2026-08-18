@@ -86,9 +86,11 @@ Defined in `.env` (loaded automatically by pydantic-settings):
 | `AUTH_USERNAME` / `AUTH_PASSWORD` | — | Required when `AUTH_MODE=env` |
 | `SECRET_KEY` | `dev-only-change-me` | **Replace with a long random value outside development** |
 | `BINANCE_MODE` | `simulated` | Use `testnet` or `demo` only with sandbox credentials |
-| `BINANCE_BASE_URL` | `https://testnet.binance.vision/api` | Must remain a documented sandbox host |
+| `BINANCE_BASE_URL` | Optional explicit override | Otherwise selected from the Demo/Testnet URL alias |
+| `BINANCE_BASE_URL_DEMO` / `BINANCE_BASE_URL_TESTNET` | Official sandbox URLs | Selected from `BINANCE_MODE` |
 | `BINANCE_API_KEY` / `BINANCE_SECRET_KEY` | — | Testnet/Demo credentials; never production keys |
 | `BINANCE_TIMEOUT_SECONDS` / `BINANCE_RECV_WINDOW_MS` | `10` / `5000` | Network timeout and signed-request window |
+| `BINANCE_PRELOAD_EXCHANGE_INFO` | `false` | Set `true` only when all symbol filters must be loaded at startup |
 | `GDELT_BASE_URL` | Official GDELT DOC API | Free news fallback |
 | `COINGECKO_BASE_URL` / `COINGECKO_API_KEY` | Public API / optional Pro key | Trending assets with cache |
 | `ALPHA_VANTAGE_API_KEY` | — | Optional market news and sentiment |

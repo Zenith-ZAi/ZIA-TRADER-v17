@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 from config.settings import Settings
-from core.market_signals import calculate_market_signal
+from core.market_signals import MarketSignalCache
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +97,7 @@ class BacktestEngine:
         trades: List[Dict[str, Any]] = []
         equity_curve: List[float] = [capital]
         quality_counts = {"good": 0, "rejected": 0, "bad_data": 0}
+        signal_cache = MarketSignalCache(data)
 
         for index in range(35, len(data)):
             row = data.iloc[index]
@@ -108,9 +109,8 @@ class BacktestEngine:
                 equity_curve.append(capital)
                 continue
 
-            window = data.iloc[:index]
-            signal = calculate_market_signal(
-                window,
+            signal = signal_cache.at(
+                index,
                 min_confidence=float(self.settings.MIN_CONFIDENCE_THRESHOLD),
                 max_volatility=float(self.settings.BACKTEST_MAX_VOLATILITY),
             )
