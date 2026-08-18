@@ -17,7 +17,7 @@ from risk.risk_ai import RiskAI
 from execution.execution_engine import ExecutionEngine
 from data.news_processor import NewsProcessor
 from execution.exchange_connector import ExchangeConnector
-from core.market_signals import calculate_market_signal
+from core.market_signals import calculate_market_signal, detect_reversal_signal
 
 
 logger = logging.getLogger(__name__)
@@ -82,11 +82,13 @@ class RoboTraderUnified:
                         SYSTEM_LOG_COUNT.labels(level='WARNING').inc()
                         continue
 
+                    order_book = await self.exchange_connector.get_order_book(symbol, limit=20)
                     current_order_flow = {
                         "symbol": symbol,
                         "total_volume": current_market_data.get("volume", 0),
-                        "buys": [],
-                        "sells": []
+                        "buys": order_book.get("bids", []),
+                        "sells": order_book.get("asks", []),
+                        "last_update_id": order_book.get("last_update_id"),
                     }
                     
                     # 2. Pipeline de IA
@@ -189,6 +191,13 @@ class RoboTraderUnified:
                         min_confidence=float(self.settings.MIN_CONFIDENCE_THRESHOLD),
                         max_volatility=float(self.settings.BACKTEST_MAX_VOLATILITY),
                     )
+                    reversal_signal = detect_reversal_signal(
+                        historical_data,
+                        news_sentiment=avg_sentiment,
+                        trend_score=trend_score,
+                        min_confidence=float(self.settings.MIN_CONFIDENCE_THRESHOLD),
+                        max_volatility=float(self.settings.BACKTEST_MAX_VOLATILITY),
+                    )
                     model_action = final_action
                     model_confidence = final_confidence
                     if market_signal.action in {"buy", "sell"} and market_signal.action == model_action:
@@ -218,6 +227,7 @@ class RoboTraderUnified:
                         "trend_score": trend_score,
                         "news_count": len(processed_news),
                         "market_signal": market_signal.to_dict(),
+                        "reversal_signal": reversal_signal,
                         "volume_analysis": volume_analysis
                     }
                     

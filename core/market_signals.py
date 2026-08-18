@@ -336,3 +336,34 @@ class MarketSignalCache:
             indicators={"rsi": float(self.rsi.iloc[position]), "atr_pct": float(volatility)},
             reasons=reasons,
         )
+
+
+def detect_reversal_signal(
+    data: pd.DataFrame,
+    news_sentiment: float = 0.0,
+    trend_score: float = 0.0,
+    min_confidence: float = 0.70,
+    max_volatility: float = 0.08,
+    min_score_delta: float = 0.20,
+) -> Dict[str, Any]:
+    """Detecta mudança de direção entre duas janelas observáveis.
+
+    A reversão é apenas um evento de contexto. Ela não autoriza uma ordem por
+    si só; a ação final continua dependendo da confiança, risco e confluência.
+    """
+    if not isinstance(data, pd.DataFrame) or len(data) < 40:
+        return {"detected": False, "from": "hold", "to": "hold", "score_delta": 0.0, "reason": "histórico insuficiente"}
+    previous = calculate_market_signal(data.iloc[:-1], news_sentiment, trend_score, min_confidence, max_volatility)
+    current = calculate_market_signal(data, news_sentiment, trend_score, min_confidence, max_volatility)
+    delta = float(current.score - previous.score)
+    changed_direction = previous.candidate_action in {"buy", "sell"} and current.candidate_action in {"buy", "sell"} and previous.candidate_action != current.candidate_action
+    detected = bool(changed_direction and abs(delta) >= min_score_delta)
+    return {
+        "detected": detected,
+        "from": previous.candidate_action,
+        "to": current.candidate_action,
+        "score_delta": delta,
+        "previous_confidence": float(previous.confidence),
+        "current_confidence": float(current.confidence),
+        "reason": "mudança direcional com delta mínimo" if detected else "sem reversão confirmada",
+    }

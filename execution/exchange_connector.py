@@ -51,6 +51,9 @@ class SimulatedExchangeAdapter:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
+    async def get_order_book(self, symbol: str, limit: int = 20) -> Dict[str, Any]:
+        return {"symbol": symbol, "bids": [], "asks": [], "limit": limit}
+
     async def place_order(self, symbol: str, action: str, order_type: str, quantity: float, price: Optional[float] = None) -> Dict[str, Any]:
         await asyncio.sleep(0.01)
         order_id = f"sim_{datetime.now(timezone.utc).timestamp()}_{random.randint(0, 9999)}"
@@ -109,6 +112,18 @@ class ExchangeConnector:
 
     async def get_market_data(self, symbol: str) -> Dict[str, Any]:
         return await self._adapter.get_market_data(symbol)
+
+    async def get_order_book(self, symbol: str, limit: int = 20) -> Dict[str, Any]:
+        return await self._adapter.get_order_book(symbol, limit)
+
+    async def normalize_order_values(self, symbol: str, quantity: float, price: Optional[float] = None) -> Dict[str, float]:
+        normalizer = getattr(self._adapter, "normalize_order_values", None)
+        if normalizer is None:
+            result = {"quantity": float(quantity)}
+            if price is not None:
+                result["price"] = float(price)
+            return result
+        return await normalizer(symbol, quantity, price)
 
     async def place_order(self, symbol: str, action: str, order_type: str, quantity: float, price: Optional[float] = None) -> Dict[str, Any]:
         return await self._adapter.place_order(symbol, action, order_type, quantity, price)

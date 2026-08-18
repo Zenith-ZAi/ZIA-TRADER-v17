@@ -221,6 +221,21 @@ class BinanceSpotAdapter:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
+    async def get_order_book(self, symbol: str, limit: int = 20) -> Dict[str, Any]:
+        payload = await self._request(
+            "GET",
+            "/v3/depth",
+            {"symbol": self.symbol_code(symbol), "limit": min(max(int(limit), 5), 1000)},
+        )
+
+        def levels(values):
+            return [
+                {"price": float(price), "quantity": float(quantity), "notional": float(price) * float(quantity)}
+                for price, quantity in values
+            ]
+
+        return {"symbol": symbol, "bids": levels(payload.get("bids", [])), "asks": levels(payload.get("asks", [])), "last_update_id": payload.get("lastUpdateId")}
+
     async def place_order(self, symbol: str, action: str, order_type: str, quantity: float, price: Optional[float] = None) -> Dict[str, Any]:
         code = self.symbol_code(symbol)
         side = action.upper()

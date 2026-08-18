@@ -53,14 +53,14 @@ class SniperEngine:
                     if previous_price:
                         price_change = abs(current_price - float(previous_price)) / float(previous_price)
                         
-                        # 2.1. Detecção de Atividade de Baleia
-                        # Para o WhaleDetector, precisamos de um fluxo de ordens mais detalhado
-                        # Isso exigiria uma integração de websocket ou API de Level 2/3, aqui simulamos com dados de mercado
+                        # 2.1. Detecção de atividade concentrada no livro de ordens
+                        order_book = await self.exchange_connector.get_order_book(symbol, limit=20)
                         current_order_flow = {
                             "symbol": symbol,
                             "total_volume": current_market_data.get("volume", 0),
-                            "buys": [], # Em um cenário real, preencheríamos com ordens de compra recentes
-                            "sells": [] # Em um cenário real, preencheríamos com ordens de venda recentes
+                            "buys": order_book.get("bids", []),
+                            "sells": order_book.get("asks", []),
+                            "last_update_id": order_book.get("last_update_id"),
                         }
                         whale_activity = self.whale_detector.detect_whale_activity(historical_data, current_order_flow)
                         if whale_activity["detected"] and whale_activity["magnitude"] > self.settings.WHALE_ACTIVITY_SNIPER_THRESHOLD:
