@@ -54,3 +54,7 @@ A documentação oficial atual confirma que o Spot Testnet usa `https://testnet.
 ## Smoke test Binance Spot Testnet executado
 
 O endpoint público foi alcançado no host `testnet.binance.vision` e o adapter carregou os endpoints públicos antes de consultar a conta. A primeira chamada privada retornou `-2015 Invalid API-key, IP, or permissions for action`; nenhuma ordem foi enviada (`orders_sent=0`). O adapter passou a classificar esse caso como `BinanceAuthenticationError` e orientar a confirmação de chave criada no Spot Testnet, permissão `USER_DATA`, eventual `TRADE` somente para testes de ordem e whitelist de IP.
+
+## Binance Demo usado pelo Testnet.zip
+
+A documentação oficial atual separa o Spot Demo Mode do Spot Testnet. O Demo Mode usa `https://demo-api.binance.com/api`, com streams `demo-*`, enquanto o Spot Testnet usa `https://testnet.binance.vision/api`. O pacote enviado foi auditado sem execução e apontou para o host `demo-api.binance.com`, portanto a validação deve usar `BINANCE_MODE=demo`, não `testnet`. Fontes: https://developers.binance.com/en/docs/products/spot/demo-mode/general-info ; https://developers.binance.com/en/docs/products/spot/testnet/rest-api
