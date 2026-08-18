@@ -97,6 +97,8 @@ Defined in `.env` (loaded automatically by pydantic-settings):
 
 The final validation command is `python -m pytest -q`; the current suite covers API authentication, database CRUD, market signal rejection, deterministic backtest, risk limits, provider fallback, and idempotent news/trend persistence. The production composition separates `main.py` (HTTP API) from `worker.py` (trading engines), uses PostgreSQL and Redis, and requires `SECRET_KEY` and `POSTGRES_PASSWORD` to be injected by the deployment environment. The GitHub Actions workflow compiles the code, runs the tests, and builds the container; it does not publish or activate live trading automatically.
 
+The repository launcher is `start.sh`. Use `ZIA_MODE=test ./start.sh` for the offline regression suite, `ZIA_MODE=api ./start.sh` for the HTTP service, or `ZIA_MODE=worker ./start.sh` for the persistent worker. The launcher intentionally contains no exchange credentials; inject them through the server secret manager or a local ignored `.env` file. The current exchange adapter remains simulation-only until a sandbox adapter is implemented.
+
 ## Admin Console
 
 A full CLI terminal for managing the system without editing files manually.
