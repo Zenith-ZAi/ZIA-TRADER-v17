@@ -92,14 +92,18 @@ class Settings(BaseSettings):
     BENZINGA_API_KEY: Optional[str] = os.getenv("BENZINGA_API_KEY")
 
     # Exchange Connector Settings
-    BINANCE_MODE: str = os.getenv("BINANCE_MODE", "simulated")
-    BINANCE_BASE_URL_DEMO: str = os.getenv("BINANCE_BASE_URL_DEMO", "https://demo-api.binance.com/api")
-    BINANCE_BASE_URL_TESTNET: str = os.getenv("BINANCE_BASE_URL_TESTNET", "https://testnet.binance.vision/api")
+    BINANCE_MODE: str = os.getenv("BINANCE_MODE") or ("demo" if os.getenv("ENVIRONMENT", "").lower() == "demo" else "simulated")
+    BINANCE_DEMO_BASE_URL: Optional[str] = os.getenv("BINANCE_DEMO_BASE_URL")
+    BINANCE_SPOT_BASE_URL: Optional[str] = os.getenv("BINANCE_SPOT_BASE_URL")
+    BINANCE_BASE_URL_DEMO: str = os.getenv("BINANCE_BASE_URL_DEMO") or BINANCE_DEMO_BASE_URL or "https://demo-api.binance.com/api"
+    BINANCE_BASE_URL_TESTNET: str = os.getenv("BINANCE_BASE_URL_TESTNET") or BINANCE_SPOT_BASE_URL or "https://testnet.binance.vision/api"
     BINANCE_BASE_URL: str = os.getenv(
         "BINANCE_BASE_URL"
     ) or (BINANCE_BASE_URL_DEMO if BINANCE_MODE.lower() == "demo" else BINANCE_BASE_URL_TESTNET)
-    BINANCE_API_KEY: Optional[str] = os.getenv("BINANCE_API_KEY")
-    BINANCE_SECRET_KEY: Optional[str] = os.getenv("BINANCE_SECRET_KEY")
+    BINANCE_DEMO_API_KEY: Optional[str] = os.getenv("BINANCE_DEMO_API_KEY")
+    BINANCE_DEMO_SECRET_KEY: Optional[str] = os.getenv("BINANCE_DEMO_SECRET_KEY")
+    BINANCE_API_KEY: Optional[str] = os.getenv("BINANCE_API_KEY") or BINANCE_DEMO_API_KEY
+    BINANCE_SECRET_KEY: Optional[str] = os.getenv("BINANCE_SECRET_KEY") or BINANCE_DEMO_SECRET_KEY
     BINANCE_TIMEOUT_SECONDS: float = float(os.getenv("BINANCE_TIMEOUT_SECONDS", "10"))
     BINANCE_RECV_WINDOW_MS: int = int(os.getenv("BINANCE_RECV_WINDOW_MS", "5000"))
     BINANCE_PRELOAD_EXCHANGE_INFO: bool = os.getenv("BINANCE_PRELOAD_EXCHANGE_INFO", "false").lower() in {"1", "true", "yes"}
