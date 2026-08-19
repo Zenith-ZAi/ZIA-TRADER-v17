@@ -25,7 +25,13 @@ class TradingManager:
         
         self.redis_cache = RedisCache(settings.REDIS_URL)
         self.whale_detector = WhaleDetector(settings, db_manager)
-        self.execution_engine = ExecutionEngine(settings, self.exchange_connector, self.redis_cache)
+        self.execution_engine = ExecutionEngine(
+            settings,
+            self.exchange_connector,
+            self.redis_cache,
+            db_manager=db_manager,
+            account_id="default_account",
+        )
 
         self.trading_engine = RoboTraderUnified(settings, self.news_processor, self.exchange_connector, db_manager)
         self.sniper_engine = SniperEngine(settings, self.exchange_connector, self.execution_engine, self.whale_detector, self.redis_cache, db_manager)

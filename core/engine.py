@@ -69,7 +69,13 @@ class RoboTraderUnified:
             self.lstm_model = PriceLSTMModel(input_dim, lstm_hidden_size, lstm_num_layers, lstm_output_size)
             self.neural_models_ready = self._load_neural_weights()
             self.ensemble_model = EnsembleModel(self.settings.ENSEMBLE_MODEL_DIR)
-            self.execution_engine = ExecutionEngine(self.settings, self.exchange_connector, self.redis_cache)
+            self.execution_engine = ExecutionEngine(
+                self.settings,
+                self.exchange_connector,
+                self.redis_cache,
+                db_manager=self.db_manager,
+                account_id=self.account_id,
+            )
         except Exception as e:
             logger.critical(f"Falha fatal na inicialização dos modelos de IA: {e}")
             raise

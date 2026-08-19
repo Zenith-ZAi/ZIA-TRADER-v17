@@ -20,6 +20,7 @@ data/public_backtest_comparison.json
 data/shadow_calibration*.json
 data/latency_benchmark*.json
 data/agent_backtest_check.json
+data/api_surface_audit.json
 data/shadow_label_summary.json
 data/*.sqlite
 data/*.sqlite3
