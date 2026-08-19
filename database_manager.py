@@ -245,6 +245,8 @@ class DatabaseManager:
             trend_score=float(observation.get("trend_score") or 0.0),
             event_blocked=bool(observation.get("event_blocked", False)),
             risk_valid=bool(observation.get("risk_valid", False)),
+            decision_latency_ms=float(observation.get("decision_latency_ms") or 0.0),
+            news_latency_ms=float(observation.get("news_latency_ms") or 0.0),
             forward_return=observation.get("forward_return"),
             outcome_label=observation.get("outcome_label"),
             metadata_json=dict(observation.get("metadata_json") or {}),

@@ -18,6 +18,7 @@ data/*.db
 data/*.csv
 data/public_backtest_comparison.json
 data/shadow_calibration*.json
+data/latency_benchmark*.json
 data/*.sqlite
 data/*.sqlite3
 *.log

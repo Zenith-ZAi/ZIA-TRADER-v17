@@ -2,9 +2,10 @@ import asyncio
 import pandas as pd
 import numpy as np
 import logging
+import time
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-from monitoring.metrics import TRADING_PNL, TRADING_BALANCE, TRADING_OPEN_POSITIONS, TRADING_ORDER_COUNT, TRADING_EXECUTION_LATENCY, AI_PREDICTION_CONFIDENCE, SYSTEM_ERROR_COUNT, SYSTEM_LOG_COUNT
+from monitoring.metrics import TRADING_PNL, TRADING_BALANCE, TRADING_OPEN_POSITIONS, TRADING_ORDER_COUNT, TRADING_EXECUTION_LATENCY, AI_PREDICTION_CONFIDENCE, AI_LOCAL_DECISION_LATENCY, AI_NEWS_FETCH_LATENCY, SYSTEM_ERROR_COUNT, SYSTEM_LOG_COUNT
 from database import MarketType
 from datetime import datetime, timedelta, timezone
 
@@ -21,6 +22,7 @@ from data.news_processor import NewsProcessor
 from execution.exchange_connector import ExchangeConnector
 from core.market_signals import calculate_market_signal, detect_reversal_signal
 from core.event_guard import EconomicEventGuard
+from core.pullback_strategy import PullbackSignalCache
 
 
 logger = logging.getLogger(__name__)
@@ -130,6 +132,7 @@ class RoboTraderUnified:
                     }
                     
                     # 2. Pipeline de IA com features causais compartilhadas
+                    model_compute_started = time.perf_counter()
                     input_dim = self.settings.TRANSFORMER_INPUT_DIM
                     model_features = pd.DataFrame()
                     try:
@@ -183,8 +186,10 @@ class RoboTraderUnified:
                             scores[prediction["action"]] += prediction["confidence"] * prediction["weight"]
                         final_action = max(scores, key=scores.get)
                         final_confidence = scores[final_action] / total_weight
+                    model_compute_latency_ms = (time.perf_counter() - model_compute_started) * 1000.0
 
                     # 3. Contexto de Mercado e gate de confluência
+                    news_started = time.perf_counter()
                     try:
                         processed_news = await self.news_processor.fetch_all([symbol])
                         trends = await self.news_processor.fetch_trending([symbol])
@@ -195,7 +200,25 @@ class RoboTraderUnified:
                         processed_news = []
                         avg_sentiment = 0.0
                         trend_score = 0.0
+                    news_latency_ms = (time.perf_counter() - news_started) * 1000.0
+                    AI_NEWS_FETCH_LATENCY.observe(news_latency_ms / 1000.0)
+                    signal_compute_started = time.perf_counter()
 
+                    pullback_signal_cached = None
+                    if self.settings.PULLBACK_STRATEGY_ENABLED:
+                        pullback_signal_cached = PullbackSignalCache(
+                            historical_data,
+                            ema_period=int(self.settings.PULLBACK_EMA_PERIOD),
+                            rsi_period=int(self.settings.PULLBACK_RSI_PERIOD),
+                            atr_period=int(self.settings.PULLBACK_ATR_PERIOD),
+                            volume_period=int(self.settings.PULLBACK_VOLUME_PERIOD),
+                            touch_tolerance=float(self.settings.PULLBACK_TOUCH_TOLERANCE),
+                            exhaustion_volume_ratio=float(self.settings.PULLBACK_EXHAUSTION_VOLUME_RATIO),
+                            trigger_volume_ratio=float(self.settings.PULLBACK_TRIGGER_VOLUME_RATIO),
+                            stop_atr_multiple=float(self.settings.PULLBACK_STOP_ATR_MULTIPLE),
+                            target_atr_multiple=float(self.settings.PULLBACK_TARGET_ATR_MULTIPLE),
+                            breakeven_atr_trigger=float(self.settings.PULLBACK_BREAKEVEN_ATR_TRIGGER),
+                        ).at(len(historical_data) - 1)
                     market_signal = calculate_market_signal(
                         historical_data,
                         news_sentiment=avg_sentiment,
@@ -214,6 +237,7 @@ class RoboTraderUnified:
                             "target_atr_multiple": float(self.settings.PULLBACK_TARGET_ATR_MULTIPLE),
                             "breakeven_atr_trigger": float(self.settings.PULLBACK_BREAKEVEN_ATR_TRIGGER),
                         },
+                        precomputed_pullback=pullback_signal_cached,
                     )
                     reversal_signal = detect_reversal_signal(
                         historical_data,
@@ -235,6 +259,9 @@ class RoboTraderUnified:
                         final_action = "hold"
                         final_confidence = min(model_confidence, market_signal.confidence)
                     final_prediction = {"prediction": final_action, "confidence": final_confidence}
+                    signal_compute_latency_ms = (time.perf_counter() - signal_compute_started) * 1000.0
+                    local_decision_latency_ms = model_compute_latency_ms + signal_compute_latency_ms
+                    AI_LOCAL_DECISION_LATENCY.observe(local_decision_latency_ms / 1000.0)
                     AI_PREDICTION_CONFIDENCE.set(final_confidence)
                     logger.info(
                         "[%s] Sinal=%s candidato=%s confiança=%.2f regime=%s motivos=%s",
@@ -296,7 +323,11 @@ class RoboTraderUnified:
                             "trend_score": trend_score,
                             "event_blocked": bool(event_status.get("blocked", False)),
                             "risk_valid": bool(shadow_risk.get("valid", False)),
+                            "decision_latency_ms": local_decision_latency_ms,
+                            "news_latency_ms": news_latency_ms,
                             "metadata_json": {
+                                "model_compute_latency_ms": model_compute_latency_ms,
+                                "signal_compute_latency_ms": signal_compute_latency_ms,
                                 "news_count": len(processed_news),
                                 "news_provider_health": self.news_processor.health(),
                                 "regime": market_signal.regime,

@@ -2,6 +2,7 @@ import asyncio
 import pandas as pd
 import numpy as np
 import logging
+import time
 from typing import List, Dict, Any
 from database import MarketType, OrderStatus
 from datetime import datetime, timezone
@@ -14,6 +15,8 @@ from core.market_signals import calculate_market_signal
 from core.event_guard import EconomicEventGuard
 from execution.exchange_connector import ExchangeConnector
 from risk.risk_ai import RiskAI
+from core.pullback_strategy import PullbackSignalCache
+from monitoring.metrics import AI_LOCAL_DECISION_LATENCY
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +86,23 @@ class SniperEngine:
 
                         # 2.2. Volatilidade só vira entrada quando há confluência real.
                         if price_change > self.volatility_threshold:
+                            sniper_started = time.perf_counter()
                             action = "buy" if current_price > float(previous_price) else "sell"
+                            pullback_signal_cached = None
+                            if self.settings.PULLBACK_STRATEGY_ENABLED:
+                                pullback_signal_cached = PullbackSignalCache(
+                                    historical_data,
+                                    ema_period=int(self.settings.PULLBACK_EMA_PERIOD),
+                                    rsi_period=int(self.settings.PULLBACK_RSI_PERIOD),
+                                    atr_period=int(self.settings.PULLBACK_ATR_PERIOD),
+                                    volume_period=int(self.settings.PULLBACK_VOLUME_PERIOD),
+                                    touch_tolerance=float(self.settings.PULLBACK_TOUCH_TOLERANCE),
+                                    exhaustion_volume_ratio=float(self.settings.PULLBACK_EXHAUSTION_VOLUME_RATIO),
+                                    trigger_volume_ratio=float(self.settings.PULLBACK_TRIGGER_VOLUME_RATIO),
+                                    stop_atr_multiple=float(self.settings.PULLBACK_STOP_ATR_MULTIPLE),
+                                    target_atr_multiple=float(self.settings.PULLBACK_TARGET_ATR_MULTIPLE),
+                                    breakeven_atr_trigger=float(self.settings.PULLBACK_BREAKEVEN_ATR_TRIGGER),
+                                ).at(len(historical_data) - 1)
                             market_signal = calculate_market_signal(
                                 historical_data,
                                 min_confidence=float(self.settings.MIN_CONFIDENCE_THRESHOLD),
@@ -100,6 +119,7 @@ class SniperEngine:
                                     "target_atr_multiple": float(self.settings.PULLBACK_TARGET_ATR_MULTIPLE),
                                     "breakeven_atr_trigger": float(self.settings.PULLBACK_BREAKEVEN_ATR_TRIGGER),
                                 },
+                                precomputed_pullback=pullback_signal_cached,
                             )
                             whale_direction_matches = (
                                 (action == "buy" and whale_activity.get("sentiment") == "bullish")
@@ -116,6 +136,35 @@ class SniperEngine:
                                 and pullback_ok
                                 and not event_status.get("blocked", False)
                             )
+                            sniper_latency_ms = (time.perf_counter() - sniper_started) * 1000.0
+                            AI_LOCAL_DECISION_LATENCY.observe(sniper_latency_ms / 1000.0)
+                            shadow_action = action if whale_detected and whale_direction_matches and market_signal.action == action and market_signal.confidence >= float(self.settings.MIN_CONFIDENCE_THRESHOLD) and pullback_ok and not event_status.get("blocked", False) else "hold"
+                            if self.settings.SHADOW_MODE_ENABLED:
+                                self.db_manager.create_ai_observation({
+                                    "symbol": symbol,
+                                    "mode": "sniper-shadow",
+                                    "action": shadow_action,
+                                    "candidate_action": action,
+                                    "confidence": min(float(market_signal.confidence), float(whale_activity.get("confidence", 0.0))),
+                                    "model_action": market_signal.action,
+                                    "model_confidence": market_signal.confidence,
+                                    "market_signal_action": market_signal.action,
+                                    "market_signal_confidence": market_signal.confidence,
+                                    "price": current_price,
+                                    "news_sentiment": 0.0,
+                                    "trend_score": 0.0,
+                                    "event_blocked": bool(event_status.get("blocked", False)),
+                                    "risk_valid": False,
+                                    "decision_latency_ms": sniper_latency_ms,
+                                    "metadata_json": {
+                                        "price_change": price_change,
+                                        "volatility_threshold": self.volatility_threshold,
+                                        "whale_activity": whale_activity,
+                                        "pullback_signal": market_signal.pullback,
+                                        "event_guard": event_status,
+                                        "autonomous_enabled": self.settings.AUTONOMOUS_TRADING_ENABLED,
+                                    },
+                                })
                             logger.info(
                                 "Sniper: evento=%s ação=%s sinal=%s confiança=%.2f confirmado=%s",
                                 symbol,

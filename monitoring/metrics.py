@@ -1,4 +1,4 @@
-from prometheus_client import Gauge, Counter
+from prometheus_client import Gauge, Counter, Histogram
 
 # Métricas de Trading
 TRADING_PNL = Gauge("zia_trader_pnl_total", "Total PnL do ZIA Trader")
@@ -9,6 +9,8 @@ TRADING_EXECUTION_LATENCY = Gauge("zia_trader_execution_latency_seconds", "Latê
 
 # Métricas de IA
 AI_PREDICTION_CONFIDENCE = Gauge("zia_trader_ai_prediction_confidence", "Confiança da última previsão da IA")
+AI_LOCAL_DECISION_LATENCY = Histogram("zia_trader_ai_local_decision_latency_seconds", "Latência local da decisão, sem rede da exchange", buckets=(0.001, 0.003, 0.005, 0.010, 0.020, 0.050, 0.100, 0.250, 1.0))
+AI_NEWS_FETCH_LATENCY = Histogram("zia_trader_ai_news_fetch_latency_seconds", "Latência de consulta e normalização de notícias", buckets=(0.010, 0.050, 0.100, 0.250, 0.500, 1.0, 3.0, 10.0))
 
 # Métricas do Sistema
 SYSTEM_ERROR_COUNT = Counter("zia_trader_system_error_count", "Contador de erros do sistema")

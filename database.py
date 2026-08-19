@@ -177,6 +177,8 @@ class AIObservation(Base):
     trend_score = Column(Float, default=0.0)
     event_blocked = Column(Boolean, default=False)
     risk_valid = Column(Boolean, default=False)
+    decision_latency_ms = Column(Float, default=0.0)
+    news_latency_ms = Column(Float, default=0.0)
     forward_return = Column(Float, nullable=True)
     outcome_label = Column(Integer, nullable=True)
     metadata_json = Column(JSON)

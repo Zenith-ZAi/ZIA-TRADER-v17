@@ -48,6 +48,7 @@ def calculate_market_signal(
     min_confidence: float = 0.70,
     max_volatility: float = 0.08,
     pullback_kwargs: Dict[str, Any] | None = None,
+    precomputed_pullback: Any | None = None,
 ) -> MarketSignal:
     """Calcula um sinal com motivos e indicadores, sem executar ordens.
 
@@ -201,7 +202,7 @@ def calculate_market_signal(
     )
     action = candidate_action if good_signal else "hold"
     status = "good" if good_signal else "rejected"
-    pullback_signal = calculate_pullback_signal(data, **(pullback_kwargs or {}))
+    pullback_signal = precomputed_pullback or calculate_pullback_signal(data, **(pullback_kwargs or {}))
     return MarketSignal(
         action=action,
         candidate_action=candidate_action,
