@@ -63,6 +63,40 @@ class RiskAI:
         except (AttributeError, TypeError, ValueError):
             return 0.0
 
+    def validate_exit(
+        self,
+        position: Dict[str, Any],
+        price: float,
+        market_context: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        """Valida somente o fechamento de uma posição já existente."""
+        action = str(position.get("action") or "").lower()
+        symbol = str(position.get("symbol") or "").strip()
+        try:
+            quantity = float(position.get("quantity", 0.0))
+            price = float(price)
+        except (TypeError, ValueError):
+            return {"valid": False, "reason": "Campos de saída inválidos."}
+        if action not in {"buy", "sell"} or not symbol or quantity <= 0 or price <= 0:
+            return {"valid": False, "reason": "Posição ou preço de saída inválidos."}
+        balances = (market_context or {}).get("exchange_balances", {})
+        if isinstance(balances, dict) and balances:
+            try:
+                base_asset = symbol.replace("-", "/").split("/", 1)[0]
+                available = float(balances.get(base_asset, 0.0))
+                if action == "buy" and available + 1e-12 < quantity:
+                    return {"valid": False, "reason": "Saldo base insuficiente para fechar a posição."}
+            except (TypeError, ValueError, IndexError):
+                return {"valid": False, "reason": "Saldo da exchange inválido para a saída."}
+        return {
+            "valid": True,
+            "symbol": symbol,
+            "action": "sell" if action == "buy" else "buy",
+            "quantity": quantity,
+            "price": price,
+            "exit_reason": str(position.get("exit_reason") or "policy"),
+        }
+
     def validate_order(
         self,
         order_data: Dict[str, Any],

@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     MAX_RISK_PER_TRADE: float = float(os.getenv("MAX_RISK_PER_TRADE", "0.02"))
     STOP_LOSS_PCT: float = float(os.getenv("STOP_LOSS_PCT", "0.02"))
     TAKE_PROFIT_PCT: float = float(os.getenv("TAKE_PROFIT_PCT", "0.05"))
+    ALLOW_SHORT: bool = os.getenv("ALLOW_SHORT", "false").lower() == "true"
     MIN_CONFIDENCE_THRESHOLD: float = float(os.getenv("MIN_CONFIDENCE_THRESHOLD", "0.7"))
     PRICE_CHANGE_THRESHOLD: float = float(os.getenv("PRICE_CHANGE_THRESHOLD", "0.001"))
     TRADING_LOOP_INTERVAL: int = int(os.getenv("TRADING_LOOP_INTERVAL", "5"))
@@ -209,6 +210,13 @@ class Settings(BaseSettings):
     BACKTEST_STOP_LOSS_PCT: float = float(os.getenv("BACKTEST_STOP_LOSS_PCT", "0.02"))
     BACKTEST_TAKE_PROFIT_PCT: float = float(os.getenv("BACKTEST_TAKE_PROFIT_PCT", "0.05"))
     BACKTEST_MAX_VOLATILITY: float = float(os.getenv("BACKTEST_MAX_VOLATILITY", "0.08"))
+
+    # Memória histórica de padrões: somente padrões encerrados e rotulados; desativada por padrão
+    PATTERN_MEMORY_ENABLED: bool = os.getenv("PATTERN_MEMORY_ENABLED", "false").lower() == "true"
+    PATTERN_MEMORY_REQUIRE_PROFITABLE: bool = os.getenv("PATTERN_MEMORY_REQUIRE_PROFITABLE", "true").lower() == "true"
+    PATTERN_MEMORY_MIN_OUTCOME_ATR: float = float(os.getenv("PATTERN_MEMORY_MIN_OUTCOME_ATR", "2.0"))
+    PATTERN_MEMORY_MAX_DISTANCE: float = float(os.getenv("PATTERN_MEMORY_MAX_DISTANCE", "1.25"))
+    PATTERN_MEMORY_MIN_SAMPLES: int = int(os.getenv("PATTERN_MEMORY_MIN_SAMPLES", "3"))
 
     # News and trend providers
     NEWS_HTTP_TIMEOUT_SECONDS: float = float(os.getenv("NEWS_HTTP_TIMEOUT_SECONDS", "8"))

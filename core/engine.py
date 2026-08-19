@@ -23,6 +23,8 @@ from execution.exchange_connector import ExchangeConnector
 from core.market_signals import calculate_market_signal, detect_reversal_signal
 from core.event_guard import EconomicEventGuard
 from core.pullback_strategy import PullbackSignalCache
+from core.pattern_memory import PatternMemory, build_pattern_signature
+from core.position_policy import evaluate_position_exit
 
 
 logger = logging.getLogger(__name__)
@@ -51,6 +53,7 @@ class RoboTraderUnified:
             self.settings.EVENT_BLOCK_BEFORE_SECONDS,
             self.settings.EVENT_BLOCK_AFTER_SECONDS,
         )
+        self.pattern_memory = PatternMemory(self.db_manager, self.settings)
         
         # Inicialização de modelos com tratamento de erro
         try:
@@ -248,11 +251,14 @@ class RoboTraderUnified:
                     )
                     model_action = final_action
                     model_confidence = final_confidence
+                    pattern_signature = build_pattern_signature(historical_data, market_signal, avg_sentiment, trend_score)
+                    pattern_match = self.pattern_memory.find_match(symbol, pattern_signature)
+                    pattern_ok = not self.pattern_memory.enabled or pattern_match.matched
                     pullback_action = market_signal.pullback.get("action", "hold")
                     pullback_ok = not self.settings.PULLBACK_STRATEGY_ENABLED or pullback_action == model_action
                     event_status = self.event_guard.blocked(datetime.now(timezone.utc), symbol)
                     event_ok = not event_status.get("blocked", False)
-                    if market_signal.action in {"buy", "sell"} and market_signal.action == model_action and pullback_ok and event_ok:
+                    if market_signal.action in {"buy", "sell"} and market_signal.action == model_action and pullback_ok and pattern_ok and event_ok:
                         final_action = model_action
                         final_confidence = min(1.0, (model_confidence + market_signal.confidence) / 2.0)
                     else:
@@ -282,6 +288,15 @@ class RoboTraderUnified:
                         exchange_balances = {}
                     account_state = self.db_manager.get_account_state(self.account_id)
                     account_balance = self.risk_ai.quote_equivalent_balance(exchange_balances, symbol, current_price) or (account_state.balance if account_state else 0.0)
+                    live_position = await self.redis_cache.get_state(f"position_{symbol}")
+                    exit_decision = evaluate_position_exit(
+                        live_position,
+                        current_price,
+                        high=current_market_data.get("high", current_price),
+                        low=current_market_data.get("low", current_price),
+                        market_signal=market_signal,
+                        reversal_signal=reversal_signal,
+                    )
                     market_context = {
                         "historical_data": historical_data,
                         "current_order_flow": current_order_flow,
@@ -334,14 +349,33 @@ class RoboTraderUnified:
                                 "reversal_signal": reversal_signal,
                                 "pullback_signal": market_signal.pullback,
                                 "event_guard": event_status,
+                                "pattern_signature": pattern_signature,
+                                "pattern_match": pattern_match.to_dict(),
+                                "live_position": live_position or {},
+                                "exit_decision": exit_decision,
                                 "volume_analysis": volume_analysis,
                                 "features": feature_snapshot,
                                 "risk_reason": shadow_risk.get("reason", ""),
                             },
                         })
                     
-                    # 4. Risco e Execução
-                    if analysis["prediction"] != "hold" and self.settings.AUTONOMOUS_TRADING_ENABLED:
+                    # 4. Risco e Execução: primeiro fecha; somente depois pode avaliar nova entrada.
+                    exit_executed = False
+                    if live_position and exit_decision.get("should_exit") and self.settings.AUTONOMOUS_TRADING_ENABLED:
+                        exit_position = {**live_position, "symbol": symbol, "exit_reason": exit_decision.get("reason")}
+                        exit_validation = self.risk_ai.validate_exit(exit_position, exit_decision["price"], {"exchange_balances": exchange_balances})
+                        if exit_validation.get("valid"):
+                            exit_result = await self.execution_engine.execute_order(exit_validation)
+                            if exit_result.get("status") == "success":
+                                await self.redis_cache.delete_state(f"position_{symbol}")
+                                self.db_manager.close_position(self.account_id, symbol)
+                                exit_executed = True
+                                logger.info("[%s] Posição fechada por %s", symbol, exit_decision.get("reason"))
+                        else:
+                            logger.warning("[%s] Saída rejeitada pelo RiskAI: %s", symbol, exit_validation.get("reason"))
+                    entry_allowed = live_position is None and not exit_executed
+                    spot_direction_allowed = bool(self.settings.ALLOW_SHORT or analysis["prediction"] == "buy")
+                    if analysis["prediction"] != "hold" and self.settings.AUTONOMOUS_TRADING_ENABLED and entry_allowed and spot_direction_allowed:
                         order_data = {
                             "symbol": symbol,
                             "action": analysis["prediction"],

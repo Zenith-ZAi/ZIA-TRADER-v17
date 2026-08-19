@@ -6,7 +6,7 @@ from sqlalchemy.orm import sessionmaker
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict
 
-from database import Base, AccountState, Position, DailyPNL, WeeklyPNL, MonthlyPNL, Drawdown, OrderHistory, ExecutionHistory, Trade, WhaleActivity, NewsArticle, TrendSnapshot, AIObservation, SystemLog, MarketType, OrderStatus, utc_now
+from database import Base, AccountState, Position, DailyPNL, WeeklyPNL, MonthlyPNL, Drawdown, OrderHistory, ExecutionHistory, Trade, WhaleActivity, NewsArticle, TrendSnapshot, AIObservation, MarketPattern, SystemLog, MarketType, OrderStatus, utc_now
 
 class DatabaseManager:
     def __init__(self, database_url: str):
@@ -265,6 +265,60 @@ class DatabaseManager:
         observations = query.order_by(AIObservation.observed_at.desc()).limit(max(1, min(int(limit), 10000))).all()
         db.close()
         return observations
+
+    def update_ai_observation_outcome(self, observation_id: int, forward_return: float, outcome_label: int) -> Optional[AIObservation]:
+        db = self.SessionLocal()
+        record = db.query(AIObservation).filter(AIObservation.id == int(observation_id)).first()
+        if record:
+            record.forward_return = float(forward_return)
+            record.outcome_label = int(outcome_label)
+            db.commit()
+            db.refresh(record)
+        db.close()
+        return record
+
+    def get_unlabeled_ai_observations(self, symbol: Optional[str] = None, limit: int = 1000) -> List[AIObservation]:
+        db = self.SessionLocal()
+        query = db.query(AIObservation).filter(AIObservation.outcome_label.is_(None))
+        if symbol:
+            query = query.filter(AIObservation.symbol == symbol)
+        records = query.order_by(AIObservation.observed_at.asc()).limit(max(1, min(int(limit), 10000))).all()
+        db.close()
+        return records
+
+    # Market pattern memory
+    def create_market_pattern(self, pattern: Dict[str, object]) -> MarketPattern:
+        db = self.SessionLocal()
+        record = MarketPattern(
+            symbol=str(pattern.get("symbol") or "unknown"),
+            strategy=str(pattern.get("strategy") or "pullback"),
+            observed_at=pattern.get("observed_at") if isinstance(pattern.get("observed_at"), datetime) else utc_now(),
+            pattern_type=str(pattern.get("pattern_type") or "pullback"),
+            signature_json=dict(pattern.get("signature_json") or {}),
+            entry_price=float(pattern.get("entry_price") or 0.0),
+            atr=float(pattern.get("atr") or 0.0),
+            outcome_atr=(float(pattern["outcome_atr"]) if pattern.get("outcome_atr") is not None else None),
+            outcome_label=(int(pattern["outcome_label"]) if pattern.get("outcome_label") is not None else None),
+            sample_size=max(1, int(pattern.get("sample_size") or 1)),
+            source_observation_id=(int(pattern["source_observation_id"]) if pattern.get("source_observation_id") is not None else None),
+            metadata_json=dict(pattern.get("metadata_json") or {}),
+        )
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        db.close()
+        return record
+
+    def get_market_patterns(self, symbol: Optional[str] = None, strategy: Optional[str] = None, limit: int = 5000) -> List[MarketPattern]:
+        db = self.SessionLocal()
+        query = db.query(MarketPattern)
+        if symbol:
+            query = query.filter(MarketPattern.symbol == symbol)
+        if strategy:
+            query = query.filter(MarketPattern.strategy == strategy)
+        records = query.order_by(MarketPattern.observed_at.desc()).limit(max(1, min(int(limit), 10000))).all()
+        db.close()
+        return records
 
     # OrderHistory Operations
     def create_order_history(self, account_id: str, order_id: str, symbol: str, market_type: MarketType, action: str, order_type: str, price: Optional[float], quantity: Optional[float], status: OrderStatus, metadata_json: Optional[dict] = None) -> OrderHistory:

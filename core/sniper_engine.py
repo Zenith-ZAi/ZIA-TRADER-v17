@@ -88,6 +88,7 @@ class SniperEngine:
                         if price_change > self.volatility_threshold:
                             sniper_started = time.perf_counter()
                             action = "buy" if current_price > float(previous_price) else "sell"
+                            live_position = await self.redis_cache.get_state(f"position_{symbol}")
                             pullback_signal_cached = None
                             if self.settings.PULLBACK_STRATEGY_ENABLED:
                                 pullback_signal_cached = PullbackSignalCache(
@@ -127,8 +128,12 @@ class SniperEngine:
                             )
                             pullback_ok = not self.settings.PULLBACK_STRATEGY_ENABLED or market_signal.pullback.get("action") == action
                             event_status = self.event_guard.blocked(datetime.now(timezone.utc), symbol)
+                            spot_direction_allowed = bool(self.settings.ALLOW_SHORT or action == "buy")
+                            entry_allowed = live_position is None
                             confirmed_event = bool(
                                 self.settings.AUTONOMOUS_TRADING_ENABLED
+                                and spot_direction_allowed
+                                and entry_allowed
                                 and whale_detected
                                 and whale_direction_matches
                                 and market_signal.action == action
@@ -162,6 +167,8 @@ class SniperEngine:
                                         "whale_activity": whale_activity,
                                         "pullback_signal": market_signal.pullback,
                                         "event_guard": event_status,
+                                        "live_position": live_position or {},
+                                        "spot_direction_allowed": spot_direction_allowed,
                                         "autonomous_enabled": self.settings.AUTONOMOUS_TRADING_ENABLED,
                                     },
                                 })

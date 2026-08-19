@@ -13,8 +13,10 @@ from ai.ensemble_model import EnsembleModel
 from ai.feature_pipeline import build_feature_frame
 from core.market_signals import MarketSignal, MarketSignalCache
 from core.pullback_strategy import PullbackSignalCache
+from core.pattern_memory import PatternMemory, build_pattern_signature
 from core.event_guard import EconomicEventGuard
 from execution.friction import ExecutionFriction
+from core.position_policy import evaluate_position_exit
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +134,8 @@ class BacktestEngine:
         blocked_event_bars = 0
         blocked_event_candidates = 0
         ensemble_rejections = 0
+        pattern_rejections = 0
+        pattern_memory = PatternMemory(self.db_manager, self.settings) if self.db_manager is not None else None
         signal_cache = MarketSignalCache(data)
         pullback_cache = PullbackSignalCache(
             data,
@@ -219,6 +223,23 @@ class BacktestEngine:
                         reasons=signal.reasons + ["Ensemble não confirmou a direção no shadow gate"],
                         pullback=signal.pullback,
                     )
+            if pattern_memory is not None and pattern_memory.enabled and signal.action in {"buy", "sell"}:
+                pattern_signature = build_pattern_signature(data.iloc[: index + 1], signal)
+                pattern_match = pattern_memory.find_match(symbol, pattern_signature)
+                if not pattern_match.matched:
+                    pattern_rejections += 1
+                    signal = MarketSignal(
+                        action="hold",
+                        candidate_action=signal.candidate_action,
+                        confidence=signal.confidence,
+                        score=signal.score,
+                        status="rejected",
+                        regime=signal.regime,
+                        volatility=signal.volatility,
+                        indicators=signal.indicators,
+                        reasons=signal.reasons + ["memória histórica não confirmou o padrão"],
+                        pullback=signal.pullback,
+                    )
             if event_status.get("blocked") and signal.action in {"buy", "sell"}:
                 signal = MarketSignal(
                     action="hold",
@@ -237,36 +258,31 @@ class BacktestEngine:
             high = self._price(row, "high")
             low = self._price(row, "low")
             if position is not None:
-                effective_stop = position["stop_loss"]
-                if position["action"] == "buy" and price >= position.get("breakeven_trigger", float("inf")):
-                    effective_stop = position["entry_price"]
-                elif position["action"] == "sell" and price <= position.get("breakeven_trigger", float("-inf")):
-                    effective_stop = position["entry_price"]
-                stop_hit = low <= effective_stop if position["action"] == "buy" else high >= effective_stop
-                take_hit = high >= position["take_profit"] if position["action"] == "buy" else low <= position["take_profit"]
-                if stop_hit or take_hit:
-                    theoretical_exit = effective_stop if stop_hit else position["take_profit"]
-                    exit_action = "sell" if position["action"] == "buy" else "buy"
-                    friction = await self._apply_friction(exit_action, theoretical_exit, position["quantity"])
+                exit_decision = evaluate_position_exit(
+                    position,
+                    price,
+                    high=high,
+                    low=low,
+                    market_signal=signal,
+                    reversal_signal={
+                        "detected": bool(signal.action in {"buy", "sell"} and signal.action != position["action"]),
+                        "to": signal.action,
+                    },
+                )
+                if exit_decision["should_exit"]:
+                    exit_action = str(exit_decision["exit_action"])
+                    friction = await self._apply_friction(exit_action, float(exit_decision["price"]), position["quantity"])
                     closed = self._close_trade(
                         position,
                         friction.executed_price,
                         data.index[index],
-                        "stop_loss" if stop_hit else "take_profit",
+                        str(exit_decision["reason"]),
                         fee_rate,
                         extra_fee=friction.commission,
                     )
                     capital += closed["pnl"]
                     trades.append(closed)
                     position = None
-
-            if position is not None and signal.action in {"buy", "sell"} and signal.action != position["action"]:
-                exit_action = "sell" if position["action"] == "buy" else "buy"
-                friction = await self._apply_friction(exit_action, price, position["quantity"])
-                closed = self._close_trade(position, friction.executed_price, data.index[index], "signal_flip", fee_rate, extra_fee=friction.commission)
-                capital += closed["pnl"]
-                trades.append(closed)
-                position = None
 
             if position is None and signal.action in {"buy", "sell"}:
                 risk_amount = capital * risk_per_trade
@@ -347,6 +363,8 @@ class BacktestEngine:
             "blocked_event_candidates": blocked_event_candidates,
             "ensemble_enabled": bool(ensemble_model and ensemble_model.is_trained),
             "ensemble_rejections": ensemble_rejections,
+            "pattern_memory_enabled": bool(pattern_memory and pattern_memory.enabled),
+            "pattern_rejections": pattern_rejections,
             "trades": trades,
         }
         logger.info("Backtest para %s concluído: PNL=%.2f, trades=%s", symbol, result["total_pnl"], len(trades))

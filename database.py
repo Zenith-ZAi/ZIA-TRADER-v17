@@ -184,6 +184,23 @@ class AIObservation(Base):
     metadata_json = Column(JSON)
 
 
+class MarketPattern(Base):
+    __tablename__ = 'market_patterns'
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String, nullable=False, index=True)
+    strategy = Column(String, nullable=False, default="pullback")
+    observed_at = Column(DateTime, default=utc_now, index=True)
+    pattern_type = Column(String, nullable=False, default="pullback")
+    signature_json = Column(JSON, nullable=False, default=dict)
+    entry_price = Column(Float, default=0.0)
+    atr = Column(Float, default=0.0)
+    outcome_atr = Column(Float, nullable=True)
+    outcome_label = Column(Integer, nullable=True)
+    sample_size = Column(Integer, default=1)
+    source_observation_id = Column(Integer, nullable=True)
+    metadata_json = Column(JSON)
+
+
 class SystemLog(Base):
     __tablename__ = 'system_logs'
     id = Column(Integer, primary_key=True)
