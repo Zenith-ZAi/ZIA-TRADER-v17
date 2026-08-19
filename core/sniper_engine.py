@@ -93,8 +93,12 @@ class SniperEngine:
                                     "rsi_period": int(self.settings.PULLBACK_RSI_PERIOD),
                                     "atr_period": int(self.settings.PULLBACK_ATR_PERIOD),
                                     "volume_period": int(self.settings.PULLBACK_VOLUME_PERIOD),
+                                    "touch_tolerance": float(self.settings.PULLBACK_TOUCH_TOLERANCE),
                                     "exhaustion_volume_ratio": float(self.settings.PULLBACK_EXHAUSTION_VOLUME_RATIO),
                                     "trigger_volume_ratio": float(self.settings.PULLBACK_TRIGGER_VOLUME_RATIO),
+                                    "stop_atr_multiple": float(self.settings.PULLBACK_STOP_ATR_MULTIPLE),
+                                    "target_atr_multiple": float(self.settings.PULLBACK_TARGET_ATR_MULTIPLE),
+                                    "breakeven_atr_trigger": float(self.settings.PULLBACK_BREAKEVEN_ATR_TRIGGER),
                                 },
                             )
                             whale_direction_matches = (

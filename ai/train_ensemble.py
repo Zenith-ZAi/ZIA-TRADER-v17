@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import pandas as pd
 from sklearn.metrics import accuracy_score, balanced_accuracy_score, f1_score, precision_score, recall_score
@@ -23,9 +28,11 @@ def load_ohlcv(path: str | Path) -> pd.DataFrame:
         frame = pd.read_parquet(source)
     else:
         raise ValueError("dataset deve ser CSV ou Parquet")
-    if "timestamp" in frame.columns:
-        frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True, errors="raise")
-        frame = frame.set_index("timestamp")
+    timestamp_column = "timestamp" if "timestamp" in frame.columns else "open_time" if "open_time" in frame.columns else None
+    if timestamp_column:
+        frame[timestamp_column] = pd.to_datetime(frame[timestamp_column], utc=True, errors="raise")
+        frame = frame.set_index(timestamp_column)
+
     required = {"open", "high", "low", "close", "volume"}
     if not required.issubset(frame.columns):
         raise ValueError(f"dataset precisa conter {sorted(required)}")

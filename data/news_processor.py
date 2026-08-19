@@ -51,7 +51,7 @@ class NewsProcessor:
         url: str,
         params: Dict[str, Any],
         headers: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, Any]:
+    ) -> Any:
         response = requests.get(
             url,
             params=params,
@@ -60,10 +60,8 @@ class NewsProcessor:
         )
         response.raise_for_status()
         payload = response.json()
-        if not isinstance(payload, dict):
-            raise ValueError("resposta do provedor não é um objeto JSON")
-        if payload.get("Error Message") or payload.get("Note") or payload.get("error"):
-            raise ValueError(str(payload.get("Error Message") or payload.get("Note") or payload.get("error")))
+        if isinstance(payload, dict) and (payload.get("Error Message") or payload.get("Note") or payload.get("error") or payload.get("status") == "error"):
+            raise ValueError(str(payload.get("Error Message") or payload.get("Note") or payload.get("error") or payload.get("message") or "provider error"))
         self._record_status(provider, True)
         return payload
 
@@ -73,7 +71,7 @@ class NewsProcessor:
         url: str,
         params: Dict[str, Any],
         headers: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, Any]:
+    ) -> Any:
         try:
             return await asyncio.to_thread(self._request_json_sync, provider, url, params, headers)
         except Exception as exc:
@@ -271,6 +269,133 @@ class NewsProcessor:
                     logger.warning("Não foi possível persistir tendência: %s", exc)
         return self._cache_set(cache_key, trends)
 
+    async def fetch_marketaux_news(self, tickers: List[str]) -> List[Dict[str, Any]]:
+        if not self.settings.MARKETAUX_API_KEY:
+            return []
+        symbols = self._base_symbols(tickers)
+        if not symbols:
+            return []
+        cache_key = f"marketaux:{','.join(symbols)}"
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            return cached
+        payload = await self._request_json(
+            "marketaux",
+            self.settings.MARKETAUX_BASE_URL,
+            {
+                "api_token": self.settings.MARKETAUX_API_KEY,
+                "symbols": ",".join(symbols),
+                "filter_entities": "true",
+                "must_have_entities": "true",
+                "group_similar": "true",
+                "language": "en",
+                "limit": min(self.settings.NEWS_PROVIDER_ARTICLES, self.settings.NEWS_MAX_ARTICLES),
+            },
+        )
+        articles = []
+        wanted = set(symbols)
+        for item in (payload.get("data", []) if payload else []):
+            entities = item.get("entities") or []
+            matching = [entity for entity in entities if str(entity.get("symbol", "")).upper() in wanted]
+            scores = [float(entity.get("sentiment_score", 0.0) or 0.0) for entity in matching]
+            articles.append(
+                self._normalize(
+                    "Marketaux",
+                    item.get("title", ""),
+                    item.get("description", "") or item.get("snippet", ""),
+                    item.get("url", ""),
+                    item.get("published_at", ""),
+                    sum(scores) / len(scores) if scores else 0.0,
+                    ticker=next((str(entity.get("symbol", "")).upper() for entity in matching), ""),
+                    external_id=item.get("uuid", ""),
+                    source_name=item.get("source", ""),
+                    relevance_score=item.get("relevance_score"),
+                    entities=matching,
+                )
+            )
+        return self._cache_set(cache_key, articles)
+
+    async def fetch_finnhub_news(self, tickers: List[str]) -> List[Dict[str, Any]]:
+        if not self.settings.FINNHUB_API_KEY:
+            return []
+        symbols = self._base_symbols(tickers)
+        if not symbols:
+            return []
+        cache_key = f"finnhub:{self.settings.FINNHUB_NEWS_CATEGORY}:{','.join(symbols)}"
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            return cached
+        payload = await self._request_json(
+            "finnhub",
+            f"{self.settings.FINNHUB_BASE_URL.rstrip('/')}/news",
+            {
+                "category": self.settings.FINNHUB_NEWS_CATEGORY,
+                "token": self.settings.FINNHUB_API_KEY,
+            },
+        )
+        wanted = set(symbols)
+        articles = []
+        for item in (payload if isinstance(payload, list) else []):
+            related = {part.strip().upper() for part in str(item.get("related", "")).split(",") if part.strip()}
+            if related and not (related & wanted) and self.settings.FINNHUB_NEWS_CATEGORY != "crypto":
+                continue
+            published = item.get("datetime")
+            if isinstance(published, (int, float)):
+                published = datetime.fromtimestamp(published, tz=timezone.utc).isoformat()
+            articles.append(
+                self._normalize(
+                    "Finnhub",
+                    item.get("headline", ""),
+                    item.get("summary", ""),
+                    item.get("url", ""),
+                    str(published or ""),
+                    0.0,
+                    ticker=next(iter(related & wanted), ""),
+                    external_id=item.get("id", ""),
+                    source_name=item.get("source", ""),
+                    category=item.get("category", ""),
+                )
+            )
+        return self._cache_set(cache_key, articles[: self.settings.NEWS_PROVIDER_ARTICLES])
+
+    async def fetch_twelve_data_news(self, tickers: List[str]) -> List[Dict[str, Any]]:
+        if not self.settings.TWELVE_DATA_API_KEY:
+            return []
+        symbols = self._symbols(tickers)
+        if not symbols:
+            return []
+        cache_key = f"twelve_data:{','.join(symbols)}"
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            return cached
+        payload = await self._request_json(
+            "twelve_data",
+            f"{self.settings.TWELVE_DATA_BASE_URL.rstrip('/')}/news",
+            {
+                "symbol": ",".join(symbols),
+                "apikey": self.settings.TWELVE_DATA_API_KEY,
+                "outputsize": min(self.settings.NEWS_PROVIDER_ARTICLES, self.settings.NEWS_MAX_ARTICLES),
+                "order": "desc",
+            },
+        )
+        raw_articles = payload.get("values", payload.get("data", [])) if payload else []
+        articles = []
+        for item in raw_articles if isinstance(raw_articles, list) else []:
+            articles.append(
+                self._normalize(
+                    "TwelveData",
+                    item.get("title", item.get("headline", "")),
+                    item.get("summary", item.get("description", "")),
+                    item.get("url", ""),
+                    item.get("published_at", item.get("datetime", "")),
+                    item.get("sentiment_score", 0.0),
+                    ticker=str(item.get("symbol", symbols[0])).upper(),
+                    external_id=item.get("id", ""),
+                    source_name=item.get("source", ""),
+                )
+            )
+        return self._cache_set(cache_key, articles)
+
     async def fetch_alpha_vantage_news(self, tickers: List[str]) -> List[Dict[str, Any]]:
         if not self.settings.ALPHA_VANTAGE_API_KEY:
             return []
@@ -400,26 +525,34 @@ class NewsProcessor:
 
     async def fetch_all(self, tickers: List[str]) -> List[Dict[str, Any]]:
         """Consulta fonte gratuita e fontes pagas habilitadas, sem duplicar títulos."""
-        results = await asyncio.gather(
-            self.fetch_gdelt_news(tickers),
-            self.fetch_rss_news(tickers),
-            self.fetch_alpha_vantage_news(tickers),
-            self.fetch_benzinga_news(tickers),
-            self.fetch_newsapi_news(tickers),
-            self.fetch_cryptopanic_news(tickers),
-            return_exceptions=True,
-        )
-        articles: List[Dict[str, Any]] = []
+        provider_calls = [
+            ("gdelt", self.fetch_gdelt_news(tickers)),
+            ("rss", self.fetch_rss_news(tickers)),
+            ("alpha_vantage", self.fetch_alpha_vantage_news(tickers)),
+            ("marketaux", self.fetch_marketaux_news(tickers)),
+            ("finnhub", self.fetch_finnhub_news(tickers)),
+            ("twelve_data", self.fetch_twelve_data_news(tickers)),
+            ("benzinga", self.fetch_benzinga_news(tickers)),
+            ("newsapi", self.fetch_newsapi_news(tickers)),
+            ("cryptopanic", self.fetch_cryptopanic_news(tickers)),
+        ]
+        results = await asyncio.gather(*(call for _, call in provider_calls), return_exceptions=True)
+        buckets: Dict[str, List[Dict[str, Any]]] = {name: [] for name, _ in provider_calls}
         seen = set()
-        for result in results:
+        for (provider, _), result in zip(provider_calls, results):
             if isinstance(result, Exception):
                 continue
-            for article in result:
-                key = article.get("url") or article.get("title")
+            for article in result if isinstance(result, list) else []:
+                key = article.get("url") or article.get("external_id") or article.get("title")
                 if key and key not in seen:
                     seen.add(key)
-                    articles.append(article)
-        processed = await self.process_news_sentiment(articles[: self.settings.NEWS_MAX_ARTICLES])
+                    buckets[provider].append(article)
+        articles: List[Dict[str, Any]] = []
+        while len(articles) < self.settings.NEWS_MAX_ARTICLES and any(buckets.values()):
+            for provider, _ in provider_calls:
+                if buckets[provider] and len(articles) < self.settings.NEWS_MAX_ARTICLES:
+                    articles.append(buckets[provider].pop(0))
+        processed = await self.process_news_sentiment(articles)
         if self.db_manager:
             for article in processed:
                 try:

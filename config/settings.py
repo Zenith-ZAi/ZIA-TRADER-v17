@@ -1,8 +1,17 @@
 import os
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, field_validator
 from pydantic_settings import BaseSettings
 from typing import List, Optional, Dict
+
+
+def _env_value(*names: str) -> Optional[str]:
+    for name in names:
+        value = os.getenv(name)
+        if value and value.strip():
+            return value.strip()
+    return None
+
 
 class Settings(BaseSettings):
     # API & Server
@@ -12,6 +21,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     AUTO_START_ENGINES: bool = os.getenv("AUTO_START_ENGINES", "false").lower() == "true"
     AUTONOMOUS_TRADING_ENABLED: bool = os.getenv("AUTONOMOUS_TRADING_ENABLED", "false").lower() == "true"
+    SHADOW_MODE_ENABLED: bool = os.getenv("SHADOW_MODE_ENABLED", "true").lower() == "true"
     NEURAL_MODELS_ENABLED: bool = os.getenv("NEURAL_MODELS_ENABLED", "false").lower() == "true"
     DEMO_AUTH_ENABLED: bool = os.getenv("DEMO_AUTH_ENABLED", "true").lower() == "true"
     DEMO_USER_PASSWORD: str = os.getenv("DEMO_USER_PASSWORD", "password")
@@ -92,8 +102,11 @@ class Settings(BaseSettings):
     TRADING_SYMBOLS: List[str] = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
 
     # News Processor Settings (if applicable)
-    ALPHA_VANTAGE_API_KEY: Optional[str] = os.getenv("ALPHA_VANTAGE_API_KEY")
-    BENZINGA_API_KEY: Optional[str] = os.getenv("BENZINGA_API_KEY")
+    ALPHA_VANTAGE_API_KEY: Optional[str] = _env_value("ALPHA_VANTAGE_API_KEY", "Alphavantage_API_KEY")
+    BENZINGA_API_KEY: Optional[str] = _env_value("BENZINGA_API_KEY")
+    MARKETAUX_API_KEY: Optional[str] = _env_value("MARKETAUX_API_KEY", "Marketaux_API_KEY")
+    FINNHUB_API_KEY: Optional[str] = _env_value("FINNHUB_API_KEY", "Finnhub_API_KEY")
+    TWELVE_DATA_API_KEY: Optional[str] = _env_value("TWELVE_DATA_API_KEY", "Twelvedata_API_KEY")
 
     # Exchange Connector Settings
     BINANCE_MODE: str = os.getenv("BINANCE_MODE") or ("demo" if os.getenv("ENVIRONMENT", "").lower() == "demo" else "simulated")
@@ -139,6 +152,8 @@ class Settings(BaseSettings):
     OBV_PERIOD: int = int(os.getenv("OBV_PERIOD", "1"))
 
     # Ensemble Predictor Settings
+    ENSEMBLE_MODEL_DIR: str = os.getenv("ENSEMBLE_MODEL_DIR", "models")
+    BACKTEST_USE_ENSEMBLE: bool = os.getenv("BACKTEST_USE_ENSEMBLE", "false").lower() == "true"
     ENSEMBLE_WEIGHTS: Dict[str, float] = {
         "transformer": 0.4,
         "lstm": 0.3,
@@ -165,6 +180,7 @@ class Settings(BaseSettings):
     PULLBACK_RSI_PERIOD: int = int(os.getenv("PULLBACK_RSI_PERIOD", "14"))
     PULLBACK_ATR_PERIOD: int = int(os.getenv("PULLBACK_ATR_PERIOD", "14"))
     PULLBACK_VOLUME_PERIOD: int = int(os.getenv("PULLBACK_VOLUME_PERIOD", "20"))
+    PULLBACK_TOUCH_TOLERANCE: float = float(os.getenv("PULLBACK_TOUCH_TOLERANCE", "0.003"))
     PULLBACK_EXHAUSTION_VOLUME_RATIO: float = float(os.getenv("PULLBACK_EXHAUSTION_VOLUME_RATIO", "0.80"))
     PULLBACK_TRIGGER_VOLUME_RATIO: float = float(os.getenv("PULLBACK_TRIGGER_VOLUME_RATIO", "1.30"))
     PULLBACK_STOP_ATR_MULTIPLE: float = float(os.getenv("PULLBACK_STOP_ATR_MULTIPLE", "1.5"))
@@ -188,6 +204,7 @@ class Settings(BaseSettings):
 
     # Backtest and stress validation
     BACKTEST_INITIAL_CAPITAL: float = float(os.getenv("BACKTEST_INITIAL_CAPITAL", "10000"))
+    BACKTEST_WARMUP_BARS: int = int(os.getenv("BACKTEST_WARMUP_BARS", "0"))
     BACKTEST_FEE_RATE: float = float(os.getenv("BACKTEST_FEE_RATE", "0.001"))
     BACKTEST_STOP_LOSS_PCT: float = float(os.getenv("BACKTEST_STOP_LOSS_PCT", "0.02"))
     BACKTEST_TAKE_PROFIT_PCT: float = float(os.getenv("BACKTEST_TAKE_PROFIT_PCT", "0.05"))
@@ -197,16 +214,31 @@ class Settings(BaseSettings):
     NEWS_HTTP_TIMEOUT_SECONDS: float = float(os.getenv("NEWS_HTTP_TIMEOUT_SECONDS", "8"))
     NEWS_CACHE_TTL_SECONDS: int = int(os.getenv("NEWS_CACHE_TTL_SECONDS", "300"))
     NEWS_MAX_ARTICLES: int = int(os.getenv("NEWS_MAX_ARTICLES", "20"))
+    NEWS_PROVIDER_ARTICLES: int = int(os.getenv("NEWS_PROVIDER_ARTICLES", "10"))
     GDELT_BASE_URL: str = os.getenv("GDELT_BASE_URL", "https://api.gdeltproject.org/api/v2/doc/doc")
     NEWS_RSS_URL_TEMPLATE: str = os.getenv("NEWS_RSS_URL_TEMPLATE", "https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en")
     COINGECKO_BASE_URL: str = os.getenv("COINGECKO_BASE_URL", "https://api.coingecko.com/api/v3")
-    COINGECKO_API_KEY: Optional[str] = os.getenv("COINGECKO_API_KEY")
+    COINGECKO_API_KEY: Optional[str] = _env_value("COINGECKO_API_KEY")
     BENZINGA_NEWS_URL: str = os.getenv("BENZINGA_NEWS_URL", "https://api.benzinga.com/api/v2/news")
     BENZINGA_TRENDS_URL: str = os.getenv("BENZINGA_TRENDS_URL", "https://api.benzinga.com/api/v1/trending-tickers")
-    NEWSAPI_API_KEY: Optional[str] = os.getenv("NEWSAPI_API_KEY")
+    NEWSAPI_API_KEY: Optional[str] = _env_value("NEWSAPI_API_KEY", "NewsApi_API_KEY")
     NEWSAPI_BASE_URL: str = os.getenv("NEWSAPI_BASE_URL", "https://newsapi.org/v2/everything")
-    CRYPTOPANIC_API_KEY: Optional[str] = os.getenv("CRYPTOPANIC_API_KEY")
+    MARKETAUX_BASE_URL: str = os.getenv("MARKETAUX_BASE_URL", "https://api.marketaux.com/v1/news/all")
+    FINNHUB_BASE_URL: str = os.getenv("FINNHUB_BASE_URL", "https://finnhub.io/api/v1")
+    FINNHUB_NEWS_CATEGORY: str = os.getenv("FINNHUB_NEWS_CATEGORY", "crypto")
+    TWELVE_DATA_BASE_URL: str = os.getenv("TWELVE_DATA_BASE_URL", "https://api.twelvedata.com")
+    CRYPTOPANIC_API_KEY: Optional[str] = _env_value("CRYPTOPANIC_API_KEY")
     CRYPTOPANIC_BASE_URL: str = os.getenv("CRYPTOPANIC_BASE_URL", "https://cryptopanic.com/api/GROWTH/v2/posts/")
+
+    @field_validator(
+        "ALPHA_VANTAGE_API_KEY", "BENZINGA_API_KEY", "MARKETAUX_API_KEY", "FINNHUB_API_KEY",
+        "TWELVE_DATA_API_KEY", "COINGECKO_API_KEY", "NEWSAPI_API_KEY", "CRYPTOPANIC_API_KEY",
+        "BINANCE_DEMO_API_KEY", "BINANCE_DEMO_SECRET_KEY", "BINANCE_API_KEY", "BINANCE_SECRET_KEY",
+        mode="before",
+    )
+    @classmethod
+    def _strip_secret_values(cls, value: Optional[str]) -> Optional[str]:
+        return value.strip() if isinstance(value, str) else value
 
     model_config = ConfigDict(env_file=".env", extra="ignore")
 

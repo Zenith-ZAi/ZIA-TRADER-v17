@@ -6,7 +6,7 @@ from sqlalchemy.orm import sessionmaker
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict
 
-from database import Base, AccountState, Position, DailyPNL, WeeklyPNL, MonthlyPNL, Drawdown, OrderHistory, ExecutionHistory, Trade, WhaleActivity, NewsArticle, TrendSnapshot, SystemLog, MarketType, OrderStatus, utc_now
+from database import Base, AccountState, Position, DailyPNL, WeeklyPNL, MonthlyPNL, Drawdown, OrderHistory, ExecutionHistory, Trade, WhaleActivity, NewsArticle, TrendSnapshot, AIObservation, SystemLog, MarketType, OrderStatus, utc_now
 
 class DatabaseManager:
     def __init__(self, database_url: str):
@@ -193,19 +193,76 @@ class DatabaseManager:
 
     def create_trend_snapshot(self, trend: Dict[str, object]) -> TrendSnapshot:
         db = self.SessionLocal()
+        provider = str(trend.get("provider") or trend.get("source") or "unknown")
+        symbol = str(trend.get("symbol") or "unknown")
+        trend_score = float(trend.get("trend_score") or 0.0)
+        market_cap_rank = trend.get("market_cap_rank")
+        price_change_24h = trend.get("price_change_24h")
+        metadata = dict(trend)
+        existing = db.query(TrendSnapshot).filter(
+            TrendSnapshot.provider == provider,
+            TrendSnapshot.symbol == symbol,
+            TrendSnapshot.trend_score == trend_score,
+            TrendSnapshot.market_cap_rank == market_cap_rank,
+            TrendSnapshot.price_change_24h == price_change_24h,
+        ).order_by(TrendSnapshot.observed_at.desc()).first()
+        if existing and existing.metadata_json == metadata:
+            existing.observed_at = utc_now()
+            db.commit()
+            db.refresh(existing)
+            db.close()
+            return existing
         snapshot = TrendSnapshot(
-            provider=str(trend.get("provider") or trend.get("source") or "unknown"),
-            symbol=str(trend.get("symbol") or "unknown"),
-            trend_score=float(trend.get("trend_score") or 0.0),
-            market_cap_rank=trend.get("market_cap_rank"),
-            price_change_24h=trend.get("price_change_24h"),
-            metadata_json=dict(trend),
+            provider=provider,
+            symbol=symbol,
+            trend_score=trend_score,
+            market_cap_rank=market_cap_rank,
+            price_change_24h=price_change_24h,
+            metadata_json=metadata,
         )
         db.add(snapshot)
         db.commit()
         db.refresh(snapshot)
         db.close()
         return snapshot
+
+    # AI shadow observations
+    def create_ai_observation(self, observation: Dict[str, object]) -> AIObservation:
+        db = self.SessionLocal()
+        record = AIObservation(
+            symbol=str(observation.get("symbol") or "unknown"),
+            observed_at=observation.get("observed_at") if isinstance(observation.get("observed_at"), datetime) else utc_now(),
+            mode=str(observation.get("mode") or "shadow"),
+            action=str(observation.get("action") or "hold"),
+            candidate_action=str(observation.get("candidate_action") or "hold"),
+            confidence=float(observation.get("confidence") or 0.0),
+            model_action=str(observation.get("model_action") or "hold"),
+            model_confidence=float(observation.get("model_confidence") or 0.0),
+            market_signal_action=str(observation.get("market_signal_action") or "hold"),
+            market_signal_confidence=float(observation.get("market_signal_confidence") or 0.0),
+            price=float(observation.get("price") or 0.0),
+            news_sentiment=float(observation.get("news_sentiment") or 0.0),
+            trend_score=float(observation.get("trend_score") or 0.0),
+            event_blocked=bool(observation.get("event_blocked", False)),
+            risk_valid=bool(observation.get("risk_valid", False)),
+            forward_return=observation.get("forward_return"),
+            outcome_label=observation.get("outcome_label"),
+            metadata_json=dict(observation.get("metadata_json") or {}),
+        )
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        db.close()
+        return record
+
+    def get_ai_observations(self, symbol: Optional[str] = None, limit: int = 1000) -> List[AIObservation]:
+        db = self.SessionLocal()
+        query = db.query(AIObservation)
+        if symbol:
+            query = query.filter(AIObservation.symbol == symbol)
+        observations = query.order_by(AIObservation.observed_at.desc()).limit(max(1, min(int(limit), 10000))).all()
+        db.close()
+        return observations
 
     # OrderHistory Operations
     def create_order_history(self, account_id: str, order_id: str, symbol: str, market_type: MarketType, action: str, order_type: str, price: Optional[float], quantity: Optional[float], status: OrderStatus, metadata_json: Optional[dict] = None) -> OrderHistory:

@@ -63,7 +63,7 @@ class RoboTraderUnified:
             lstm_output_size = self.settings.LSTM_OUTPUT_DIM
             self.lstm_model = PriceLSTMModel(input_dim, lstm_hidden_size, lstm_num_layers, lstm_output_size)
             self.neural_models_ready = self._load_neural_weights()
-            self.ensemble_model = EnsembleModel()
+            self.ensemble_model = EnsembleModel(self.settings.ENSEMBLE_MODEL_DIR)
             self.execution_engine = ExecutionEngine(self.settings, self.exchange_connector, self.redis_cache)
         except Exception as e:
             logger.critical(f"Falha fatal na inicialização dos modelos de IA: {e}")
@@ -207,6 +207,7 @@ class RoboTraderUnified:
                             "rsi_period": int(self.settings.PULLBACK_RSI_PERIOD),
                             "atr_period": int(self.settings.PULLBACK_ATR_PERIOD),
                             "volume_period": int(self.settings.PULLBACK_VOLUME_PERIOD),
+                            "touch_tolerance": float(self.settings.PULLBACK_TOUCH_TOLERANCE),
                             "exhaustion_volume_ratio": float(self.settings.PULLBACK_EXHAUSTION_VOLUME_RATIO),
                             "trigger_volume_ratio": float(self.settings.PULLBACK_TRIGGER_VOLUME_RATIO),
                             "stop_atr_multiple": float(self.settings.PULLBACK_STOP_ATR_MULTIPLE),
@@ -265,8 +266,48 @@ class RoboTraderUnified:
                         "reversal_signal": reversal_signal,
                         "pullback_signal": market_signal.pullback,
                         "event_guard": event_status,
-                        "volume_analysis": volume_analysis
+                        "volume_analysis": volume_analysis,
                     }
+                    shadow_order_data = {
+                        "symbol": symbol,
+                        "action": analysis["prediction"],
+                        "confidence": analysis["confidence"],
+                        "price": current_price,
+                    }
+                    shadow_risk = {"valid": False, "reason": "sinal HOLD"}
+                    if analysis["prediction"] in {"buy", "sell"}:
+                        shadow_risk = self.risk_ai.validate_order(shadow_order_data, account_balance, market_context)
+                    if self.settings.SHADOW_MODE_ENABLED:
+                        feature_snapshot = {}
+                        if not model_features.empty:
+                            feature_snapshot = {key: float(value) for key, value in model_features.tail(1).iloc[0].to_dict().items() if np.isfinite(float(value))}
+                        self.db_manager.create_ai_observation({
+                            "symbol": symbol,
+                            "mode": "shadow",
+                            "action": analysis["prediction"],
+                            "candidate_action": market_signal.candidate_action,
+                            "confidence": analysis["confidence"],
+                            "model_action": model_action,
+                            "model_confidence": model_confidence,
+                            "market_signal_action": market_signal.action,
+                            "market_signal_confidence": market_signal.confidence,
+                            "price": current_price,
+                            "news_sentiment": avg_sentiment,
+                            "trend_score": trend_score,
+                            "event_blocked": bool(event_status.get("blocked", False)),
+                            "risk_valid": bool(shadow_risk.get("valid", False)),
+                            "metadata_json": {
+                                "news_count": len(processed_news),
+                                "news_provider_health": self.news_processor.health(),
+                                "regime": market_signal.regime,
+                                "reversal_signal": reversal_signal,
+                                "pullback_signal": market_signal.pullback,
+                                "event_guard": event_status,
+                                "volume_analysis": volume_analysis,
+                                "features": feature_snapshot,
+                                "risk_reason": shadow_risk.get("reason", ""),
+                            },
+                        })
                     
                     # 4. Risco e Execução
                     if analysis["prediction"] != "hold" and self.settings.AUTONOMOUS_TRADING_ENABLED:

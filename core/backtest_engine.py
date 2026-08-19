@@ -9,6 +9,8 @@ import numpy as np
 import pandas as pd
 
 from config.settings import Settings
+from ai.ensemble_model import EnsembleModel
+from ai.feature_pipeline import build_feature_frame
 from core.market_signals import MarketSignal, MarketSignalCache
 from core.pullback_strategy import PullbackSignalCache
 from core.event_guard import EconomicEventGuard
@@ -129,6 +131,7 @@ class BacktestEngine:
         quality_counts = {"good": 0, "rejected": 0, "bad_data": 0}
         blocked_event_bars = 0
         blocked_event_candidates = 0
+        ensemble_rejections = 0
         signal_cache = MarketSignalCache(data)
         pullback_cache = PullbackSignalCache(
             data,
@@ -136,14 +139,18 @@ class BacktestEngine:
             rsi_period=int(self.settings.PULLBACK_RSI_PERIOD),
             atr_period=int(self.settings.PULLBACK_ATR_PERIOD),
             volume_period=int(self.settings.PULLBACK_VOLUME_PERIOD),
+            touch_tolerance=float(self.settings.PULLBACK_TOUCH_TOLERANCE),
             exhaustion_volume_ratio=float(self.settings.PULLBACK_EXHAUSTION_VOLUME_RATIO),
             trigger_volume_ratio=float(self.settings.PULLBACK_TRIGGER_VOLUME_RATIO),
             stop_atr_multiple=float(self.settings.PULLBACK_STOP_ATR_MULTIPLE),
             target_atr_multiple=float(self.settings.PULLBACK_TARGET_ATR_MULTIPLE),
             breakeven_atr_trigger=float(self.settings.PULLBACK_BREAKEVEN_ATR_TRIGGER),
         ) if self.settings.PULLBACK_STRATEGY_ENABLED else None
+        ensemble_model = EnsembleModel(self.settings.ENSEMBLE_MODEL_DIR) if self.settings.BACKTEST_USE_ENSEMBLE else None
+        model_features = build_feature_frame(data).dropna() if ensemble_model and ensemble_model.is_trained else None
 
-        for index in range(35, len(data)):
+        start_index = max(35, int(self.settings.BACKTEST_WARMUP_BARS))
+        for index in range(start_index, len(data)):
             row = data.iloc[index]
             price = self._price(row, "open")
             if not np.isfinite(price) or price <= 0:
@@ -196,6 +203,22 @@ class BacktestEngine:
             if event_status.get("blocked"):
                 if raw_signal_action not in {"buy", "sell"} and signal.action in {"buy", "sell"}:
                     blocked_event_candidates += 1
+            if ensemble_model and ensemble_model.is_trained and model_features is not None and data.index[index] in model_features.index and signal.action in {"buy", "sell"}:
+                model_action, model_confidence = ensemble_model.predict(model_features.loc[[data.index[index]]])
+                if model_action != signal.action or model_confidence < float(self.settings.MIN_CONFIDENCE_THRESHOLD):
+                    ensemble_rejections += 1
+                    signal = MarketSignal(
+                        action="hold",
+                        candidate_action=signal.candidate_action,
+                        confidence=signal.confidence,
+                        score=signal.score,
+                        status="rejected",
+                        regime=signal.regime,
+                        volatility=signal.volatility,
+                        indicators=signal.indicators,
+                        reasons=signal.reasons + ["Ensemble não confirmou a direção no shadow gate"],
+                        pullback=signal.pullback,
+                    )
             if event_status.get("blocked") and signal.action in {"buy", "sell"}:
                 signal = MarketSignal(
                     action="hold",
@@ -322,6 +345,8 @@ class BacktestEngine:
             "total_fees": float(sum(trade.get("fees", 0.0) for trade in trades)),
             "blocked_event_bars": blocked_event_bars,
             "blocked_event_candidates": blocked_event_candidates,
+            "ensemble_enabled": bool(ensemble_model and ensemble_model.is_trained),
+            "ensemble_rejections": ensemble_rejections,
             "trades": trades,
         }
         logger.info("Backtest para %s concluído: PNL=%.2f, trades=%s", symbol, result["total_pnl"], len(trades))

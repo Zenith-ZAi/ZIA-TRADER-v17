@@ -17,6 +17,7 @@ venv/
 data/*.db
 data/*.csv
 data/public_backtest_comparison.json
+data/shadow_calibration*.json
 data/*.sqlite
 data/*.sqlite3
 *.log

@@ -159,6 +159,29 @@ class TrendSnapshot(Base):
     metadata_json = Column(JSON)
 
 
+class AIObservation(Base):
+    __tablename__ = 'ai_observations'
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String, nullable=False, index=True)
+    observed_at = Column(DateTime, default=utc_now, index=True)
+    mode = Column(String, nullable=False, default="shadow")
+    action = Column(String, nullable=False, default="hold")
+    candidate_action = Column(String, nullable=False, default="hold")
+    confidence = Column(Float, default=0.0)
+    model_action = Column(String, nullable=False, default="hold")
+    model_confidence = Column(Float, default=0.0)
+    market_signal_action = Column(String, nullable=False, default="hold")
+    market_signal_confidence = Column(Float, default=0.0)
+    price = Column(Float, default=0.0)
+    news_sentiment = Column(Float, default=0.0)
+    trend_score = Column(Float, default=0.0)
+    event_blocked = Column(Boolean, default=False)
+    risk_valid = Column(Boolean, default=False)
+    forward_return = Column(Float, nullable=True)
+    outcome_label = Column(Integer, nullable=True)
+    metadata_json = Column(JSON)
+
+
 class SystemLog(Base):
     __tablename__ = 'system_logs'
     id = Column(Integer, primary_key=True)
