@@ -2,11 +2,12 @@ import asyncio
 from contextlib import asynccontextmanager
 import logging
 import secrets
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from prometheus_client import generate_latest
 
@@ -71,6 +72,14 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title=settings.PROJECT_NAME, version=settings.VERSION, lifespan=lifespan)
+allowed_origins = [origin.strip() for origin in settings.CORS_ALLOWED_ORIGINS.split(",") if origin.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 
 def _public_user(user: Dict[str, Any]) -> Dict[str, Any]:
@@ -221,11 +230,68 @@ async def read_own_items(
     return [{"item_id": "Foo", "owner": current_user["username"]}]
 
 
+def _runtime_status_payload() -> Dict[str, Any]:
+    tasks = {
+        name: bool(task and not task.done())
+        for name, task in engine_tasks.items()
+    }
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "engines": tasks,
+        "runtime": trading_manager.runtime_status(),
+        "exchange": {
+            "connected": trading_manager.exchange_connector.is_connected,
+            "mode": settings.BINANCE_MODE,
+        },
+        "redis": trading_manager.redis_cache.health(),
+        "news_providers": trading_manager.news_processor.health(),
+    }
+
+
 @app.get("/admin/dashboard")
 async def admin_dashboard(
     current_user: Dict[str, Any] = Depends(get_admin_user),
 ):
-    return {"message": f"Welcome, admin {current_user['username']}"}
+    return {"message": f"Welcome, admin {current_user['username']}", "status": _runtime_status_payload()}
+
+
+@app.get("/dashboard/status")
+async def dashboard_status(
+    current_user: Dict[str, Any] = Depends(get_trader_user),
+) -> Dict[str, Any]:
+    await rate_limiter(current_user["username"])
+    return _runtime_status_payload()
+
+
+@app.post("/runtime/reload")
+async def reload_runtime(
+    current_user: Dict[str, Any] = Depends(get_admin_user),
+) -> Dict[str, Any]:
+    await rate_limiter(current_user["username"])
+    profile = trading_manager.reload_runtime_config()
+    return {"reloaded": True, "profile": profile, "status": _runtime_status_payload()}
+
+
+@app.websocket("/ws/dashboard")
+async def dashboard_websocket(websocket: WebSocket):
+    token = websocket.query_params.get("token")
+    try:
+        if not token:
+            raise HTTPException(status_code=401, detail="Token obrigatório")
+        username = verify_token(token, HTTPException(status_code=401, detail="Token inválido"))
+        user = _auth_users().get(username)
+        if not user or not is_trader(user.get("roles", [])):
+            raise HTTPException(status_code=403, detail="Permissão insuficiente")
+    except HTTPException:
+        await websocket.close(code=1008)
+        return
+    await websocket.accept()
+    try:
+        while True:
+            await websocket.send_json(_runtime_status_payload())
+            await asyncio.sleep(2)
+    except WebSocketDisconnect:
+        return
 
 
 @app.get("/")

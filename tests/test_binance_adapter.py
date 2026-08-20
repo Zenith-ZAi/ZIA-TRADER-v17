@@ -89,3 +89,12 @@ def test_adapter_connect_market_balance_history_and_filters():
     signed_query = signed_call["params"] or ""
     assert "signature=" in signed_query
     assert "test-secret" not in signed_query
+
+
+def test_adapter_aggregates_supported_10m_from_5m():
+    session = FakeSession()
+    adapter = BinanceSpotAdapter(sandbox_settings(), session=session)
+    history = asyncio.run(adapter.get_historical_data("BTC/USDT", "10m", 1))
+    assert len(history) == 1
+    kline_call = next(call for call in session.calls if call["url"].endswith("/v3/klines"))
+    assert "interval=5m" in str(kline_call["params"])

@@ -65,6 +65,7 @@ class ExecutionEngine:
         await self.redis_cache.set_state(f"position_{symbol}", position_state)
         if self.db_manager is not None:
             try:
+                self.db_manager.upsert_runtime_position(self.account_id, position_state)
                 self.db_manager.create_position(
                     self.account_id,
                     symbol,
@@ -80,6 +81,7 @@ class ExecutionEngine:
         await self.redis_cache.delete_state(f"position_{symbol}")
         if self.db_manager is not None:
             try:
+                self.db_manager.close_runtime_position(self.account_id, symbol)
                 self.db_manager.close_position(self.account_id, symbol)
             except Exception as exc:
                 logger.error("Falha ao fechar posição persistida de %s: %s", symbol, exc)

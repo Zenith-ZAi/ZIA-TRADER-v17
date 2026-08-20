@@ -49,3 +49,13 @@ def test_invalid_demo_login_is_rejected(monkeypatch, tmp_path):
             data={"username": "admin", "password": "wrong"},
         )
         assert response.status_code == 401
+
+
+def test_dashboard_control_surface_is_exposed():
+    import importlib
+
+    module = importlib.import_module("main")
+    paths = {getattr(route, "path", "") for route in module.app.routes}
+    assert "/dashboard/status" in paths
+    assert "/runtime/reload" in paths
+    assert "/ws/dashboard" in paths

@@ -6,7 +6,7 @@ from sqlalchemy.orm import sessionmaker
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict
 
-from database import Base, AccountState, Position, DailyPNL, WeeklyPNL, MonthlyPNL, Drawdown, OrderHistory, ExecutionHistory, Trade, WhaleActivity, NewsArticle, TrendSnapshot, AIObservation, MarketPattern, SystemLog, MarketType, OrderStatus, utc_now
+from database import Base, AccountState, Position, RuntimePositionState, DailyPNL, WeeklyPNL, MonthlyPNL, Drawdown, OrderHistory, ExecutionHistory, Trade, WhaleActivity, NewsArticle, TrendSnapshot, AIObservation, MarketPattern, SystemLog, MarketType, OrderStatus, utc_now
 
 class DatabaseManager:
     def __init__(self, database_url: str):
@@ -80,6 +80,48 @@ class DatabaseManager:
         if position:
             position.is_open = False
             position.close_time = utc_now()
+            db.commit()
+            db.refresh(position)
+        db.close()
+        return position
+
+    # Runtime position state operations
+    def upsert_runtime_position(self, account_id: str, state: Dict) -> RuntimePositionState:
+        db = self.SessionLocal()
+        position = db.query(RuntimePositionState).filter(
+            RuntimePositionState.account_id == account_id,
+            RuntimePositionState.symbol == state["symbol"],
+        ).first()
+        if position is None:
+            position = RuntimePositionState(account_id=account_id, symbol=state["symbol"])
+            db.add(position)
+        for field in ("action", "quantity", "entry_price", "stop_loss", "take_profit", "breakeven_trigger", "order_id"):
+            if field in state:
+                setattr(position, field, state[field])
+        position.is_open = True
+        db.commit()
+        db.refresh(position)
+        db.close()
+        return position
+
+    def get_open_runtime_positions(self, account_id: str) -> List[RuntimePositionState]:
+        db = self.SessionLocal()
+        rows = db.query(RuntimePositionState).filter(
+            RuntimePositionState.account_id == account_id,
+            RuntimePositionState.is_open.is_(True),
+        ).all()
+        db.close()
+        return rows
+
+    def close_runtime_position(self, account_id: str, symbol: str) -> Optional[RuntimePositionState]:
+        db = self.SessionLocal()
+        position = db.query(RuntimePositionState).filter(
+            RuntimePositionState.account_id == account_id,
+            RuntimePositionState.symbol == symbol,
+            RuntimePositionState.is_open.is_(True),
+        ).first()
+        if position:
+            position.is_open = False
             db.commit()
             db.refresh(position)
         db.close()

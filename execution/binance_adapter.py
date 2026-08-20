@@ -40,7 +40,7 @@ class BinanceSpotAdapter:
     """Implementação real da API Spot somente em ambiente Testnet/Demo."""
 
     ALLOWED_HOSTS = {"testnet.binance.vision", "demo-api.binance.com"}
-    INTERVALS = {"1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w", "1M"}
+    INTERVALS = {"1m", "3m", "5m", "10m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w", "1M"}
 
     def __init__(self, settings: Settings, session: Optional[requests.Session] = None):
         self.settings = settings
@@ -195,16 +195,40 @@ class BinanceSpotAdapter:
             result["price"] = normalized_price
         return result
 
-    async def get_historical_data(self, symbol: str, timeframe: str, limit: int = 100) -> pd.DataFrame:
-        if timeframe not in self.INTERVALS:
-            raise BinanceAdapterError(f"Timeframe não suportado pela Binance: {timeframe}")
-        payload = await self._request("GET", "/v3/klines", {"symbol": self.symbol_code(symbol), "interval": timeframe, "limit": min(limit, 1000)})
+    @staticmethod
+    def _klines_to_frame(payload: list) -> pd.DataFrame:
         columns = ["timestamp", "open", "high", "low", "close", "volume", "close_time", "quote_volume", "trades", "taker_base", "taker_quote", "ignore"]
         frame = pd.DataFrame(payload, columns=columns)
+        if frame.empty:
+            return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
         frame["timestamp"] = pd.to_datetime(frame["timestamp"], unit="ms", utc=True)
         for column in ["open", "high", "low", "close", "volume"]:
             frame[column] = pd.to_numeric(frame[column], errors="raise")
         return frame.set_index("timestamp")[["open", "high", "low", "close", "volume"]].sort_index()
+
+    async def get_historical_data(self, symbol: str, timeframe: str, limit: int = 100) -> pd.DataFrame:
+        if timeframe not in self.INTERVALS:
+            raise BinanceAdapterError(f"Timeframe não suportado pela Binance: {timeframe}")
+        if timeframe == "10m":
+            source_limit = min(max(int(limit) * 2 + 2, 10), 1000)
+            payload = await self._request(
+                "GET",
+                "/v3/klines",
+                {"symbol": self.symbol_code(symbol), "interval": "5m", "limit": source_limit},
+            )
+            frame = self._klines_to_frame(payload)
+            if frame.empty:
+                return frame
+            aggregated = frame.resample("10min", label="left", closed="left").agg(
+                {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
+            ).dropna()
+            return aggregated.tail(int(limit))
+        payload = await self._request(
+            "GET",
+            "/v3/klines",
+            {"symbol": self.symbol_code(symbol), "interval": timeframe, "limit": min(limit, 1000)},
+        )
+        return self._klines_to_frame(payload)
 
     async def get_market_data(self, symbol: str) -> Dict[str, Any]:
         code = self.symbol_code(symbol)

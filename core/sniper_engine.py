@@ -16,19 +16,24 @@ from core.event_guard import EconomicEventGuard
 from execution.exchange_connector import ExchangeConnector
 from risk.risk_ai import RiskAI
 from core.pullback_strategy import PullbackSignalCache
+from core.news_gate import evaluate_news_gate
+from core.risk_guard import evaluate_circuit_breaker, evaluate_emergency_exit
+from core.position_policy import evaluate_position_exit
+from core.microstructure import estimate_entry_costs
 from monitoring.metrics import AI_LOCAL_DECISION_LATENCY
 
 logger = logging.getLogger(__name__)
 
 class SniperEngine:
     """Motor Sniper para execução rápida em eventos de alta volatilidade."""
-    def __init__(self, settings: Settings, exchange_connector: ExchangeConnector, execution_engine: ExecutionEngine, whale_detector: WhaleDetector, redis_cache: RedisCache, db_manager):
+    def __init__(self, settings: Settings, exchange_connector: ExchangeConnector, execution_engine: ExecutionEngine, whale_detector: WhaleDetector, redis_cache: RedisCache, db_manager, news_processor=None):
         self.settings = settings
         self.exchange_connector = exchange_connector
         self.execution_engine = execution_engine
         self.whale_detector = whale_detector
         self.redis_cache = redis_cache
         self.db_manager = db_manager
+        self.news_processor = news_processor
         self.account_id = "default_account" # Pode ser dinâmico em um sistema real
         self.risk_ai = RiskAI(settings, db_manager)
         self.event_guard = EconomicEventGuard(
@@ -39,6 +44,10 @@ class SniperEngine:
         self.is_running = False
         self.symbols = self.settings.SYMBOLS
         self.volatility_threshold = self.settings.SNIPER_VOLATILITY_THRESHOLD  # Ex: 2% de variação em 1 minuto
+
+    def refresh_runtime_config(self) -> None:
+        self.symbols = self.settings.SYMBOLS
+        logger.info("Configuração do Sniper atualizada: símbolos=%s timeframe=%s", self.symbols, self.settings.SNIPER_TIMEFRAME)
 
     async def start(self):
         """Inicia o motor Sniper."""
@@ -60,6 +69,26 @@ class SniperEngine:
                     if current_price is None:
                         logger.warning(f"[{symbol}] Sniper: Não foi possível obter o preço atual. Pulando ciclo.")
                         continue
+
+                    live_position = await self.redis_cache.get_state(f"position_{symbol}")
+                    if live_position and self.settings.AUTONOMOUS_TRADING_ENABLED:
+                        exit_decision = evaluate_position_exit(
+                            live_position,
+                            current_price,
+                            high=current_market_data.get("high", current_price),
+                            low=current_market_data.get("low", current_price),
+                        )
+                        if exit_decision.get("should_exit"):
+                            try:
+                                exchange_balances = await self.exchange_connector.get_account_balance()
+                            except Exception:
+                                exchange_balances = {}
+                            exit_payload = {**live_position, "symbol": symbol, "exit_reason": exit_decision.get("reason")}
+                            exit_validation = self.risk_ai.validate_exit(exit_payload, exit_decision["price"], {"exchange_balances": exchange_balances})
+                            if exit_validation.get("valid"):
+                                exit_result = await self.execution_engine.execute_order(exit_validation)
+                                if exit_result.get("status") == "success":
+                                    logger.info("Sniper: posição fechada por %s", exit_decision.get("reason"))
 
                     previous_price_key = f"prev_price_sniper_{symbol}"
                     previous_price = await self.redis_cache.get_state(previous_price_key)
@@ -88,7 +117,18 @@ class SniperEngine:
                         if price_change > self.volatility_threshold:
                             sniper_started = time.perf_counter()
                             action = "buy" if current_price > float(previous_price) else "sell"
-                            live_position = await self.redis_cache.get_state(f"position_{symbol}")
+                            processed_news = []
+                            trends = []
+                            if self.news_processor is not None:
+                                try:
+                                    processed_news = await self.news_processor.fetch_all([symbol])
+                                    trends = await self.news_processor.fetch_trending([symbol])
+                                except Exception as exc:
+                                    logger.warning("Sniper: falha em notícias/tendências para %s: %s", symbol, exc)
+                            news_sentiment = self.news_processor.aggregate_sentiment(processed_news) if self.news_processor is not None else 0.0
+                            trend_score = float(trends[0].get("trend_score", 0.0)) if trends else 0.0
+                            news_health = self.news_processor.health() if self.news_processor is not None else {}
+                            news_gate = evaluate_news_gate(processed_news, news_health, self.settings)
                             pullback_signal_cached = None
                             if self.settings.PULLBACK_STRATEGY_ENABLED:
                                 pullback_signal_cached = PullbackSignalCache(
@@ -106,6 +146,8 @@ class SniperEngine:
                                 ).at(len(historical_data) - 1)
                             market_signal = calculate_market_signal(
                                 historical_data,
+                                news_sentiment=news_sentiment,
+                                trend_score=trend_score,
                                 min_confidence=float(self.settings.MIN_CONFIDENCE_THRESHOLD),
                                 max_volatility=float(self.settings.BACKTEST_MAX_VOLATILITY),
                                 pullback_kwargs={
@@ -128,6 +170,27 @@ class SniperEngine:
                             )
                             pullback_ok = not self.settings.PULLBACK_STRATEGY_ENABLED or market_signal.pullback.get("action") == action
                             event_status = self.event_guard.blocked(datetime.now(timezone.utc), symbol)
+                            account_state = self.db_manager.get_account_state(self.account_id)
+                            daily_pnl_obj = self.db_manager.get_daily_pnl(self.account_id, datetime.now(timezone.utc).replace(tzinfo=None))
+                            circuit_breaker = evaluate_circuit_breaker(
+                                float(account_state.balance if account_state else 0.0),
+                                float(account_state.initial_capital if account_state else 0.0),
+                                float(daily_pnl_obj.pnl if daily_pnl_obj else 0.0),
+                                self.settings,
+                            )
+                            emergency_exit = evaluate_emergency_exit(event_status, news_gate, market_signal, self.settings)
+                            estimated_stop = current_price * (1.0 - float(self.settings.STOP_LOSS_PCT)) if action == "buy" else current_price * (1.0 + float(self.settings.STOP_LOSS_PCT))
+                            estimated_target = current_price * (1.0 + float(self.settings.TAKE_PROFIT_PCT)) if action == "buy" else current_price * (1.0 - float(self.settings.TAKE_PROFIT_PCT))
+                            microstructure = estimate_entry_costs(
+                                current_market_data,
+                                current_order_flow,
+                                action,
+                                float(self.settings.SNIPER_TRADE_QUANTITY),
+                                current_price,
+                                estimated_stop,
+                                estimated_target,
+                                self.settings,
+                            )
                             spot_direction_allowed = bool(self.settings.ALLOW_SHORT or action == "buy")
                             entry_allowed = live_position is None
                             confirmed_event = bool(
@@ -139,11 +202,14 @@ class SniperEngine:
                                 and market_signal.action == action
                                 and market_signal.confidence >= float(self.settings.MIN_CONFIDENCE_THRESHOLD)
                                 and pullback_ok
+                                and news_gate["entry_allowed"]
+                                and not circuit_breaker["tripped"]
+                                and microstructure["allowed"]
                                 and not event_status.get("blocked", False)
                             )
                             sniper_latency_ms = (time.perf_counter() - sniper_started) * 1000.0
                             AI_LOCAL_DECISION_LATENCY.observe(sniper_latency_ms / 1000.0)
-                            shadow_action = action if whale_detected and whale_direction_matches and market_signal.action == action and market_signal.confidence >= float(self.settings.MIN_CONFIDENCE_THRESHOLD) and pullback_ok and not event_status.get("blocked", False) else "hold"
+                            shadow_action = action if whale_detected and whale_direction_matches and market_signal.action == action and market_signal.confidence >= float(self.settings.MIN_CONFIDENCE_THRESHOLD) and pullback_ok and news_gate["entry_allowed"] and not circuit_breaker["tripped"] and microstructure["allowed"] and not event_status.get("blocked", False) else "hold"
                             if self.settings.SHADOW_MODE_ENABLED:
                                 self.db_manager.create_ai_observation({
                                     "symbol": symbol,
@@ -156,8 +222,8 @@ class SniperEngine:
                                     "market_signal_action": market_signal.action,
                                     "market_signal_confidence": market_signal.confidence,
                                     "price": current_price,
-                                    "news_sentiment": 0.0,
-                                    "trend_score": 0.0,
+                                    "news_sentiment": news_sentiment,
+                                    "trend_score": trend_score,
                                     "event_blocked": bool(event_status.get("blocked", False)),
                                     "risk_valid": False,
                                     "decision_latency_ms": sniper_latency_ms,
@@ -167,6 +233,10 @@ class SniperEngine:
                                         "whale_activity": whale_activity,
                                         "pullback_signal": market_signal.pullback,
                                         "event_guard": event_status,
+                                        "news_gate": news_gate,
+                                        "circuit_breaker": circuit_breaker,
+                                        "microstructure": microstructure,
+                                        "emergency_exit": emergency_exit,
                                         "live_position": live_position or {},
                                         "spot_direction_allowed": spot_direction_allowed,
                                         "autonomous_enabled": self.settings.AUTONOMOUS_TRADING_ENABLED,
@@ -187,6 +257,7 @@ class SniperEngine:
                                     "quantity": self.settings.SNIPER_TRADE_QUANTITY,
                                     "price": current_price,
                                     "confidence": min(float(market_signal.confidence), float(whale_activity.get("confidence", 0.0))),
+                                    "market_type": MarketType.FOREX if str(self.settings.MARKET_ADAPTER).lower() == "forex" else MarketType.CRYPTO,
                                 }
                                 account_state = self.db_manager.get_account_state(self.account_id)
                                 try:
@@ -201,6 +272,7 @@ class SniperEngine:
                                     "market_signal": market_signal.to_dict(),
                                     "whale_activity": whale_activity,
                                     "current_order_flow": current_order_flow,
+                                    "microstructure": microstructure,
                                 }
                                 risk_validation = self.risk_ai.validate_order(
                                     order_data,
@@ -219,7 +291,7 @@ class SniperEngine:
                                             execution_id=execution_result["order_id"],
                                             order_id=execution_result["order_id"],
                                             symbol=order_data["symbol"],
-                                            market_type=MarketType.CRYPTO,
+                                            market_type=order_data.get("market_type", MarketType.CRYPTO),
                                             action=order_data["action"],
                                             filled_price=execution_result["filled_price"],
                                             filled_quantity=execution_result["filled_quantity"],

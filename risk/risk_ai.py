@@ -122,6 +122,14 @@ class RiskAI:
         if entry_price <= 0:
             return {"valid": False, "reason": "Preço de entrada inválido."}
 
+        microstructure = (market_context or {}).get("microstructure") or {}
+        if bool(getattr(self.settings, "MICROSTRUCTURE_GATE_ENABLED", True)) and microstructure and not microstructure.get("allowed", False):
+            return {
+                "valid": False,
+                "reason": "; ".join(microstructure.get("reasons", ["microestrutura rejeitada"])),
+                "microstructure": microstructure,
+            }
+
         daily_pnl_obj = self.db_manager.get_daily_pnl(
             self.account_id,
             datetime.now(timezone.utc).replace(tzinfo=None),
@@ -178,4 +186,5 @@ class RiskAI:
             "take_profit": take_profit,
             "risk_amount": risk_amount,
             "projected_notional": proposed_notional,
+            "microstructure": microstructure,
         }

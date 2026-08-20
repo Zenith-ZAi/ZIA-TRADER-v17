@@ -67,6 +67,9 @@ def test_filled_entry_persists_rich_position_state(tmp_path):
     assert len(positions) == 1
     assert positions[0].market_type is MarketType.CRYPTO
     assert positions[0].entry_price == 101.25
+    runtime_positions = db.get_open_runtime_positions("test-account")
+    assert len(runtime_positions) == 1
+    assert runtime_positions[0].take_profit == 104.0
 
 
 def test_filled_exit_clears_position_state_and_database(tmp_path):
@@ -98,3 +101,4 @@ def test_filled_exit_clears_position_state_and_database(tmp_path):
     assert result["status"] == "success"
     assert "position_BTC/USDT" not in redis_cache.states
     assert db.get_open_positions("test-account") == []
+    assert db.get_open_runtime_positions("test-account") == []

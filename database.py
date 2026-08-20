@@ -47,6 +47,22 @@ class Position(Base):
     open_time = Column(DateTime, default=utc_now)
     close_time = Column(DateTime)
 
+class RuntimePositionState(Base):
+    __tablename__ = 'runtime_position_state'
+    id = Column(Integer, primary_key=True)
+    account_id = Column(String, nullable=False)
+    symbol = Column(String, nullable=False)
+    action = Column(String, nullable=False)
+    quantity = Column(Float, nullable=False)
+    entry_price = Column(Float, nullable=False)
+    stop_loss = Column(Float)
+    take_profit = Column(Float)
+    breakeven_trigger = Column(Float)
+    order_id = Column(String)
+    is_open = Column(Boolean, default=True)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+
 class DailyPNL(Base):
     __tablename__ = 'daily_pnl'
     id = Column(Integer, primary_key=True)

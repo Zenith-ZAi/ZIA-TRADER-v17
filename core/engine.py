@@ -25,6 +25,10 @@ from core.event_guard import EconomicEventGuard
 from core.pullback_strategy import PullbackSignalCache
 from core.pattern_memory import PatternMemory, build_pattern_signature
 from core.position_policy import evaluate_position_exit
+from core.multi_timeframe import combine_timeframe_signals, parse_timeframes
+from core.news_gate import evaluate_news_gate
+from core.risk_guard import evaluate_circuit_breaker, evaluate_emergency_exit
+from core.microstructure import estimate_entry_costs
 
 
 logger = logging.getLogger(__name__)
@@ -48,6 +52,13 @@ class RoboTraderUnified:
 
         self.risk_ai = RiskAI(self.settings, self.db_manager)
         self.redis_cache = RedisCache(self.settings.REDIS_URL)
+        self.autonomy_blocked = bool(
+            self.settings.AUTONOMOUS_TRADING_ENABLED
+            and self.settings.REDIS_REQUIRED_FOR_AUTONOMOUS
+            and not self.redis_cache.is_persistent
+        )
+        if self.autonomy_blocked:
+            logger.critical("Autonomia bloqueada: Redis persistente é obrigatório para manter posições live.")
         self.event_guard = EconomicEventGuard(
             self.settings.ECONOMIC_EVENTS_FILE,
             self.settings.EVENT_BLOCK_BEFORE_SECONDS,
@@ -105,9 +116,36 @@ class RoboTraderUnified:
             return "sell", min(1.0, abs(value) * 100)
         return "hold", 0.0
 
+    def refresh_runtime_config(self) -> None:
+        self.symbols = self.settings.SYMBOLS
+        self.timeframe = self.settings.TIMEFRAME
+        logger.info("Configuração do motor principal atualizada: símbolos=%s timeframe=%s", self.symbols, self.timeframe)
+
+    async def reconcile_runtime_positions(self) -> int:
+        restored = 0
+        for position in self.db_manager.get_open_runtime_positions(self.account_id):
+            key = f"position_{position.symbol}"
+            if await self.redis_cache.get_state(key) is None:
+                await self.redis_cache.set_state(key, {
+                    "symbol": position.symbol,
+                    "action": position.action,
+                    "quantity": position.quantity,
+                    "entry_price": position.entry_price,
+                    "stop_loss": position.stop_loss,
+                    "take_profit": position.take_profit,
+                    "breakeven_trigger": position.breakeven_trigger,
+                    "status": "open",
+                    "order_id": position.order_id,
+                })
+                restored += 1
+        if restored:
+            logger.warning("%s posição(ões) restaurada(s) do estado persistente.", restored)
+        return restored
+
     async def start(self):
         """Inicia o motor de trading com resiliência a falhas de rede/API."""
         self.is_running = True
+        await self.reconcile_runtime_positions()
         logger.info("Motor de Trading ZIA iniciado.")
         
         while self.is_running:
@@ -209,6 +247,8 @@ class RoboTraderUnified:
                         processed_news = []
                         avg_sentiment = 0.0
                         trend_score = 0.0
+                    news_provider_health = self.news_processor.health() if hasattr(self.news_processor, "health") else {}
+                    news_gate = evaluate_news_gate(processed_news, news_provider_health, self.settings)
                     news_latency_ms = (time.perf_counter() - news_started) * 1000.0
                     AI_NEWS_FETCH_LATENCY.observe(news_latency_ms / 1000.0)
                     signal_compute_started = time.perf_counter()
@@ -248,6 +288,32 @@ class RoboTraderUnified:
                         },
                         precomputed_pullback=pullback_signal_cached,
                     )
+                    timeframe_signals = {self.timeframe: market_signal}
+                    if self.settings.MULTI_TIMEFRAME_ENABLED:
+                        for timeframe in parse_timeframes(self.settings.ANALYSIS_TIMEFRAMES, self.timeframe):
+                            if timeframe == self.timeframe:
+                                continue
+                            try:
+                                timeframe_data = await self.exchange_connector.get_historical_data(
+                                    symbol,
+                                    timeframe,
+                                    limit=max(250, int(self.settings.PULLBACK_EMA_PERIOD) + 30),
+                                )
+                                timeframe_signals[timeframe] = calculate_market_signal(
+                                    timeframe_data,
+                                    news_sentiment=avg_sentiment,
+                                    trend_score=trend_score,
+                                    min_confidence=float(self.settings.MIN_CONFIDENCE_THRESHOLD),
+                                    max_volatility=float(self.settings.BACKTEST_MAX_VOLATILITY),
+                                )
+                            except Exception as exc:
+                                logger.warning("[%s] Falha no timeframe %s: %s", symbol, timeframe, exc)
+                    multi_timeframe = combine_timeframe_signals(
+                        timeframe_signals,
+                        self.timeframe,
+                        int(self.settings.MULTI_TIMEFRAME_MIN_CONFIRMATIONS),
+                    )
+                    multi_timeframe_ok = not self.settings.MULTI_TIMEFRAME_ENABLED or multi_timeframe["confirmed"]
                     reversal_signal = detect_reversal_signal(
                         historical_data,
                         news_sentiment=avg_sentiment,
@@ -264,7 +330,7 @@ class RoboTraderUnified:
                     pullback_ok = not self.settings.PULLBACK_STRATEGY_ENABLED or pullback_action == model_action
                     event_status = self.event_guard.blocked(datetime.now(timezone.utc), symbol)
                     event_ok = not event_status.get("blocked", False)
-                    if market_signal.action in {"buy", "sell"} and market_signal.action == model_action and pullback_ok and pattern_ok and event_ok:
+                    if market_signal.action in {"buy", "sell"} and market_signal.action == model_action and pullback_ok and pattern_ok and event_ok and multi_timeframe_ok and news_gate["entry_allowed"]:
                         final_action = model_action
                         final_confidence = min(1.0, (model_confidence + market_signal.confidence) / 2.0)
                     else:
@@ -294,6 +360,31 @@ class RoboTraderUnified:
                         exchange_balances = {}
                     account_state = self.db_manager.get_account_state(self.account_id)
                     account_balance = self.risk_ai.quote_equivalent_balance(exchange_balances, symbol, current_price) or (account_state.balance if account_state else 0.0)
+                    daily_pnl_obj = self.db_manager.get_daily_pnl(self.account_id, datetime.now(timezone.utc).replace(tzinfo=None))
+                    daily_pnl = float(daily_pnl_obj.pnl) if daily_pnl_obj else 0.0
+                    circuit_breaker = evaluate_circuit_breaker(
+                        account_balance,
+                        float(account_state.initial_capital if account_state else 0.0),
+                        daily_pnl,
+                        self.settings,
+                    )
+                    estimated_action = analysis["prediction"] if analysis["prediction"] in {"buy", "sell"} else "buy"
+                    estimated_quantity = (
+                        account_balance * float(self.settings.MAX_RISK_PER_TRADE)
+                        / max(current_price * float(self.settings.STOP_LOSS_PCT), 1e-12)
+                    )
+                    estimated_stop = current_price * (1.0 - float(self.settings.STOP_LOSS_PCT)) if estimated_action == "buy" else current_price * (1.0 + float(self.settings.STOP_LOSS_PCT))
+                    estimated_target = current_price * (1.0 + float(self.settings.TAKE_PROFIT_PCT)) if estimated_action == "buy" else current_price * (1.0 - float(self.settings.TAKE_PROFIT_PCT))
+                    microstructure = estimate_entry_costs(
+                        current_market_data,
+                        current_order_flow,
+                        estimated_action,
+                        estimated_quantity,
+                        current_price,
+                        estimated_stop,
+                        estimated_target,
+                        self.settings,
+                    )
                     live_position = await self.redis_cache.get_state(f"position_{symbol}")
                     exit_decision = evaluate_position_exit(
                         live_position,
@@ -303,6 +394,14 @@ class RoboTraderUnified:
                         market_signal=market_signal,
                         reversal_signal=reversal_signal,
                     )
+                    emergency_exit = evaluate_emergency_exit(event_status, news_gate, market_signal, self.settings)
+                    if live_position and emergency_exit["should_exit"]:
+                        exit_decision = {
+                            "should_exit": True,
+                            "reason": emergency_exit["reason"],
+                            "exit_action": "sell" if live_position.get("action") == "buy" else "buy",
+                            "price": current_price,
+                        }
                     market_context = {
                         "historical_data": historical_data,
                         "current_order_flow": current_order_flow,
@@ -314,6 +413,9 @@ class RoboTraderUnified:
                         "reversal_signal": reversal_signal,
                         "pullback_signal": market_signal.pullback,
                         "event_guard": event_status,
+                        "news_gate": news_gate,
+                        "multi_timeframe": multi_timeframe,
+                        "microstructure": microstructure,
                         "volume_analysis": volume_analysis,
                     }
                     shadow_order_data = {
@@ -355,6 +457,11 @@ class RoboTraderUnified:
                                 "reversal_signal": reversal_signal,
                                 "pullback_signal": market_signal.pullback,
                                 "event_guard": event_status,
+                                "news_gate": news_gate,
+                                "multi_timeframe": multi_timeframe,
+                                "circuit_breaker": circuit_breaker,
+                                "microstructure": microstructure,
+                                "emergency_exit": emergency_exit,
                                 "pattern_signature": pattern_signature,
                                 "pattern_match": pattern_match.to_dict(),
                                 "live_position": live_position or {},
@@ -381,12 +488,20 @@ class RoboTraderUnified:
                             logger.warning("[%s] Saída rejeitada pelo RiskAI: %s", symbol, exit_validation.get("reason"))
                     entry_allowed = live_position is None and not exit_executed
                     spot_direction_allowed = bool(self.settings.ALLOW_SHORT or analysis["prediction"] == "buy")
-                    if analysis["prediction"] != "hold" and self.settings.AUTONOMOUS_TRADING_ENABLED and entry_allowed and spot_direction_allowed:
+                    safety_entry_allowed = bool(
+                        not self.autonomy_blocked
+                        and not circuit_breaker["tripped"]
+                        and news_gate["entry_allowed"]
+                        and multi_timeframe_ok
+                        and microstructure["allowed"]
+                    )
+                    if analysis["prediction"] != "hold" and self.settings.AUTONOMOUS_TRADING_ENABLED and entry_allowed and spot_direction_allowed and safety_entry_allowed:
                         order_data = {
                             "symbol": symbol,
                             "action": analysis["prediction"],
                             "confidence": analysis["confidence"],
                             "price": current_price,
+                            "market_type": MarketType.FOREX if str(self.settings.MARKET_ADAPTER).lower() == "forex" else MarketType.CRYPTO,
                         }
                         
                         risk_validation = self.risk_ai.validate_order(order_data, account_balance, market_context)
@@ -408,7 +523,7 @@ class RoboTraderUnified:
                                         execution_id=execution_result["order_id"], # Usando order_id como execution_id por simplicidade
                                         order_id=execution_result["order_id"],
                                         symbol=order_data["symbol"],
-                                        market_type=MarketType.CRYPTO, # Assumindo crypto por enquanto
+                                        market_type=order_data.get("market_type", MarketType.CRYPTO),
                                         action=order_data["action"],
                                         filled_price=execution_result["filled_price"],
                                         filled_quantity=execution_result["filled_quantity"],

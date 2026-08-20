@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     PRICE_CHANGE_THRESHOLD: float = float(os.getenv("PRICE_CHANGE_THRESHOLD", "0.001"))
     TRADING_LOOP_INTERVAL: int = int(os.getenv("TRADING_LOOP_INTERVAL", "5"))
     ERROR_RETRY_INTERVAL: int = int(os.getenv("ERROR_RETRY_INTERVAL", "10"))
+    ANALYSIS_TIMEFRAMES: str = os.getenv("ANALYSIS_TIMEFRAMES", "1m,5m,1h")
+    MULTI_TIMEFRAME_ENABLED: bool = os.getenv("MULTI_TIMEFRAME_ENABLED", "false").lower() == "true"
+    MULTI_TIMEFRAME_MIN_CONFIRMATIONS: int = int(os.getenv("MULTI_TIMEFRAME_MIN_CONFIRMATIONS", "2"))
 
     # AI Model Settings
     TRANSFORMER_INPUT_DIM: int = int(os.getenv("TRANSFORMER_INPUT_DIM", "10"))
@@ -73,6 +76,8 @@ class Settings(BaseSettings):
     SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-only-change-me")
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+    CORS_ALLOWED_ORIGINS: str = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173")
+    CORS_ALLOW_CREDENTIALS: bool = os.getenv("CORS_ALLOW_CREDENTIALS", "false").lower() == "true"
 
     # Smart Money Engine Settings
     SMART_MONEY_LOOKBACK_PERIOD: int = int(os.getenv("SMART_MONEY_LOOKBACK_PERIOD", "100"))
@@ -87,6 +92,12 @@ class Settings(BaseSettings):
     MAX_EXPOSURE_PER_SYMBOL: float = float(os.getenv("MAX_EXPOSURE_PER_SYMBOL", "0.10")) # 10% of balance
     MAX_TOTAL_EXPOSURE: float = float(os.getenv("MAX_TOTAL_EXPOSURE", "0.30")) # 30% of balance
     CORRELATION_THRESHOLD: float = float(os.getenv("CORRELATION_THRESHOLD", "0.8")) # For correlated assets
+    CIRCUIT_BREAKER_ENABLED: bool = os.getenv("CIRCUIT_BREAKER_ENABLED", "true").lower() == "true"
+    CIRCUIT_BREAKER_MAX_DRAWDOWN_PERCENT: float = float(os.getenv("CIRCUIT_BREAKER_MAX_DRAWDOWN_PERCENT", "0.15"))
+    EMERGENCY_EXIT_ENABLED: bool = os.getenv("EMERGENCY_EXIT_ENABLED", "false").lower() == "true"
+    EMERGENCY_EXIT_ON_NEWS_SHOCK: bool = os.getenv("EMERGENCY_EXIT_ON_NEWS_SHOCK", "false").lower() == "true"
+    EMERGENCY_EXIT_ON_EVENT: bool = os.getenv("EMERGENCY_EXIT_ON_EVENT", "false").lower() == "true"
+    REDIS_REQUIRED_FOR_AUTONOMOUS: bool = os.getenv("REDIS_REQUIRED_FOR_AUTONOMOUS", "true").lower() == "true"
 
     # Observability Settings
     PROMETHEUS_PORT: int = int(os.getenv("PROMETHEUS_PORT", "8001"))
@@ -110,6 +121,10 @@ class Settings(BaseSettings):
     TWELVE_DATA_API_KEY: Optional[str] = _env_value("TWELVE_DATA_API_KEY", "Twelvedata_API_KEY")
 
     # Exchange Connector Settings
+    MARKET_ADAPTER: str = os.getenv("MARKET_ADAPTER", "binance")
+    FOREX_MODE: str = os.getenv("FOREX_MODE", "paper")
+    FOREX_PAPER_SPREAD: float = float(os.getenv("FOREX_PAPER_SPREAD", "0.0001"))
+    FOREX_TICK_SIZE: float = float(os.getenv("FOREX_TICK_SIZE", "0.00001"))
     BINANCE_MODE: str = os.getenv("BINANCE_MODE") or ("demo" if os.getenv("ENVIRONMENT", "").lower() == "demo" else "simulated")
     BINANCE_DEMO_BASE_URL: Optional[str] = os.getenv("BINANCE_DEMO_BASE_URL")
     BINANCE_SPOT_BASE_URL: Optional[str] = os.getenv("BINANCE_SPOT_BASE_URL")
@@ -190,6 +205,10 @@ class Settings(BaseSettings):
     ECONOMIC_EVENTS_FILE: str = os.getenv("ECONOMIC_EVENTS_FILE", "data/economic_events.json")
     EVENT_BLOCK_BEFORE_SECONDS: int = int(os.getenv("EVENT_BLOCK_BEFORE_SECONDS", "60"))
     EVENT_BLOCK_AFTER_SECONDS: int = int(os.getenv("EVENT_BLOCK_AFTER_SECONDS", "300"))
+    MICROSTRUCTURE_GATE_ENABLED: bool = os.getenv("MICROSTRUCTURE_GATE_ENABLED", "true").lower() == "true"
+    MAX_SPREAD_BPS: float = float(os.getenv("MAX_SPREAD_BPS", "30"))
+    MAX_ESTIMATED_SLIPPAGE_BPS: float = float(os.getenv("MAX_ESTIMATED_SLIPPAGE_BPS", "20"))
+    MIN_REWARD_RISK_RATIO: float = float(os.getenv("MIN_REWARD_RISK_RATIO", "1.2"))
 
     # Fricção de execução para Sandbox/backtest; não ativa produção por padrão
     FRICTION_ENABLED: bool = os.getenv("FRICTION_ENABLED", "false").lower() == "true"
@@ -223,6 +242,12 @@ class Settings(BaseSettings):
     NEWS_CACHE_TTL_SECONDS: int = int(os.getenv("NEWS_CACHE_TTL_SECONDS", "300"))
     NEWS_MAX_ARTICLES: int = int(os.getenv("NEWS_MAX_ARTICLES", "20"))
     NEWS_PROVIDER_ARTICLES: int = int(os.getenv("NEWS_PROVIDER_ARTICLES", "10"))
+    NEWS_FAIL_CLOSED_FOR_ENTRY: bool = os.getenv("NEWS_FAIL_CLOSED_FOR_ENTRY", "true").lower() == "true"
+    NEWS_MIN_HEALTHY_PROVIDERS: int = int(os.getenv("NEWS_MIN_HEALTHY_PROVIDERS", "1"))
+    NEWS_MIN_ARTICLES_FOR_ENTRY: int = int(os.getenv("NEWS_MIN_ARTICLES_FOR_ENTRY", "1"))
+    NEWS_SHOCK_SENTIMENT_THRESHOLD: float = float(os.getenv("NEWS_SHOCK_SENTIMENT_THRESHOLD", "-0.65"))
+    NEWS_SHOCK_MIN_ARTICLES: int = int(os.getenv("NEWS_SHOCK_MIN_ARTICLES", "3"))
+    NEWS_MAX_ARTICLE_AGE_SECONDS: int = int(os.getenv("NEWS_MAX_ARTICLE_AGE_SECONDS", "7200"))
     GDELT_BASE_URL: str = os.getenv("GDELT_BASE_URL", "https://api.gdeltproject.org/api/v2/doc/doc")
     NEWS_RSS_URL_TEMPLATE: str = os.getenv("NEWS_RSS_URL_TEMPLATE", "https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en")
     COINGECKO_BASE_URL: str = os.getenv("COINGECKO_BASE_URL", "https://api.coingecko.com/api/v3")

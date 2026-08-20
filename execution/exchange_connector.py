@@ -85,6 +85,19 @@ class ExchangeConnector:
 
     def __init__(self, settings: Settings):
         self.settings = settings
+        adapter_name = str(getattr(settings, "MARKET_ADAPTER", "binance")).lower()
+        if adapter_name == "forex":
+            from execution.forex_adapter import ForexLiveAdapter, ForexPaperAdapter
+            forex_mode = str(getattr(settings, "FOREX_MODE", "paper")).lower()
+            if forex_mode == "paper":
+                self._adapter = ForexPaperAdapter(settings)
+                logger.info("ExchangeConnector inicializado em modo Forex paper.")
+            elif forex_mode == "live":
+                self._adapter = ForexLiveAdapter(settings)
+                logger.warning("Adapter Forex live selecionado, mas permanece fail-closed até broker ser configurado.")
+            else:
+                raise ValueError("FOREX_MODE deve ser paper ou live.")
+            return
         mode = settings.BINANCE_MODE.lower()
         if mode in {"testnet", "demo"}:
             from execution.binance_adapter import BinanceSpotAdapter

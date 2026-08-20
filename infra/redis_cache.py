@@ -48,6 +48,17 @@ class RedisCache:
             )
             self.redis_client = _InMemoryFallback()
 
+    @property
+    def is_persistent(self) -> bool:
+        """Indica se o estado sobrevive ao reinício do processo."""
+        return not isinstance(self.redis_client, _InMemoryFallback)
+
+    def health(self) -> dict[str, object]:
+        return {
+            "persistent": self.is_persistent,
+            "backend": "redis" if self.is_persistent else "memory_fallback",
+        }
+
     async def set_state(self, key: str, value: Any, expire: Optional[int] = None):
         try:
             if isinstance(value, (dict, list)):

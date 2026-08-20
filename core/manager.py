@@ -12,6 +12,7 @@ from execution.exchange_connector import ExchangeConnector
 from infra.redis_cache import RedisCache
 from ai.whale_detector import WhaleDetector
 from execution.execution_engine import ExecutionEngine
+from core.runtime_registry import RuntimeConfigRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,8 @@ class TradingManager:
 
     def __init__(self, settings: Settings, db_manager):
         self.settings = settings
+        self.runtime_registry = RuntimeConfigRegistry(db_manager)
+        self.runtime_profile = self.runtime_registry.apply_to_settings(settings)
         self.news_processor = NewsProcessor(settings, db_manager)
         self.exchange_connector = ExchangeConnector(settings)
         
@@ -34,9 +37,40 @@ class TradingManager:
         )
 
         self.trading_engine = RoboTraderUnified(settings, self.news_processor, self.exchange_connector, db_manager)
-        self.sniper_engine = SniperEngine(settings, self.exchange_connector, self.execution_engine, self.whale_detector, self.redis_cache, db_manager)
+        self.sniper_engine = SniperEngine(
+            settings,
+            self.exchange_connector,
+            self.execution_engine,
+            self.whale_detector,
+            self.redis_cache,
+            db_manager,
+            news_processor=self.news_processor,
+        )
         self.backtest_engine = BacktestEngine(settings, db_manager)
         # self.arbitrage_engine = ArbitrageEngine(settings, self.exchange_connector) # Se houver um ArbitrageEngine real
+
+    def reload_runtime_config(self) -> Dict[str, Any]:
+        self.runtime_profile = self.runtime_registry.apply_to_settings(self.settings)
+        self.trading_engine.refresh_runtime_config()
+        self.sniper_engine.refresh_runtime_config()
+        return self.runtime_profile
+
+    def runtime_status(self) -> Dict[str, Any]:
+        return {
+            "profile": self.runtime_profile,
+            "settings": {
+                "symbols": list(self.settings.SYMBOLS),
+                "timeframe": self.settings.TIMEFRAME,
+                "analysis_timeframes": self.settings.ANALYSIS_TIMEFRAMES,
+                "multi_timeframe_enabled": self.settings.MULTI_TIMEFRAME_ENABLED,
+                "sniper_timeframe": self.settings.SNIPER_TIMEFRAME,
+                "autonomous_trading_enabled": self.settings.AUTONOMOUS_TRADING_ENABLED,
+                "shadow_mode_enabled": self.settings.SHADOW_MODE_ENABLED,
+                "market_adapter": self.settings.MARKET_ADAPTER,
+                "forex_mode": self.settings.FOREX_MODE,
+                "binance_mode": self.settings.BINANCE_MODE,
+            },
+        }
 
     async def start_trading(self):
         """Inicia o motor de trading principal (RoboTraderUnified)."""
