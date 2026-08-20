@@ -17,6 +17,8 @@ from core.pattern_memory import PatternMemory, build_pattern_signature
 from core.event_guard import EconomicEventGuard
 from execution.friction import ExecutionFriction
 from core.position_policy import evaluate_position_exit
+from risk.sharpe_analyzer import SharpeAnalyzer
+from risk.sharpe_feedback import SharpeFeedback
 
 logger = logging.getLogger(__name__)
 
@@ -329,11 +331,32 @@ class BacktestEngine:
 
         equity = np.asarray(equity_curve, dtype=float)
         returns = pd.Series(equity).pct_change().replace([np.inf, -np.inf], np.nan).dropna()
-        downside = returns.std(ddof=1) if len(returns) > 1 else 0.0
-        sharpe = float((returns.mean() / downside) * np.sqrt(252)) if downside > 0 else 0.0
-        running_max = np.maximum.accumulate(equity)
-        drawdowns = (equity - running_max) / np.maximum(running_max, 1e-9)
-        max_drawdown = float(drawdowns.min()) if len(drawdowns) else 0.0
+        risk_analyzer = SharpeAnalyzer(
+            risk_free_rate=float(getattr(self.settings, "RISK_FREE_RATE_ANNUAL", 0.0)),
+            periods_per_year=int(getattr(self.settings, "METRICS_PERIODS_PER_YEAR", 252)),
+        )
+        risk_metrics = risk_analyzer.analyze(returns.tolist(), equity_curve=equity.tolist())
+        trade_returns = [float(trade.get("return_pct", 0.0)) for trade in trades]
+        feedback_engine = SharpeFeedback(
+            analyzer=risk_analyzer,
+            reoptimize_every=int(getattr(self.settings, "OPTIMIZER_REOPTIMIZE_EVERY", 50)),
+        )
+        trade_sharpe_feedback = []
+        for trade_index, trade in enumerate(trades):
+            reward = feedback_engine.record(trade["return_pct"])
+            trade["sharpe_after_trade"] = reward.sharpe_after
+            trade["sortino_after_trade"] = float(risk_analyzer.analyze(feedback_engine.returns)["sortino_ratio"])
+            trade["sharpe_reward"] = reward.reward
+            trade_sharpe_feedback.append({
+                "trade_index": trade_index,
+                "sharpe_ratio": trade["sharpe_after_trade"],
+                "sortino_ratio": trade["sortino_after_trade"],
+                "sharpe_reward": trade["sharpe_reward"],
+                "return_pct": trade["return_pct"],
+                "should_reoptimize": reward.should_reoptimize,
+            })
+        sharpe = float(risk_metrics["sharpe_ratio"])
+        max_drawdown = float(risk_metrics["maximum_drawdown"])
         wins = [trade for trade in trades if trade["pnl"] > 0]
         losses = [trade for trade in trades if trade["pnl"] < 0]
         gross_profit = sum(trade["pnl"] for trade in wins)
@@ -350,7 +373,12 @@ class BacktestEngine:
             "total_pnl": float(capital - initial_capital),
             "return_pct": float((capital / initial_capital) - 1.0),
             "sharpe_ratio": sharpe,
+            "sortino_ratio": float(risk_metrics["sortino_ratio"]),
+            "calmar_ratio": float(risk_metrics["calmar_ratio"]),
+            "annualized_return": float(risk_metrics["annualized_return"]),
             "max_drawdown": max_drawdown,
+            "maximum_drawdown": max_drawdown,
+            "risk_metrics": risk_metrics,
             "trades_executed": len(trades),
             "winning_trades": len(wins),
             "losing_trades": len(losses),
@@ -365,6 +393,8 @@ class BacktestEngine:
             "ensemble_rejections": ensemble_rejections,
             "pattern_memory_enabled": bool(pattern_memory and pattern_memory.enabled),
             "pattern_rejections": pattern_rejections,
+            "trade_sharpe_feedback": trade_sharpe_feedback,
+            "sharpe_feedback": feedback_engine.snapshot(),
             "trades": trades,
         }
         logger.info("Backtest para %s concluído: PNL=%.2f, trades=%s", symbol, result["total_pnl"], len(trades))

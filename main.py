@@ -17,6 +17,7 @@ from database_manager import DatabaseManager
 from monitoring.telemetry.telemetry_setup import setup_telemetry
 from security.jwt_utils import create_access_token, verify_token
 from security.rbac_utils import is_admin, is_trader
+from risk.strategy_optimizer import OptimizationBudget, StrategyOptimizer
 from security.rate_limiter import RateLimiter
 
 logging.basicConfig(level=logging.INFO)
@@ -261,6 +262,44 @@ async def dashboard_status(
 ) -> Dict[str, Any]:
     await rate_limiter(current_user["username"])
     return _runtime_status_payload()
+
+
+@app.get("/api/optimize_sharpe")
+async def optimize_sharpe(
+    asset_list: str,
+    current_user: Dict[str, Any] = Depends(get_trader_user),
+) -> Dict[str, Any]:
+    await rate_limiter(current_user["username"])
+    requested_assets = [value.strip() for value in asset_list.split(",") if value.strip()]
+    if not requested_assets:
+        raise HTTPException(status_code=400, detail="asset_list não pode ser vazio")
+    symbol = requested_assets[0]
+    try:
+        historical_data = await trading_manager.exchange_connector.get_historical_data(
+            symbol,
+            settings.TIMEFRAME,
+            limit=min(8760, 10000),
+        )
+        optimizer = StrategyOptimizer(
+            settings,
+            trading_manager.backtest_engine.db_manager,
+            budget=OptimizationBudget(
+                max_evaluations=settings.OPTIMIZER_MAX_EVALUATIONS,
+                max_seconds=settings.OPTIMIZER_MAX_SECONDS,
+                validation_fraction=settings.OPTIMIZER_VALIDATION_FRACTION,
+                min_trades=settings.OPTIMIZER_MIN_TRADES,
+            ),
+        )
+        recommendation = await optimizer.optimize_async(symbol, historical_data, strategy_name="API Sharpe Optimization")
+        return {
+            "requested_assets": requested_assets,
+            "optimized_asset": symbol,
+            "orders_sent": 0,
+            "recommendation": recommendation,
+        }
+    except Exception as exc:
+        logger.exception("Falha na otimização Sharpe para %s", symbol)
+        raise HTTPException(status_code=503, detail="otimização indisponível no momento") from exc
 
 
 @app.post("/runtime/reload")

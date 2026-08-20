@@ -29,6 +29,7 @@ from core.multi_timeframe import combine_timeframe_signals, parse_timeframes
 from core.news_gate import evaluate_news_gate
 from core.risk_guard import evaluate_circuit_breaker, evaluate_emergency_exit
 from core.microstructure import estimate_entry_costs
+from execution.cost_aware_executor import CostAwareExecutor
 
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,11 @@ class RoboTraderUnified:
             self.settings.EVENT_BLOCK_AFTER_SECONDS,
         )
         self.pattern_memory = PatternMemory(self.db_manager, self.settings)
+        self.cost_aware_executor = CostAwareExecutor(
+            max_spread_bps=float(self.settings.MAX_SPREAD_BPS),
+            max_slippage_bps=float(self.settings.MAX_ESTIMATED_SLIPPAGE_BPS),
+            max_book_impact=float(self.settings.MAX_BOOK_IMPACT),
+        )
         
         # Inicialização de modelos com tratamento de erro
         try:
@@ -385,6 +391,15 @@ class RoboTraderUnified:
                         estimated_target,
                         self.settings,
                     )
+                    cost_estimate = self.cost_aware_executor.estimate(
+                        current_market_data | current_order_flow,
+                        estimated_action,
+                        estimated_quantity,
+                    )
+                    if self.settings.COST_AWARE_EXECUTION_ENABLED and not cost_estimate["allowed"]:
+                        microstructure["allowed"] = False
+                        microstructure["reasons"].append(cost_estimate["reason"])
+                    microstructure["cost_aware"] = cost_estimate
                     live_position = await self.redis_cache.get_state(f"position_{symbol}")
                     exit_decision = evaluate_position_exit(
                         live_position,
@@ -505,6 +520,18 @@ class RoboTraderUnified:
                         }
                         
                         risk_validation = self.risk_ai.validate_order(order_data, account_balance, market_context)
+                        if risk_validation["valid"] and self.settings.COST_AWARE_EXECUTION_ENABLED:
+                            adjusted_cost = self.cost_aware_executor.adjust_quantity(
+                                current_market_data | current_order_flow,
+                                order_data["action"],
+                                float(risk_validation.get("quantity", 0.0)),
+                            )
+                            adjusted_quantity = float(adjusted_cost.get("adjusted_quantity", 0.0))
+                            if adjusted_quantity <= 0.0:
+                                risk_validation = {"valid": False, "reason": adjusted_cost["reason"], "cost_aware": adjusted_cost}
+                            else:
+                                risk_validation["quantity"] = adjusted_quantity
+                                risk_validation["cost_aware"] = adjusted_cost
                         
                         if risk_validation["valid"]:
                             try:

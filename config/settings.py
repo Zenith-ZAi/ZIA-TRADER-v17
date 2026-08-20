@@ -92,6 +92,8 @@ class Settings(BaseSettings):
     MAX_EXPOSURE_PER_SYMBOL: float = float(os.getenv("MAX_EXPOSURE_PER_SYMBOL", "0.10")) # 10% of balance
     MAX_TOTAL_EXPOSURE: float = float(os.getenv("MAX_TOTAL_EXPOSURE", "0.30")) # 30% of balance
     CORRELATION_THRESHOLD: float = float(os.getenv("CORRELATION_THRESHOLD", "0.8")) # For correlated assets
+    PORTFOLIO_LOW_CORRELATION_THRESHOLD: float = float(os.getenv("PORTFOLIO_LOW_CORRELATION_THRESHOLD", "0.30"))
+    PORTFOLIO_MAX_WEIGHT: float = float(os.getenv("PORTFOLIO_MAX_WEIGHT", "1.0"))
     CIRCUIT_BREAKER_ENABLED: bool = os.getenv("CIRCUIT_BREAKER_ENABLED", "true").lower() == "true"
     CIRCUIT_BREAKER_MAX_DRAWDOWN_PERCENT: float = float(os.getenv("CIRCUIT_BREAKER_MAX_DRAWDOWN_PERCENT", "0.15"))
     EMERGENCY_EXIT_ENABLED: bool = os.getenv("EMERGENCY_EXIT_ENABLED", "false").lower() == "true"
@@ -209,6 +211,8 @@ class Settings(BaseSettings):
     MAX_SPREAD_BPS: float = float(os.getenv("MAX_SPREAD_BPS", "30"))
     MAX_ESTIMATED_SLIPPAGE_BPS: float = float(os.getenv("MAX_ESTIMATED_SLIPPAGE_BPS", "20"))
     MIN_REWARD_RISK_RATIO: float = float(os.getenv("MIN_REWARD_RISK_RATIO", "1.2"))
+    COST_AWARE_EXECUTION_ENABLED: bool = os.getenv("COST_AWARE_EXECUTION_ENABLED", "true").lower() == "true"
+    MAX_BOOK_IMPACT: float = float(os.getenv("MAX_BOOK_IMPACT", "0.10"))
 
     # Fricção de execução para Sandbox/backtest; não ativa produção por padrão
     FRICTION_ENABLED: bool = os.getenv("FRICTION_ENABLED", "false").lower() == "true"
@@ -229,6 +233,13 @@ class Settings(BaseSettings):
     BACKTEST_STOP_LOSS_PCT: float = float(os.getenv("BACKTEST_STOP_LOSS_PCT", "0.02"))
     BACKTEST_TAKE_PROFIT_PCT: float = float(os.getenv("BACKTEST_TAKE_PROFIT_PCT", "0.05"))
     BACKTEST_MAX_VOLATILITY: float = float(os.getenv("BACKTEST_MAX_VOLATILITY", "0.08"))
+    RISK_FREE_RATE_ANNUAL: float = float(os.getenv("RISK_FREE_RATE_ANNUAL", "0.0"))
+    METRICS_PERIODS_PER_YEAR: int = int(os.getenv("METRICS_PERIODS_PER_YEAR", "252"))
+    OPTIMIZER_MAX_EVALUATIONS: int = int(os.getenv("OPTIMIZER_MAX_EVALUATIONS", "32"))
+    OPTIMIZER_MAX_SECONDS: float = float(os.getenv("OPTIMIZER_MAX_SECONDS", "540"))
+    OPTIMIZER_VALIDATION_FRACTION: float = float(os.getenv("OPTIMIZER_VALIDATION_FRACTION", "0.30"))
+    OPTIMIZER_MIN_TRADES: int = int(os.getenv("OPTIMIZER_MIN_TRADES", "3"))
+    OPTIMIZER_REOPTIMIZE_EVERY: int = int(os.getenv("OPTIMIZER_REOPTIMIZE_EVERY", "50"))
 
     # Memória histórica de padrões: somente padrões encerrados e rotulados; desativada por padrão
     PATTERN_MEMORY_ENABLED: bool = os.getenv("PATTERN_MEMORY_ENABLED", "false").lower() == "true"
