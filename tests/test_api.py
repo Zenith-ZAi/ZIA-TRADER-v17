@@ -60,3 +60,8 @@ def test_dashboard_control_surface_is_exposed():
     assert "/runtime/reload" in paths
     assert "/ws/dashboard" in paths
     assert "/api/optimize_sharpe" in paths
+    assert "/status" in paths
+    assert "/order" in paths
+    assert "/order/confirm" in paths
+    assert "/market" in paths
+    assert "/logs" in paths

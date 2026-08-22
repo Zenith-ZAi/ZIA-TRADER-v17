@@ -6,6 +6,7 @@ Usage:
 """
 import sys
 import logging
+import argparse
 
 # ── suppress noisy library logs in the console UI ────────────────────────────
 logging.basicConfig(level=logging.ERROR)
@@ -46,11 +47,15 @@ import cli.logs_menu        as logs_menu
 import cli.updates_menu     as updates_menu
 import cli.security_menu    as security_menu
 import cli.tests_menu       as tests_menu
+import cli.runtime_menu      as runtime_menu
 
 
 # ── main loop ────────────────────────────────────────────────────────────────
 
-def main() -> None:
+def main(mode: str | None = None) -> None:
+    if mode:
+        settings.ORDER_MANAGER_MODE = mode
+        settings.ORDER_CONFIRMATION_REQUIRED = True
     db = get_db()
 
     # ── authentication ────────────────────────────────────────────────────
@@ -74,6 +79,7 @@ def main() -> None:
             ("8",  "Atualizações"),
             ("9",  "Segurança"),
             ("10", "Testes"),
+            ("11", "Trading Híbrido"),
             ("0",  "Sair"),
         ])
 
@@ -97,6 +103,8 @@ def main() -> None:
             security_menu.run(db, current_user)
         elif choice == "10":
             tests_menu.run(db, current_user)
+        elif choice == "11":
+            runtime_menu.run(db, current_user)
         elif choice == "0":
             revoke_session(current_user.username)
             console.print("\n[bold cyan]Encerrando sessão. Até logo![/bold cyan]\n")
@@ -107,4 +115,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Console administrativo ZIA Trader")
+    parser.add_argument("--mode", choices=("manual", "auto"), default=None, help="modo do OrderManager")
+    main(parser.parse_args().mode)

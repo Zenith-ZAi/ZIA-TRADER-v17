@@ -23,12 +23,14 @@ data/agent_backtest_check.json
 data/continuous_protocol_result.json
 data/continuous_assets/
 data/api_surface_audit.json
+data/upgrade2_replay_result.json
 data/shadow_label_summary.json
 data/*.sqlite
 data/*.sqlite3
 *.log
 models/
 checkpoints/
+*.tar.gz
 
 # Sistema e IDE
 .DS_Store

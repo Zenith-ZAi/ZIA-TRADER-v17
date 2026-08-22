@@ -9,6 +9,8 @@ from core.backtest_engine import BacktestEngine
 
 from data.news_processor import NewsProcessor
 from execution.exchange_connector import ExchangeConnector
+from execution.market_connector import MarketConnector
+from execution.order_manager import OrderManager
 from infra.redis_cache import RedisCache
 from ai.whale_detector import WhaleDetector
 from execution.execution_engine import ExecutionEngine
@@ -24,33 +26,39 @@ class TradingManager:
         self.runtime_registry = RuntimeConfigRegistry(db_manager)
         self.runtime_profile = self.runtime_registry.apply_to_settings(settings)
         self.news_processor = NewsProcessor(settings, db_manager)
-        self.exchange_connector = ExchangeConnector(settings)
+        base_exchange_connector = ExchangeConnector(settings)
+        self.market_connector = MarketConnector(settings, base_exchange_connector)
+        self.exchange_connector = self.market_connector
         
         self.redis_cache = RedisCache(settings.REDIS_URL)
         self.whale_detector = WhaleDetector(settings, db_manager)
         self.execution_engine = ExecutionEngine(
             settings,
-            self.exchange_connector,
+            self.market_connector,
             self.redis_cache,
             db_manager=db_manager,
             account_id="default_account",
         )
 
-        self.trading_engine = RoboTraderUnified(settings, self.news_processor, self.exchange_connector, db_manager)
+        self.order_manager = OrderManager(settings, self.market_connector, self.execution_engine)
+        self.trading_engine = RoboTraderUnified(settings, self.news_processor, self.market_connector, db_manager)
+        self.trading_engine.order_manager = self.order_manager
         self.sniper_engine = SniperEngine(
             settings,
-            self.exchange_connector,
+            self.market_connector,
             self.execution_engine,
             self.whale_detector,
             self.redis_cache,
             db_manager,
             news_processor=self.news_processor,
         )
+        self.sniper_engine.order_manager = self.order_manager
         self.backtest_engine = BacktestEngine(settings, db_manager)
         # self.arbitrage_engine = ArbitrageEngine(settings, self.exchange_connector) # Se houver um ArbitrageEngine real
 
     def reload_runtime_config(self) -> Dict[str, Any]:
         self.runtime_profile = self.runtime_registry.apply_to_settings(self.settings)
+        self.order_manager.set_mode(self.settings.ORDER_MANAGER_MODE)
         self.trading_engine.refresh_runtime_config()
         self.sniper_engine.refresh_runtime_config()
         return self.runtime_profile
@@ -69,6 +77,9 @@ class TradingManager:
                 "market_adapter": self.settings.MARKET_ADAPTER,
                 "forex_mode": self.settings.FOREX_MODE,
                 "binance_mode": self.settings.BINANCE_MODE,
+                "order_manager_mode": self.order_manager.mode,
+                "order_confirmation_required": self.order_manager.confirmation_required,
+                "market_type": self.market_connector.market_type,
             },
         }
 

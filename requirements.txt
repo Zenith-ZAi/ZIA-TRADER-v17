@@ -18,4 +18,8 @@ psycopg2-binary
 requests
 python-jose[cryptography]
 python-multipart
+# Conectores opcionais do MarketConnector; caminhos paper/read-only continuam disponíveis sem credenciais
+ccxt>=4.4.0
+forex-python>=1.8
+yfinance>=0.2.40
 passlib[bcrypt]

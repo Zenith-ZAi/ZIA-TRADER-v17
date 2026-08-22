@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect, status
+from fastapi import Body, Depends, FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from prometheus_client import generate_latest
@@ -254,6 +254,80 @@ async def admin_dashboard(
     current_user: Dict[str, Any] = Depends(get_admin_user),
 ):
     return {"message": f"Welcome, admin {current_user['username']}", "status": _runtime_status_payload()}
+
+
+@app.get("/status")
+async def status_alias(
+    current_user: Dict[str, Any] = Depends(get_trader_user),
+) -> Dict[str, Any]:
+    await rate_limiter(current_user["username"])
+    account = db_manager.get_account_state("default_account")
+    positions = db_manager.get_open_positions("default_account")
+    daily = db_manager.get_daily_pnl("default_account", datetime.now(timezone.utc).replace(tzinfo=None))
+    payload = _runtime_status_payload()
+    payload.update({
+        "balance": float(account.balance) if account else 0.0,
+        "initial_capital": float(account.initial_capital) if account else 0.0,
+        "daily_pnl": float(daily.pnl) if daily else 0.0,
+        "open_positions": [
+            {"symbol": item.symbol, "quantity": float(item.quantity), "entry_price": float(item.entry_price), "current_price": float(item.current_price), "unrealized_pnl": float(item.unrealized_pnl or 0.0)}
+            for item in positions
+        ],
+    })
+    return payload
+
+
+@app.post("/order")
+async def create_order(
+    order: Dict[str, Any] = Body(...),
+    current_user: Dict[str, Any] = Depends(get_trader_user),
+) -> Dict[str, Any]:
+    await rate_limiter(current_user["username"])
+    source = str(order.pop("source", "manual")).lower()
+    confirmed = bool(order.pop("confirmed", False))
+    try:
+        return await trading_manager.order_manager.submit(order, source=source, confirmed=confirmed)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/order/confirm")
+async def confirm_order(
+    request: Dict[str, Any] = Body(...),
+    current_user: Dict[str, Any] = Depends(get_trader_user),
+) -> Dict[str, Any]:
+    await rate_limiter(current_user["username"])
+    token = str(request.get("confirmation_token", ""))
+    approved = bool(request.get("approved", True))
+    try:
+        return await trading_manager.order_manager.confirm(token, approved=approved)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/market")
+async def market_alias(
+    symbol: str,
+    current_user: Dict[str, Any] = Depends(get_trader_user),
+) -> Dict[str, Any]:
+    await rate_limiter(current_user["username"])
+    try:
+        normalized = trading_manager.market_connector.normalize_symbol(symbol)
+        market_data = await trading_manager.market_connector.get_market_data(normalized)
+        order_book = await trading_manager.market_connector.get_order_book(normalized, limit=20)
+        return {"symbol": normalized, "market": market_data, "order_book": order_book}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="dados de mercado indisponíveis") from exc
+
+
+@app.get("/logs")
+async def logs_alias(
+    current_user: Dict[str, Any] = Depends(get_trader_user),
+) -> Dict[str, Any]:
+    await rate_limiter(current_user["username"])
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=24)
+    logs = [item for item in db_manager.get_system_logs("default_account") if item.timestamp and item.timestamp >= cutoff]
+    return {"since": cutoff.isoformat(), "logs": [{"timestamp": item.timestamp.isoformat(), "level": item.level, "module": item.module, "message": item.message} for item in logs]}
 
 
 @app.get("/dashboard/status")

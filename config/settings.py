@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     API_PORT: int = int(os.getenv("API_PORT", os.getenv("PORT", "8000")))
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     AUTO_START_ENGINES: bool = os.getenv("AUTO_START_ENGINES", "false").lower() == "true"
+    ORDER_MANAGER_MODE: str = os.getenv("ORDER_MANAGER_MODE", "manual")
+    ORDER_CONFIRMATION_REQUIRED: bool = os.getenv("ORDER_CONFIRMATION_REQUIRED", "true").lower() == "true"
+    MANUAL_TRADING_ENABLED: bool = os.getenv("MANUAL_TRADING_ENABLED", "false").lower() == "true"
     AUTONOMOUS_TRADING_ENABLED: bool = os.getenv("AUTONOMOUS_TRADING_ENABLED", "false").lower() == "true"
     SHADOW_MODE_ENABLED: bool = os.getenv("SHADOW_MODE_ENABLED", "true").lower() == "true"
     NEURAL_MODELS_ENABLED: bool = os.getenv("NEURAL_MODELS_ENABLED", "false").lower() == "true"
@@ -86,7 +89,11 @@ class Settings(BaseSettings):
     DAILY_LOSS_LIMIT_PERCENT: float = float(os.getenv("DAILY_LOSS_LIMIT_PERCENT", "0.05"))
     WEEKLY_LOSS_LIMIT_PERCENT: float = float(os.getenv("WEEKLY_LOSS_LIMIT_PERCENT", "0.10"))
     MONTHLY_LOSS_LIMIT_PERCENT: float = float(os.getenv("MONTHLY_LOSS_LIMIT_PERCENT", "0.15"))
-    KELLY_FRACTION: float = float(os.getenv("KELLY_FRACTION", "0.5")) # Fractional Kelly
+    KELLY_FRACTION: float = float(os.getenv("KELLY_FRACTION", "0.5")) # Fractional Kelly legado
+    ADAPTIVE_KELLY_ENABLED: bool = os.getenv("ADAPTIVE_KELLY_ENABLED", "true").lower() == "true"
+    ADAPTIVE_KELLY_FRACTION: float = float(os.getenv("ADAPTIVE_KELLY_FRACTION", "0.25"))
+    KELLY_TARGET_VOLATILITY: float = float(os.getenv("KELLY_TARGET_VOLATILITY", "0.02"))
+    KELLY_MAX_RISK_FRACTION: float = float(os.getenv("KELLY_MAX_RISK_FRACTION", "0.02"))
     ATR_PERIOD: int = int(os.getenv("ATR_PERIOD", "14"))
     VOLATILITY_MULTIPLIER: float = float(os.getenv("VOLATILITY_MULTIPLIER", "1.5"))
     MAX_EXPOSURE_PER_SYMBOL: float = float(os.getenv("MAX_EXPOSURE_PER_SYMBOL", "0.10")) # 10% of balance
@@ -124,6 +131,9 @@ class Settings(BaseSettings):
 
     # Exchange Connector Settings
     MARKET_ADAPTER: str = os.getenv("MARKET_ADAPTER", "binance")
+    MARKET_TYPE: str = os.getenv("MARKET_TYPE", "spot")
+    CCXT_EXCHANGE_ID: str = os.getenv("CCXT_EXCHANGE_ID", "binance")
+    YAHOO_FINANCE_BASE_URL: str = os.getenv("YAHOO_FINANCE_BASE_URL", "https://query1.finance.yahoo.com/v8/finance/chart")
     FOREX_MODE: str = os.getenv("FOREX_MODE", "paper")
     FOREX_PAPER_SPREAD: float = float(os.getenv("FOREX_PAPER_SPREAD", "0.0001"))
     FOREX_TICK_SIZE: float = float(os.getenv("FOREX_TICK_SIZE", "0.00001"))

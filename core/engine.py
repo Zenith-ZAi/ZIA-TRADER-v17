@@ -30,6 +30,7 @@ from core.news_gate import evaluate_news_gate
 from core.risk_guard import evaluate_circuit_breaker, evaluate_emergency_exit
 from core.microstructure import estimate_entry_costs
 from execution.cost_aware_executor import CostAwareExecutor
+from core.pre_market_gate import PreMarketGate
 
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,7 @@ class RoboTraderUnified:
         self.account_balance = self.db_manager.get_account_state(self.account_id).balance
         TRADING_BALANCE.set(self.account_balance)
         self.exchange_connector = exchange_connector
+        self.order_manager = None
 
         self.risk_ai = RiskAI(self.settings, self.db_manager)
         self.redis_cache = RedisCache(self.settings.REDIS_URL)
@@ -71,6 +73,7 @@ class RoboTraderUnified:
             max_slippage_bps=float(self.settings.MAX_ESTIMATED_SLIPPAGE_BPS),
             max_book_impact=float(self.settings.MAX_BOOK_IMPACT),
         )
+        self.pre_market_gate = PreMarketGate(self.settings)
         
         # Inicialização de modelos com tratamento de erro
         try:
@@ -320,6 +323,11 @@ class RoboTraderUnified:
                         int(self.settings.MULTI_TIMEFRAME_MIN_CONFIRMATIONS),
                     )
                     multi_timeframe_ok = not self.settings.MULTI_TIMEFRAME_ENABLED or multi_timeframe["confirmed"]
+                    pre_market = self.pre_market_gate.evaluate(
+                        historical_data,
+                        {"articles": processed_news, "provider_health": self.news_processor.health()},
+                        market_open=True,
+                    )
                     reversal_signal = detect_reversal_signal(
                         historical_data,
                         news_sentiment=avg_sentiment,
@@ -336,7 +344,7 @@ class RoboTraderUnified:
                     pullback_ok = not self.settings.PULLBACK_STRATEGY_ENABLED or pullback_action == model_action
                     event_status = self.event_guard.blocked(datetime.now(timezone.utc), symbol)
                     event_ok = not event_status.get("blocked", False)
-                    if market_signal.action in {"buy", "sell"} and market_signal.action == model_action and pullback_ok and pattern_ok and event_ok and multi_timeframe_ok and news_gate["entry_allowed"]:
+                    if market_signal.action in {"buy", "sell"} and market_signal.action == model_action and pullback_ok and pattern_ok and event_ok and multi_timeframe_ok and news_gate["entry_allowed"] and pre_market["allowed"]:
                         final_action = model_action
                         final_confidence = min(1.0, (model_confidence + market_signal.confidence) / 2.0)
                     else:
@@ -432,6 +440,7 @@ class RoboTraderUnified:
                         "multi_timeframe": multi_timeframe,
                         "microstructure": microstructure,
                         "volume_analysis": volume_analysis,
+                        "pre_market_gate": pre_market,
                     }
                     shadow_order_data = {
                         "symbol": symbol,
@@ -482,6 +491,7 @@ class RoboTraderUnified:
                                 "live_position": live_position or {},
                                 "exit_decision": exit_decision,
                                 "volume_analysis": volume_analysis,
+                                "pre_market_gate": pre_market,
                                 "features": feature_snapshot,
                                 "risk_reason": shadow_risk.get("reason", ""),
                             },
@@ -536,7 +546,13 @@ class RoboTraderUnified:
                         if risk_validation["valid"]:
                             try:
                                 execution_order = {**order_data, **risk_validation}
-                                execution_result = await self.execution_engine.execute_order(execution_order)
+                                if self.order_manager is not None:
+                                    managed_result = await self.order_manager.submit(execution_order, source="ai", confirmed=False)
+                                    execution_result = managed_result.get("execution", managed_result)
+                                    if managed_result.get("status") == "pending_confirmation":
+                                        self.db_manager.create_system_log("WARNING", "Decisão IA aguardando confirmação visual antes da execução.", "OrderManager", self.account_id)
+                                else:
+                                    execution_result = await self.execution_engine.execute_order(execution_order)
                                 if execution_result["status"] == "success":
                                     # Atualizar saldo e registrar execução
                                     current_balance = self.db_manager.get_account_state(self.account_id).balance

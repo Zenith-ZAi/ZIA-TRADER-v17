@@ -7,6 +7,7 @@ from typing import Any, Dict
 
 from config.settings import Settings
 from database_manager import DatabaseManager
+from risk.adaptive_kelly import AdaptiveKellySizer
 
 
 class RiskAI:
@@ -18,6 +19,11 @@ class RiskAI:
         self.account_id = "default_account"
         self.max_risk_per_trade = float(settings.MAX_RISK_PER_TRADE)
         self.daily_loss_limit = float(settings.DAILY_LOSS_LIMIT_PERCENT)
+        self.adaptive_kelly = AdaptiveKellySizer(
+            fraction=float(getattr(settings, "ADAPTIVE_KELLY_FRACTION", 0.25)),
+            target_volatility=float(getattr(settings, "KELLY_TARGET_VOLATILITY", 0.02)),
+            max_risk_fraction=float(getattr(settings, "KELLY_MAX_RISK_FRACTION", self.max_risk_per_trade)),
+        )
 
     def analyze_volume_flow(self, historical_data: Any) -> Dict[str, Any]:
         """Identifica volume anormal e sua direção, sem afirmar causalidade."""
@@ -140,7 +146,16 @@ class RiskAI:
 
         stop_loss_pct = float(self.settings.STOP_LOSS_PCT)
         take_profit_pct = float(self.settings.TAKE_PROFIT_PCT)
-        risk_amount = account_balance * self.max_risk_per_trade
+        adaptive_kelly = None
+        risk_fraction = self.max_risk_per_trade
+        trade_returns = (market_context or {}).get("trade_returns", [])
+        if bool(getattr(self.settings, "ADAPTIVE_KELLY_ENABLED", True)) and isinstance(trade_returns, (list, tuple)) and len(trade_returns) >= 20:
+            reward_risk = take_profit_pct / max(stop_loss_pct, 1e-9)
+            adaptive_kelly = self.adaptive_kelly.estimate(trade_returns, reward_risk=reward_risk)
+            risk_fraction = min(risk_fraction, float(adaptive_kelly.get("risk_fraction", 0.0)))
+            if risk_fraction <= 0.0:
+                return {"valid": False, "reason": "Kelly adaptativo não identificou vantagem estatística suficiente.", "adaptive_kelly": adaptive_kelly}
+        risk_amount = account_balance * risk_fraction
         unit_risk = entry_price * stop_loss_pct
         if risk_amount <= 0 or unit_risk <= 0:
             return {"valid": False, "reason": "Parâmetros de risco inválidos."}
@@ -185,6 +200,8 @@ class RiskAI:
             "stop_loss": stop_loss,
             "take_profit": take_profit,
             "risk_amount": risk_amount,
+            "risk_fraction": risk_fraction,
             "projected_notional": proposed_notional,
             "microstructure": microstructure,
+            "adaptive_kelly": adaptive_kelly,
         }
