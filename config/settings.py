@@ -1,5 +1,5 @@
 import os
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List, Optional
 
 class Settings(BaseSettings):
@@ -54,8 +54,67 @@ class Settings(BaseSettings):
     ALPHA_VANTAGE_API_KEY: Optional[str] = os.getenv("ALPHA_VANTAGE_API_KEY", "YOUR_ALPHA_VANTAGE_API_KEY")
     BENZINGA_API_KEY: Optional[str] = os.getenv("BENZINGA_API_KEY", "YOUR_BENZINGA_API_KEY")
     GNEWS_API_KEY: Optional[str] = os.getenv("GNEWS_API_KEY", "YOUR_GNEWS_API_KEY")
+    SLACK_WEBHOOK_URL: Optional[str] = None
 
-    class Config:
-        env_file = ".env"
+    # Security Configuration
+    SECRET_KEY: str = "replace-with-a-secure-key-in-production"
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+
+    # Additional Trading Configurations
+    MIN_CONFIDENCE_THRESHOLD: float = 0.7
+    PRICE_CHANGE_THRESHOLD: float = 0.001
+
+    # AI Models - Transformer
+    TRANSFORMER_INPUT_DIM: int = 10
+    TRANSFORMER_D_MODEL: int = 64
+    TRANSFORMER_NHEAD: int = 4
+    TRANSFORMER_NUM_ENCODER_LAYERS: int = 2
+    TRANSFORMER_SEQ_LEN: int = 30
+
+    # AI Models - LSTM
+    LSTM_INPUT_DIM: int = 10
+    LSTM_HIDDEN_DIM: int = 128
+    LSTM_NUM_LAYERS: int = 2
+    LSTM_OUTPUT_DIM: int = 1
+    LSTM_SEQ_LEN: int = 30
+
+    # Risk Engine
+    DAILY_LOSS_LIMIT_PERCENT: float = 0.05
+    WEEKLY_LOSS_LIMIT_PERCENT: float = 0.10
+    MONTHLY_LOSS_LIMIT_PERCENT: float = 0.15
+    KELLY_FRACTION: float = 0.5
+    ATR_PERIOD: int = 14
+    VOLATILITY_MULTIPLIER: float = 1.5
+    MAX_EXPOSURE_PER_SYMBOL: float = 0.10
+    MAX_TOTAL_EXPOSURE: float = 0.30
+    CORRELATION_THRESHOLD: float = 0.8
+
+    # Whale Detector Settings
+    WHALE_ACTIVITY_THRESHOLD: float = 0.05
+    WHALE_VOLUME_THRESHOLD_MULTIPLIER: float = 5.0
+    WHALE_ACTIVITY_SNIPER_THRESHOLD: float = 0.8
+
+    # Sniper Engine Settings
+    SNIPER_VOLATILITY_THRESHOLD: float = 0.02
+    SNIPER_TIMEFRAME: str = "1m"
+    SNIPER_TRADE_QUANTITY: float = 0.001
+    SNIPER_PRICE_CACHE_EXPIRE: int = 60
+    SNIPER_CYCLE_INTERVAL_SECONDS: int = 1
+
+    # Observability
+    PROMETHEUS_PORT: int = 8001
+    OTEL_SERVICE_NAME: str = "zia-trader"
+    OTEL_EXPORTER_OTLP_ENDPOINT: str = "http://localhost:4317"
+
+    # API Rate Limiting
+    API_RATE_LIMIT: int = 100
+    API_RATE_LIMIT_INTERVAL: int = 60
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        extra="ignore"
+    )
 
 settings = Settings()
+ 
