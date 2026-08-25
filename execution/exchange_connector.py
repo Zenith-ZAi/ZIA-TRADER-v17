@@ -16,8 +16,10 @@ logger = logging.getLogger(__name__)
 class SimulatedExchangeAdapter:
     """Adapter local determinístico o suficiente para testes sem rede."""
 
-    def __init__(self) -> None:
+    def __init__(self, settings: Settings | None = None) -> None:
+        self.settings = settings
         self.is_connected = False
+        self._last_prices: Dict[str, float] = {}
 
     async def connect(self) -> None:
         await asyncio.sleep(0.01)
@@ -42,6 +44,7 @@ class SimulatedExchangeAdapter:
 
     async def get_market_data(self, symbol: str) -> Dict[str, Any]:
         price = random.uniform(1000, 50000)
+        self._last_prices[symbol] = price
         return {
             "symbol": symbol,
             "last": price,
@@ -52,7 +55,17 @@ class SimulatedExchangeAdapter:
         }
 
     async def get_order_book(self, symbol: str, limit: int = 20) -> Dict[str, Any]:
-        return {"symbol": symbol, "bids": [], "asks": [], "limit": limit}
+        price = self._last_prices.get(symbol, 10000.0)
+        bias = str(getattr(self.settings, "SIMULATED_ORDER_FLOW_BIAS", "neutral")).lower()
+        ratio = max(float(getattr(self.settings, "SIMULATED_ORDER_FLOW_RATIO", 2.2)), 1.0)
+        bid_weight, ask_weight = (ratio, 1.0) if bias == "bullish" else (1.0, ratio) if bias == "bearish" else (1.0, 1.0)
+        return {
+            "symbol": symbol,
+            "bids": [[price * (1.0 - 0.001 * level), 1.0 * bid_weight / level] for level in range(1, min(limit, 5) + 1)],
+            "asks": [[price * (1.0 + 0.001 * level), 1.0 * ask_weight / level] for level in range(1, min(limit, 5) + 1)],
+            "limit": limit,
+            "simulation_bias": bias,
+        }
 
     async def place_order(self, symbol: str, action: str, order_type: str, quantity: float, price: Optional[float] = None) -> Dict[str, Any]:
         await asyncio.sleep(0.01)
@@ -105,7 +118,7 @@ class ExchangeConnector:
             self._adapter = BinanceSpotAdapter(settings)
             logger.info("ExchangeConnector inicializado em modo Binance %s.", mode)
         elif mode in {"simulated", "simulation", "mock"}:
-            self._adapter = SimulatedExchangeAdapter()
+            self._adapter = SimulatedExchangeAdapter(settings)
             logger.info("ExchangeConnector inicializado em modo de simulação.")
         else:
             raise ValueError("BINANCE_MODE deve ser simulated, testnet ou demo.")

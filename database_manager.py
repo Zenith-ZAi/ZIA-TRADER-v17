@@ -308,12 +308,22 @@ class DatabaseManager:
         db.close()
         return observations
 
-    def update_ai_observation_outcome(self, observation_id: int, forward_return: float, outcome_label: int) -> Optional[AIObservation]:
+    def update_ai_observation_outcome(
+        self,
+        observation_id: int,
+        forward_return: float,
+        outcome_label: int,
+        after_context: Optional[Dict[str, object]] = None,
+    ) -> Optional[AIObservation]:
         db = self.SessionLocal()
         record = db.query(AIObservation).filter(AIObservation.id == int(observation_id)).first()
         if record:
             record.forward_return = float(forward_return)
             record.outcome_label = int(outcome_label)
+            if after_context:
+                metadata = dict(record.metadata_json or {})
+                metadata.update(after_context)
+                record.metadata_json = metadata
             db.commit()
             db.refresh(record)
         db.close()

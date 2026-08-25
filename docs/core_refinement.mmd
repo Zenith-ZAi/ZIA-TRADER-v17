@@ -1,0 +1,75 @@
+flowchart TD
+    U["Operador / API / Worker"] --> CM["CoreCommandManager\ncore/sync • core/analyze"]
+    CM --> TM["TradingManager\nconfiguração e ciclo de vida"]
+    TM --> FEED["MultiTimeframeFeed\ncoleta paralela e snapshot"]
+
+    subgraph DATA["Camada de dados e adaptadores"]
+        MC["MarketConnector\ncontrato único"]
+        SIM["SimulatedExchangeAdapter\nreplay/paper"]
+        BN["BinanceSpotAdapter\ntestnet/demo fail-closed"]
+        FX["Forex adapter\npaper/read-only"]
+        B3["Yahoo B3\nsomente leitura"]
+        NP["NewsProcessor\ncache + persistência"]
+        NEWS["GDELT • RSS\nAlpha Vantage • Benzinga\nNewsAPI • Marketaux • Finnhub\nTwelveData • CryptoPanic"]
+        TREND["CoinGecko/Benzinga\ntendência direcional"]
+        MC --> SIM
+        MC --> BN
+        MC --> FX
+        MC --> B3
+        NP --> NEWS
+        NP --> TREND
+    end
+
+    FEED --> MC
+    FEED --> NP
+    FEED --> SNAP["MarketSnapshot\nOHLCV • order book • news • trends"]
+
+    subgraph ANALYSIS["Camada de análise e gates"]
+        IND["Indicadores causais\nEMA • RSI • MACD • ATR • volume"]
+        FLOW["FlowAnalysis\ncompradores/vendedores\n2x1 ou HOLD"]
+        MS["MarketSignal\nscore explicável e regime"]
+        PB["PullbackStrategy\ncorreção • exaustão • trigger"]
+        MTF["MultiTimeframe\n15m/1h/1m conforme config"]
+        NG["NewsGate + EventGuard\ncontexto fresco e eventos"]
+        PM["PreMarketGate + RiskGuard\nspread • volatilidade • drawdown"]
+        SNAP --> IND
+        SNAP --> FLOW
+        IND --> MS
+        FLOW --> MS
+        SNAP --> PB
+        MS --> MTF
+        PB --> MTF
+        SNAP --> NG
+        MTF --> PM
+        NG --> PM
+    end
+
+    subgraph EXEC["Camada de execução segura"]
+        OM["OrderManager\nconfirmação e modo"]
+        CA["CostAwareExecutor\nspread • slippage • impacto"]
+        RISK["RiskAI\nrisk 1–2% • stops • exposição"]
+        OUT["Execução simulada/paper\nordem real bloqueada por flags"]
+        PM --> RISK
+        RISK --> CA
+        CA --> OM
+        OM --> OUT
+    end
+
+    subgraph LEARN["Camada de aprendizado"]
+        BEFORE["AIObservation BEFORE\npreço • indicadores • fluxo\nnotícias • tendência • decisão"]
+        AFTER["LearningLayer AFTER\npreço futuro • retorno\nwin/loss • horizonte"]
+        MEM["PatternMemory\npadrões encerrados e filtrados"]
+        TRAIN["Treino/ajuste de modelos\nsomente com dataset rotulado"]
+        MS --> BEFORE
+        FLOW --> BEFORE
+        NP --> BEFORE
+        OUT -. "resultado da simulação" .-> AFTER
+        BEFORE --> AFTER
+        AFTER --> MEM
+        AFTER --> TRAIN
+        MEM -. "confirmação histórica" .-> MS
+    end
+
+    RULES["Regra operacional\nHOLD se tendência neutra\nou fluxo incompleto\nsem entrada alavancada automática"] --> PM
+    LOG["Logs • métricas • banco SQLite/Postgres"] --- BEFORE
+    LOG --- OUT

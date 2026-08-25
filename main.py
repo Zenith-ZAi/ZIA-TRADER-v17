@@ -338,6 +338,43 @@ async def dashboard_status(
     return _runtime_status_payload()
 
 
+@app.get("/core/analyze")
+async def analyze_core_symbol(
+    symbol: str,
+    offline: bool = False,
+    current_user: Dict[str, Any] = Depends(get_trader_user),
+) -> Dict[str, Any]:
+    """Executa leitura explicável de mercado sem enviar ordem."""
+    await rate_limiter(current_user["username"])
+    try:
+        return await trading_manager.command_manager.analyze_symbol(symbol, offline=offline)
+    except Exception as exc:
+        logger.warning("Falha na análise do core para %s: %s", symbol, exc)
+        raise HTTPException(status_code=503, detail="análise indisponível no momento") from exc
+
+
+@app.post("/core/sync")
+async def sync_core_data(
+    request: Dict[str, Any] = Body(default_factory=dict),
+    current_user: Dict[str, Any] = Depends(get_trader_user),
+) -> Dict[str, Any]:
+    """Sincroniza feeds e retorna snapshots; não executa ordens."""
+    await rate_limiter(current_user["username"])
+    raw_symbols = request.get("symbols") or settings.SYMBOLS
+    symbols = [raw_symbols] if isinstance(raw_symbols, str) else raw_symbols
+    try:
+        return await trading_manager.command_manager.sync_market(
+            symbols=symbols,
+            limit=int(request.get("limit", 250)),
+            offline=bool(request.get("offline", False)),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.warning("Falha na sincronização do core: %s", exc)
+        raise HTTPException(status_code=503, detail="sincronização indisponível no momento") from exc
+
+
 @app.get("/api/optimize_sharpe")
 async def optimize_sharpe(
     asset_list: str,

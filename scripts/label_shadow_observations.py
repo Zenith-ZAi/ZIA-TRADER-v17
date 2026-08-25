@@ -16,6 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from config.settings import Settings
+from core.learning_layer import SignalLearningLayer
 from core.pattern_memory import PATTERN_FEATURES, PatternMemory
 from database_manager import DatabaseManager
 
@@ -44,27 +45,26 @@ def main() -> None:
     close = pd.to_numeric(frame["close"], errors="coerce").dropna()
     observations = db.get_unlabeled_ai_observations(limit=args.limit)
     memory = PatternMemory(db, settings)
+    learning = SignalLearningLayer(db, settings)
     labeled = 0
     patterns = 0
     skipped = 0
     for observation in observations:
-        observed_at = pd.Timestamp(observation.observed_at)
-        if observed_at.tzinfo is None:
-            observed_at = observed_at.tz_localize("UTC")
-        else:
-            observed_at = observed_at.tz_convert("UTC")
-        position = close.index.searchsorted(observed_at, side="right") - 1
-        future_position = position + args.horizon_bars
-        if position < 0 or future_position >= len(close) or float(observation.price or 0.0) <= 0:
+        learning_label = learning.label_observation(observation, close, args.horizon_bars)
+        if learning_label is None:
             skipped += 1
             continue
-        current_price = float(observation.price)
-        future_price = float(close.iloc[future_position])
-        action = str(observation.action or observation.candidate_action or "hold").lower()
-        direction = 1.0 if action == "buy" else -1.0 if action == "sell" else 0.0
-        forward_return = (future_price / current_price - 1.0) * direction
-        label = 1 if direction != 0 and forward_return > 0 else 0
-        db.update_ai_observation_outcome(observation.id, forward_return, label)
+        current_price = learning_label.current_price
+        future_price = learning_label.future_price
+        action = learning_label.action
+        forward_return = learning_label.forward_return
+        label = learning_label.outcome_label
+        db.update_ai_observation_outcome(
+            observation.id,
+            forward_return,
+            label,
+            after_context={"after": learning_label.to_dict()},
+        )
         labeled += 1
         metadata = observation.metadata_json or {}
         signature = metadata.get("pattern_signature") if isinstance(metadata, dict) else None

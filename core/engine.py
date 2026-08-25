@@ -31,6 +31,7 @@ from core.risk_guard import evaluate_circuit_breaker, evaluate_emergency_exit
 from core.microstructure import estimate_entry_costs
 from execution.cost_aware_executor import CostAwareExecutor
 from core.pre_market_gate import PreMarketGate
+from core.data_feeds import FeedUnavailable, MultiTimeframeFeed
 
 
 logger = logging.getLogger(__name__)
@@ -74,6 +75,7 @@ class RoboTraderUnified:
             max_book_impact=float(self.settings.MAX_BOOK_IMPACT),
         )
         self.pre_market_gate = PreMarketGate(self.settings)
+        self.data_feed = MultiTimeframeFeed(self.exchange_connector, self.news_processor, self.settings)
         
         # Inicialização de modelos com tratamento de erro
         try:
@@ -162,15 +164,21 @@ class RoboTraderUnified:
                 for symbol in self.symbols:
                     # 1. Busca de dados com tratamento de erro específico por símbolo
                     try:
-                        historical_data = await self.exchange_connector.get_historical_data(
+                        snapshot = await self.data_feed.fetch_snapshot(
                             symbol,
-                            self.timeframe,
+                            primary_timeframe=self.timeframe,
+                            timeframes=self.settings.ANALYSIS_TIMEFRAMES,
                             limit=max(250, int(self.settings.PULLBACK_EMA_PERIOD) + 30),
                         )
-                        current_market_data = await self.exchange_connector.get_market_data(symbol)
+                        historical_data = snapshot.primary_history
+                        current_market_data = snapshot.market
+                        order_book = snapshot.order_book
                         current_price = current_market_data.get("last") if current_market_data else None
-                    except Exception as e:
-                        logger.error(f"Erro de conexão/API para {symbol}: {e}")
+                    except FeedUnavailable as exc:
+                        logger.error("Dados obrigatórios indisponíveis para %s: %s", symbol, exc)
+                        continue
+                    except Exception as exc:
+                        logger.error("Erro de conexão/API para %s: %s", symbol, exc)
                         continue
 
                     if current_price is None:
@@ -178,13 +186,13 @@ class RoboTraderUnified:
                         SYSTEM_LOG_COUNT.labels(level='WARNING').inc()
                         continue
 
-                    order_book = await self.exchange_connector.get_order_book(symbol, limit=20)
                     current_order_flow = {
                         "symbol": symbol,
                         "total_volume": current_market_data.get("volume", 0),
                         "buys": order_book.get("bids", []),
                         "sells": order_book.get("asks", []),
                         "last_update_id": order_book.get("last_update_id"),
+                        "flow_analysis": snapshot.order_flow,
                     }
                     
                     # 2. Pipeline de IA com features causais compartilhadas
@@ -246,16 +254,10 @@ class RoboTraderUnified:
 
                     # 3. Contexto de Mercado e gate de confluência
                     news_started = time.perf_counter()
-                    try:
-                        processed_news = await self.news_processor.fetch_all([symbol])
-                        trends = await self.news_processor.fetch_trending([symbol])
-                        avg_sentiment = self.news_processor.aggregate_sentiment(processed_news)
-                        trend_score = float(trends[0].get("trend_score", 0.0)) if trends else 0.0
-                    except Exception as e:
-                        logger.warning(f"Falha ao processar notícias/tendências para {symbol}: {e}")
-                        processed_news = []
-                        avg_sentiment = 0.0
-                        trend_score = 0.0
+                    processed_news = snapshot.news
+                    trends = snapshot.trends
+                    avg_sentiment = self.news_processor.aggregate_sentiment(processed_news)
+                    trend_score = self.news_processor.aggregate_trend_score(trends) if hasattr(self.news_processor, "aggregate_trend_score") else 0.0
                     news_provider_health = self.news_processor.health() if hasattr(self.news_processor, "health") else {}
                     news_gate = evaluate_news_gate(processed_news, news_provider_health, self.settings)
                     news_latency_ms = (time.perf_counter() - news_started) * 1000.0
@@ -296,27 +298,26 @@ class RoboTraderUnified:
                             "breakeven_atr_trigger": float(self.settings.PULLBACK_BREAKEVEN_ATR_TRIGGER),
                         },
                         precomputed_pullback=pullback_signal_cached,
+                        order_flow=current_order_flow,
+                        flow_ratio_threshold=float(self.settings.ORDER_FLOW_RATIO_THRESHOLD),
+                        require_flow_confirmation=bool(self.settings.ORDER_FLOW_CONFIRMATION_REQUIRED),
                     )
                     timeframe_signals = {self.timeframe: market_signal}
                     if self.settings.MULTI_TIMEFRAME_ENABLED:
                         for timeframe in parse_timeframes(self.settings.ANALYSIS_TIMEFRAMES, self.timeframe):
                             if timeframe == self.timeframe:
                                 continue
-                            try:
-                                timeframe_data = await self.exchange_connector.get_historical_data(
-                                    symbol,
-                                    timeframe,
-                                    limit=max(250, int(self.settings.PULLBACK_EMA_PERIOD) + 30),
-                                )
-                                timeframe_signals[timeframe] = calculate_market_signal(
-                                    timeframe_data,
-                                    news_sentiment=avg_sentiment,
-                                    trend_score=trend_score,
-                                    min_confidence=float(self.settings.MIN_CONFIDENCE_THRESHOLD),
-                                    max_volatility=float(self.settings.BACKTEST_MAX_VOLATILITY),
-                                )
-                            except Exception as exc:
-                                logger.warning("[%s] Falha no timeframe %s: %s", symbol, timeframe, exc)
+                            timeframe_data = snapshot.historical.get(timeframe)
+                            if timeframe_data is None:
+                                logger.warning("[%s] Histórico secundário indisponível para %s", symbol, timeframe)
+                                continue
+                            timeframe_signals[timeframe] = calculate_market_signal(
+                                timeframe_data,
+                                news_sentiment=avg_sentiment,
+                                trend_score=trend_score,
+                                min_confidence=float(self.settings.MIN_CONFIDENCE_THRESHOLD),
+                                max_volatility=float(self.settings.BACKTEST_MAX_VOLATILITY),
+                            )
                     multi_timeframe = combine_timeframe_signals(
                         timeframe_signals,
                         self.timeframe,
@@ -441,6 +442,7 @@ class RoboTraderUnified:
                         "microstructure": microstructure,
                         "volume_analysis": volume_analysis,
                         "pre_market_gate": pre_market,
+                        "order_flow": snapshot.order_flow,
                     }
                     shadow_order_data = {
                         "symbol": symbol,
@@ -492,6 +494,7 @@ class RoboTraderUnified:
                                 "exit_decision": exit_decision,
                                 "volume_analysis": volume_analysis,
                                 "pre_market_gate": pre_market,
+                                "order_flow": snapshot.order_flow,
                                 "features": feature_snapshot,
                                 "risk_reason": shadow_risk.get("reason", ""),
                             },

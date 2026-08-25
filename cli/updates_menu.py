@@ -25,8 +25,9 @@ def run(db: Session, current_user: AdminUser) -> None:
             ("2", "Atualizar Dependências"),
             ("3", "Migrar Banco de Dados"),
             ("4", "Executar Scripts de Manutenção"),
-            ("5", "Backup Automático"),
-            ("6", "Rollback"),
+            ("5", "Atualizar e validar Core"),
+            ("6", "Backup Automático"),
+            ("7", "Rollback"),
             ("0", "Voltar"),
         ])
         if choice == "1":
@@ -38,8 +39,10 @@ def run(db: Session, current_user: AdminUser) -> None:
         elif choice == "4":
             _run_scripts(current_user)
         elif choice == "5":
-            _backup(db, current_user)
+            _update_core(current_user)
         elif choice == "6":
+            _backup(db, current_user)
+        elif choice == "7":
             _rollback(current_user)
         elif choice == "0":
             break
@@ -169,6 +172,28 @@ def _run_scripts(user: AdminUser) -> None:
             console.print(result.stdout[-500:])
     else:
         error(f"Script falhou:\n{result.stderr[-300:]}")
+    pause()
+
+
+def _update_core(user: AdminUser) -> None:
+    if not _check_admin(user):
+        return
+    if not confirm("Executar compilação, testes e atualização do diagrama do core?"):
+        return
+    header("ATUALIZAR E VALIDAR CORE")
+    result = subprocess.run(
+        ["python", "scripts/update_core.py"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        success("Core atualizado e validado sem envio de ordens.")
+    else:
+        error("A validação do core falhou; verifique a saída abaixo.")
+    if result.stdout:
+        console.print(result.stdout[-4000:])
+    if result.stderr:
+        console.print(result.stderr[-1000:])
     pause()
 
 

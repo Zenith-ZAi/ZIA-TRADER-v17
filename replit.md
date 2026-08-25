@@ -21,6 +21,8 @@ The API is available on **port 8000**. Background trading engines are **not star
 | GET | `/admin/dashboard` | Admin-only dashboard |
 | GET | `/healthz` | Liveness and provider status |
 | GET | `/metrics` | Prometheus metrics |
+| GET | `/core/analyze?symbol=BTC/USDT` | Explainable core analysis without order execution |
+| POST | `/core/sync` | Parallel market/news/trend snapshot synchronization without orders |
 | POST | `/trading/start` | Start the trading engine once |
 | POST | `/sniper/start` | Start the Sniper engine once |
 | POST | `/trading/stop` | Stop all engines and background tasks |
@@ -51,6 +53,11 @@ core/
   sniper_engine.py       High-frequency sniper engine
   manager.py             Orchestrates all engines
   backtest_engine.py     Backtesting
+  data_feeds.py          Parallel market, order-book, news and trend snapshot
+  flow_analysis.py       Buyer/seller notional imbalance and 2x1 gate
+  command_manager.py     Supervised sync and analysis commands
+  learning_layer.py      Before/after shadow labeling
+  daily_state_manager.py Daily 5W/2L gate
 ai/
   ensemble_model.py      Combines Transformer, LSTM, XGBoost, RF
   whale_detector.py      Large-order activity detection
@@ -97,12 +104,24 @@ Defined in `.env` (loaded automatically by pydantic-settings):
 | `BENZINGA_API_KEY` | — | Optional licensed news feed |
 | `NEWSAPI_API_KEY` | — | Optional article discovery |
 | `CRYPTOPANIC_API_KEY` | — | Optional paid crypto news and PanicScore |
+| `ORDER_FLOW_RATIO_THRESHOLD` | `2.0` | Minimum buyer/seller notional ratio |
+| `ORDER_FLOW_CONFIRMATION_REQUIRED` | `true` | Blocks neutral or incomplete order books |
+| `SIMULATED_ORDER_FLOW_BIAS` | `neutral` | `bullish`, `bearish` or `neutral` simulation scenario |
+| `SIMULATED_ORDER_FLOW_RATIO` | `2.2` | Ratio used by the simulated order book |
+| `LEARNING_FORWARD_HORIZON_BARS` | `8` | Future candles used to label shadow observations |
+
+## Core update and learning commands
+
+Use `python scripts/update_core.py` to compile the core, run the complete regression suite and regenerate `docs/core_refinement.png`. The command reports `orders_sent=0` and never enables live trading. After a shadow replay, use `python scripts/label_shadow_observations.py <dataset.csv> --horizon-bars 8` to attach future-candle outcomes to the stored before-context; only observations with enough future bars are labeled.
 
 ## Validation and deployment
 
-The final validation command is `python -m pytest -q`; the current suite covers API authentication, database CRUD, market signal rejection, deterministic backtest, risk limits, provider fallback, and idempotent news/trend persistence. The production composition separates `main.py` (HTTP API) from `worker.py` (trading engines), uses PostgreSQL and Redis, and requires `SECRET_KEY` and `POSTGRES_PASSWORD` to be injected by the deployment environment. The GitHub Actions workflow compiles the code, runs the tests, and builds the container; it does not publish or activate live trading automatically.
+The final validation command is `python -m pytest -q`;
+ the current suite covers API authentication, database CRUD, market signal rejection, deterministic backtest, risk limits, provider fallback, and idempotent news/trend persistence. The production composition separates `main.py` (HTTP API) from `worker.py` (trading engines), uses PostgreSQL and Redis, and requires `SECRET_KEY` and `POSTGRES_PASSWORD` to be injected by the deployment environment. The GitHub Actions workflow compiles the code, runs the tests, and builds the container; it does not publish or activate live trading automatically.
 
 The repository launcher is `start.sh`. Use `ZIA_MODE=test ./start.sh` for the offline regression suite, `ZIA_MODE=api ./start.sh` for the HTTP service, or `ZIA_MODE=worker ./start.sh` for the persistent worker. The launcher intentionally contains no exchange credentials; inject them through the server secret manager or a local ignored `.env` file.
+
+The core interprets buyer notional dominance as bullish pressure and seller notional dominance as bearish pressure only when the configured 2x1 ratio is reached. A balanced or incomplete book remains `hold`, and neutral conditions never authorize a new entry. Pullback confirmation is not an automatic authorization for leverage. The before/after learning layer records the context first and labels the result only after future candles are available.
 
 The exchange facade supports `BINANCE_MODE=simulated` (default), `BINANCE_MODE=testnet` with `https://testnet.binance.vision/api`, and `BINANCE_MODE=demo` with `https://demo-api.binance.com/api`. The real adapter rejects unknown or production hosts, signs HMAC requests, loads `exchangeInfo`, applies symbol filters and fetches account/market data. Keep order calls disabled until the sandbox smoke test passes; this repository does not provide a production adapter.
 

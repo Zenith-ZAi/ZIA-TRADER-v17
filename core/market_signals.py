@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 import numpy as np
 import pandas as pd
 
+from core.flow_analysis import analyze_order_flow
 from core.pullback_strategy import calculate_pullback_signal
 
 
@@ -25,6 +26,7 @@ class MarketSignal:
     indicators: Dict[str, float]
     reasons: List[str]
     pullback: Dict[str, Any] = field(default_factory=dict)
+    flow: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -49,6 +51,9 @@ def calculate_market_signal(
     max_volatility: float = 0.08,
     pullback_kwargs: Dict[str, Any] | None = None,
     precomputed_pullback: Any | None = None,
+    order_flow: Dict[str, Any] | None = None,
+    flow_ratio_threshold: float = 2.0,
+    require_flow_confirmation: bool = False,
 ) -> MarketSignal:
     """Calcula um sinal com motivos e indicadores, sem executar ordens.
 
@@ -134,6 +139,7 @@ def calculate_market_signal(
     macd_component = _clamp(float((macd.iloc[-1] - macd_signal.iloc[-1]) / macd_scale) * 3)
 
     volume_component = 0.0
+    volume_ratio = 0.0
     volume = _numeric_series(data, "volume")
     if volume is not None and len(volume) >= 20:
         volume = volume.reindex(data.index).ffill().dropna()
@@ -144,6 +150,8 @@ def calculate_market_signal(
 
     news_component = _clamp(float(news_sentiment))
     trend_component_external = _clamp(float(trend_score))
+    flow_analysis = analyze_order_flow(order_flow, ratio_threshold=flow_ratio_threshold)
+    flow_component = _clamp(float(flow_analysis.get("imbalance", 0.0)) * 3.0)
     components = {
         "trend": trend_component,
         "momentum": momentum_component,
@@ -152,6 +160,7 @@ def calculate_market_signal(
         "volume": volume_component,
         "news": news_component,
         "external_trend": trend_component_external,
+        "order_flow": flow_component,
     }
     score = (
         0.25 * trend_component
@@ -161,6 +170,7 @@ def calculate_market_signal(
         + 0.10 * volume_component
         + 0.05 * news_component
         + 0.05 * trend_component_external
+        + 0.10 * flow_component
     )
     score = _clamp(score)
     confidence = 0.50 + (0.50 * abs(score))
@@ -193,12 +203,20 @@ def calculate_market_signal(
         reasons.append("confiança abaixo do limiar operacional")
     if volume_component == 0.0:
         reasons.append("volume sem confirmação suficiente")
+    flow_ok = True
+    if require_flow_confirmation:
+        flow_ok = bool(flow_analysis.get("data_available") and flow_analysis.get("action") == candidate_action)
+        if not flow_ok:
+            reasons.append("fluxo comprador/vendedor sem dominância 2x1 confirmada")
+    elif not flow_analysis.get("data_available"):
+        reasons.append("livro de ofertas indisponível; fluxo não usado no score")
 
     good_signal = (
         candidate_action != "hold"
         and confidence >= min_confidence
         and not contradiction
         and volatility <= max_volatility
+        and flow_ok
     )
     action = candidate_action if good_signal else "hold"
     status = "good" if good_signal else "rejected"
@@ -211,9 +229,19 @@ def calculate_market_signal(
         status=status,
         regime=regime,
         volatility=float(volatility),
-        indicators={"rsi": float(rsi.iloc[-1]), "atr_pct": float(volatility)},
+        indicators={
+            "ema_fast": float(ema_fast.iloc[-1]),
+            "ema_slow": float(ema_slow.iloc[-1]),
+            "momentum_5": float(returns.tail(5).sum()),
+            "rsi": float(rsi.iloc[-1]),
+            "macd": float(macd.iloc[-1] - macd_signal.iloc[-1]),
+            "volume_ratio": float(volume_ratio),
+            "atr_pct": float(volatility),
+            "flow_imbalance": float(flow_component),
+        },
         reasons=reasons,
         pullback=pullback_signal.to_dict(),
+        flow=flow_analysis,
     )
 
 

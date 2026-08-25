@@ -223,6 +223,10 @@ class Settings(BaseSettings):
     MIN_REWARD_RISK_RATIO: float = float(os.getenv("MIN_REWARD_RISK_RATIO", "1.2"))
     COST_AWARE_EXECUTION_ENABLED: bool = os.getenv("COST_AWARE_EXECUTION_ENABLED", "true").lower() == "true"
     MAX_BOOK_IMPACT: float = float(os.getenv("MAX_BOOK_IMPACT", "0.10"))
+    ORDER_FLOW_RATIO_THRESHOLD: float = float(os.getenv("ORDER_FLOW_RATIO_THRESHOLD", "2.0"))
+    ORDER_FLOW_CONFIRMATION_REQUIRED: bool = os.getenv("ORDER_FLOW_CONFIRMATION_REQUIRED", "true").lower() == "true"
+    SIMULATED_ORDER_FLOW_BIAS: str = os.getenv("SIMULATED_ORDER_FLOW_BIAS", "neutral")
+    SIMULATED_ORDER_FLOW_RATIO: float = float(os.getenv("SIMULATED_ORDER_FLOW_RATIO", "2.2"))
 
     # Fricção de execução para Sandbox/backtest; não ativa produção por padrão
     FRICTION_ENABLED: bool = os.getenv("FRICTION_ENABLED", "false").lower() == "true"
@@ -257,6 +261,8 @@ class Settings(BaseSettings):
     PATTERN_MEMORY_MIN_OUTCOME_ATR: float = float(os.getenv("PATTERN_MEMORY_MIN_OUTCOME_ATR", "2.0"))
     PATTERN_MEMORY_MAX_DISTANCE: float = float(os.getenv("PATTERN_MEMORY_MAX_DISTANCE", "1.25"))
     PATTERN_MEMORY_MIN_SAMPLES: int = int(os.getenv("PATTERN_MEMORY_MIN_SAMPLES", "3"))
+    LEARNING_FORWARD_HORIZON_BARS: int = int(os.getenv("LEARNING_FORWARD_HORIZON_BARS", "8"))
+    LEARNING_MIN_LABELED_SAMPLES: int = int(os.getenv("LEARNING_MIN_LABELED_SAMPLES", "20"))
 
     # News and trend providers
     NEWS_HTTP_TIMEOUT_SECONDS: float = float(os.getenv("NEWS_HTTP_TIMEOUT_SECONDS", "8"))

@@ -15,6 +15,8 @@ from infra.redis_cache import RedisCache
 from ai.whale_detector import WhaleDetector
 from execution.execution_engine import ExecutionEngine
 from core.runtime_registry import RuntimeConfigRegistry
+from core.command_manager import CoreCommandManager
+from core.daily_state_manager import DailyStateManager
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +27,7 @@ class TradingManager:
         self.settings = settings
         self.runtime_registry = RuntimeConfigRegistry(db_manager)
         self.runtime_profile = self.runtime_registry.apply_to_settings(settings)
+        self.daily_state = DailyStateManager(max_wins=5, max_losses=2)
         self.news_processor = NewsProcessor(settings, db_manager)
         base_exchange_connector = ExchangeConnector(settings)
         self.market_connector = MarketConnector(settings, base_exchange_connector)
@@ -41,6 +44,7 @@ class TradingManager:
         )
 
         self.order_manager = OrderManager(settings, self.market_connector, self.execution_engine)
+        self.command_manager = CoreCommandManager(settings, db_manager, self.market_connector, self.news_processor)
         self.trading_engine = RoboTraderUnified(settings, self.news_processor, self.market_connector, db_manager)
         self.trading_engine.order_manager = self.order_manager
         self.sniper_engine = SniperEngine(
@@ -80,6 +84,7 @@ class TradingManager:
                 "order_manager_mode": self.order_manager.mode,
                 "order_confirmation_required": self.order_manager.confirmation_required,
                 "market_type": self.market_connector.market_type,
+                "daily_state": self.daily_state.status(),
             },
         }
 

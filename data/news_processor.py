@@ -582,6 +582,20 @@ class NewsProcessor:
         scores = [float(article.get("sentiment_score", 0.0)) for article in news_articles]
         return max(-1.0, min(1.0, sum(scores) / len(scores))) if scores else 0.0
 
+    @staticmethod
+    def aggregate_trend_score(trends: List[Dict[str, Any]]) -> float:
+        """Converte somente variação direcional em score; popularidade isolada é neutra."""
+        directional = []
+        for trend in trends:
+            value = trend.get("price_change_24h")
+            if value is None:
+                continue
+            try:
+                directional.append(max(-1.0, min(1.0, float(value) / 10.0)))
+            except (TypeError, ValueError):
+                continue
+        return max(-1.0, min(1.0, sum(directional) / len(directional))) if directional else 0.0
+
     def health(self) -> Dict[str, Dict[str, Any]]:
         return dict(self.provider_status)
 
