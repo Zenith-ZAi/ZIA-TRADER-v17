@@ -121,15 +121,19 @@ class SignalLearningLayer:
             )
             labeled += 1
             labels.append(label.to_dict())
-        wins = sum(item["outcome_label"] for item in labels)
+        directional = [item for item in labels if item["action"] in {"buy", "sell"}]
+        wins = sum(item["outcome_label"] for item in directional)
+        directional_count = len(directional)
         return {
             "symbol": symbol,
             "observations_seen": len(observations),
             "observations_labeled": labeled,
             "observations_skipped": skipped,
+            "directional_observations": directional_count,
+            "neutral_observations": labeled - directional_count,
             "wins": wins,
-            "losses": labeled - wins,
-            "win_rate": wins / labeled if labeled else 0.0,
+            "losses": directional_count - wins,
+            "win_rate": wins / directional_count if directional_count else 0.0,
             "horizon_bars": max(1, int(horizon_bars or self.default_horizon)),
             "labels": labels,
             "orders_sent": 0,

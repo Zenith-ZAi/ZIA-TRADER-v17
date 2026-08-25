@@ -28,7 +28,7 @@ def main() -> int:
     parser.add_argument("--skip-diagram", action="store_true")
     args = parser.parse_args()
 
-    checks = [_run([sys.executable, "-m", "compileall", "-q", "core", "data", "execution", "config"])]
+    checks = [_run([sys.executable, "-m", "compileall", "-q", "core", "data", "execution", "config", "scripts"])]
     if not args.skip_tests:
         checks.append(_run([sys.executable, "-m", "pytest", "-q"]))
     if not args.skip_diagram:

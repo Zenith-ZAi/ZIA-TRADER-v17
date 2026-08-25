@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import json
 import time
 from datetime import datetime, timedelta, timezone
@@ -14,7 +15,7 @@ import pandas as pd
 import requests
 
 
-URL = "https://api.binance.com/api/v3/klines"
+URL = f"{os.getenv('BINANCE_PUBLIC_BASE_URL', 'https://data-api.binance.vision').rstrip('/')}/api/v3/klines"
 COLUMNS = [
     "open_time", "open", "high", "low", "close", "volume", "close_time",
     "quote_asset_volume", "number_of_trades", "taker_buy_base_volume",
@@ -90,7 +91,10 @@ def fetch(
     frame = pd.DataFrame(pages, columns=COLUMNS)
     if frame.empty:
         raise RuntimeError("Binance retornou dataset vazio")
-    numeric = ["open", "high", "low", "close", "volume", "quote_asset_volume", "number_of_trades"]
+    numeric = [
+        "open", "high", "low", "close", "volume", "quote_asset_volume",
+        "number_of_trades", "taker_buy_base_volume", "taker_buy_quote_volume",
+    ]
     for column in numeric:
         frame[column] = pd.to_numeric(frame[column], errors="raise")
     frame["open_time"] = pd.to_datetime(frame["open_time"], unit="ms", utc=True)
@@ -102,7 +106,11 @@ def fetch(
         raise RuntimeError("duplicata de open_time após normalização")
     if not frame["open_time"].is_monotonic_increasing:
         raise RuntimeError("timestamps não estão em ordem crescente")
-    return frame[["open_time", "open", "high", "low", "close", "volume"]].reset_index(drop=True)
+    return frame[[
+        "open_time", "open", "high", "low", "close", "volume",
+        "quote_asset_volume", "number_of_trades", "taker_buy_base_volume",
+        "taker_buy_quote_volume",
+    ]].reset_index(drop=True)
 
 
 def main() -> None:

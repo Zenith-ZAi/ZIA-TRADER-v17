@@ -95,6 +95,7 @@ Defined in `.env` (loaded automatically by pydantic-settings):
 | `BINANCE_MODE` | `simulated` | Use `testnet` or `demo` only with sandbox credentials |
 | `BINANCE_BASE_URL` | Optional explicit override | Otherwise selected from the Demo/Testnet URL alias |
 | `BINANCE_BASE_URL_DEMO` / `BINANCE_BASE_URL_TESTNET` | Official sandbox URLs | Selected from `BINANCE_MODE` |
+| `BINANCE_PUBLIC_BASE_URL` | `https://data-api.binance.vision` | Public market-data endpoint without credentials |
 | `BINANCE_API_KEY` / `BINANCE_SECRET_KEY` | — | Testnet/Demo credentials; never production keys |
 | `BINANCE_TIMEOUT_SECONDS` / `BINANCE_RECV_WINDOW_MS` | `10` / `5000` | Network timeout and signed-request window |
 | `BINANCE_PRELOAD_EXCHANGE_INFO` | `false` | Set `true` only when all symbol filters must be loaded at startup |
@@ -112,7 +113,7 @@ Defined in `.env` (loaded automatically by pydantic-settings):
 
 ## Core update and learning commands
 
-Use `python scripts/update_core.py` to compile the core, run the complete regression suite and regenerate `docs/core_refinement.png`. The command reports `orders_sent=0` and never enables live trading. After a shadow replay, use `python scripts/label_shadow_observations.py <dataset.csv> --horizon-bars 8` to attach future-candle outcomes to the stored before-context; only observations with enough future bars are labeled.
+Use `python scripts/update_core.py` to compile the core, run the complete regression suite and regenerate `docs/core_refinement.png`. Use `python scripts/test_free_market_data.py` for public read-only Binance, Yahoo global, B3 and Forex checks, `python scripts/ingest_news.py --symbols BTC/USDT ETH/USDT` for free news/trend providers, and `python scripts/run_learning_replay.py --symbol BTCUSDT --limit 500 --horizon-bars 8` for a causal replay with before/after labels. These commands report `orders_sent=0` and never enable live trading. After a shadow replay, use `python scripts/label_shadow_observations.py <dataset.csv> --horizon-bars 8` to attach future-candle outcomes to the stored before-context; only observations with enough future bars are labeled.
 
 ## Validation and deployment
 
@@ -123,7 +124,8 @@ The repository launcher is `start.sh`. Use `ZIA_MODE=test ./start.sh` for the of
 
 The core interprets buyer notional dominance as bullish pressure and seller notional dominance as bearish pressure only when the configured 2x1 ratio is reached. A balanced or incomplete book remains `hold`, and neutral conditions never authorize a new entry. Pullback confirmation is not an automatic authorization for leverage. The before/after learning layer records the context first and labels the result only after future candles are available.
 
-The exchange facade supports `BINANCE_MODE=simulated` (default), `BINANCE_MODE=testnet` with `https://testnet.binance.vision/api`, and `BINANCE_MODE=demo` with `https://demo-api.binance.com/api`. The real adapter rejects unknown or production hosts, signs HMAC requests, loads `exchangeInfo`, applies symbol filters and fetches account/market data. Keep order calls disabled until the sandbox smoke test passes; this repository does not provide a production adapter.
+Public market data uses `BINANCE_PUBLIC_BASE_URL=https://data-api.binance.vision` without credentials. The exchange facade supports `BINANCE_MODE=simulated` (default), `BINANCE_MODE=testnet` with `https://testnet.binance.vision/api`, and `BINANCE_MODE=demo` with `https://demo-api.binance.com/api`.
+ The real adapter rejects unknown or production hosts, signs HMAC requests, loads `exchangeInfo`, applies symbol filters and fetches account/market data. Keep order calls disabled until the sandbox smoke test passes; this repository does not provide a production adapter.
 
 ## Admin Console
 

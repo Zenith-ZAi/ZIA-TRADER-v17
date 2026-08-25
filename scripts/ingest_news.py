@@ -34,7 +34,7 @@ async def run(symbols: list[str], database_url: str) -> dict:
         "trends_persisted_or_updated": len(trends),
         "providers": processor.health(),
         "sentiment": processor.aggregate_sentiment(articles),
-        "trend_score": float(trends[0].get("trend_score", 0.0)) if trends else 0.0,
+        "trend_score": processor.aggregate_trend_score(trends),
     }
 
 

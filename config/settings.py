@@ -145,6 +145,7 @@ class Settings(BaseSettings):
     BINANCE_BASE_URL: str = os.getenv(
         "BINANCE_BASE_URL"
     ) or (BINANCE_BASE_URL_DEMO if BINANCE_MODE.lower() == "demo" else BINANCE_BASE_URL_TESTNET)
+    BINANCE_PUBLIC_BASE_URL: str = os.getenv("BINANCE_PUBLIC_BASE_URL", "https://data-api.binance.vision")
     BINANCE_DEMO_API_KEY: Optional[str] = os.getenv("BINANCE_DEMO_API_KEY")
     BINANCE_DEMO_SECRET_KEY: Optional[str] = os.getenv("BINANCE_DEMO_SECRET_KEY")
     BINANCE_API_KEY: Optional[str] = os.getenv("BINANCE_API_KEY") or BINANCE_DEMO_API_KEY

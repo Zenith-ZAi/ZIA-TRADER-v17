@@ -20,6 +20,10 @@ data/public_backtest_comparison.json
 data/shadow_calibration*.json
 data/latency_benchmark*.json
 data/agent_backtest_check.json
+data/free_market_data_test.json
+data/learning_replay_result.json
+data/replay_*.csv
+data/news_api_test*.db
 data/continuous_protocol_result.json
 data/continuous_assets/
 data/api_surface_audit.json

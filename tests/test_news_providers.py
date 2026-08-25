@@ -52,6 +52,12 @@ def test_optional_news_providers_are_normalized(monkeypatch):
     assert set(processor.health()) == {"marketaux", "finnhub", "twelve_data"}
 
 
+def test_trend_score_uses_directional_change_only():
+    assert NewsProcessor.aggregate_trend_score([{"trend_score": 1.0}]) == 0.0
+    assert NewsProcessor.aggregate_trend_score([{"price_change_24h": 5.0}]) == 0.5
+    assert NewsProcessor.aggregate_trend_score([{"price_change_24h": -20.0}]) == -1.0
+
+
 def test_news_provider_errors_degrade_without_fabricating(monkeypatch):
     settings = Settings(MARKETAUX_API_KEY="marketaux-test", MARKETAUX_BASE_URL="https://test.local/marketaux")
     processor = NewsProcessor(settings)
