@@ -74,3 +74,13 @@ Antes de qualquer uso financeiro, devem ser executados revisão independente de 
 [2]: logs/test_report.log "Log da validação final"
 [3]: tests/test_production_gaps.py "Testes estruturais P0/P1"
 [4]: learning/training_pipeline.py "Pipeline controlado de treinamento OOS"
+
+## Preparação adicional para VPS
+
+A estrutura foi ampliada para uma migração controlada ao VPS. O novo `docker-compose.vps.yml` separa PostgreSQL, Redis com AOF e senha, `db-init`, API, worker, jobs de backtesting/notícias e Prometheus opcional. A API fica vinculada a `127.0.0.1`, os dados são volumes persistentes e API/worker/jobs permanecem dependentes do schema inicializado. O `.env.vps.example` mantém `BINANCE_MODE=simulated`, shadow ativo, autonomia/manual desligados e as flags live fixadas em false no compose.
+
+Foi adicionado `scripts/vps_preflight.py`, que valida flags de segurança, conectividade/schema, persistência exigida de PostgreSQL/Redis e permissões de diretórios. Também foram adicionados `scripts/run_monthly_backtest.py`, para coleta pública de OHLCV e persistência de cada execução em `backtest_runs`, `scripts/initialize_schema.py`, `scripts/vps_backup.sh`, o workflow CI revisado e `docs/VPS_DEPLOYMENT_RUNBOOK.md`.
+
+A suíte completa após essa rodada terminou com **77 testes aprovados** e dois warnings não bloqueantes. Um backtest técnico de **31 dias de BTCUSDT em 1h** foi executado em banco SQLite temporário com 743 barras, sem credenciais, sem ordens e sem promoção de modelo. O resultado foi `orders_sent: 0`, `live_trading_enabled: false`, `model_promoted: false`, status `ok` e zero trades no recorte observado. Isso confirma o fluxo de coleta, integridade, backtest e persistência; não é uma conclusão de rentabilidade nem substitui o experimento multiativo no VPS.
+
+O Docker não estava instalado no Sandbox, então o build real da imagem e a execução do Compose devem ser confirmados no VPS ou em CI com Docker. O YAML do compose foi validado estaticamente e nenhum serviço de trading real foi iniciado.

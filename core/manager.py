@@ -25,6 +25,7 @@ class TradingManager:
 
     def __init__(self, settings: Settings, db_manager):
         self.settings = settings
+        self.db_manager = db_manager
         self.runtime_registry = RuntimeConfigRegistry(db_manager)
         self.runtime_profile = self.runtime_registry.apply_to_settings(settings)
         self.daily_state = DailyStateManager(max_wins=5, max_losses=2)

@@ -11,6 +11,10 @@ venv
 data/*.db
 data/*.sqlite
 data/*.sqlite3
+data/*.csv
+data/monthly_backtest
+backups
 models
 checkpoints
 *.log
+logs

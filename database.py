@@ -293,3 +293,28 @@ class KillSwitchEvent(Base):
     reason = Column(String, nullable=False)
     actor = Column(String, nullable=False, default="system")
     created_at = Column(DateTime, default=utc_now, index=True)
+
+
+class BacktestRun(Base):
+    """Registro auditável de uma execução histórica, sem promover modelos automaticamente."""
+    __tablename__ = "backtest_runs"
+    id = Column(Integer, primary_key=True)
+    run_id = Column(String, unique=True, nullable=False, index=True)
+    symbol = Column(String, nullable=False, index=True)
+    timeframe = Column(String, nullable=False, default="1h")
+    mode = Column(String, nullable=False, default="historical")
+    dataset_path = Column(String, nullable=False)
+    dataset_sha256 = Column(String, nullable=False)
+    start_time = Column(DateTime, nullable=False)
+    end_time = Column(DateTime, nullable=False)
+    status = Column(String, nullable=False, default="completed")
+    initial_capital = Column(Float)
+    final_capital = Column(Float)
+    total_pnl = Column(Float)
+    return_pct = Column(Float)
+    sharpe_ratio = Column(Float)
+    maximum_drawdown = Column(Float)
+    trades_executed = Column(Integer, default=0)
+    configuration_json = Column(JSON)
+    result_json = Column(JSON)
+    created_at = Column(DateTime, default=utc_now, index=True)

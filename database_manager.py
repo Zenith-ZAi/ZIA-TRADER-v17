@@ -1,16 +1,20 @@
 from sqlalchemy.orm import Session
 import hashlib
+import math
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict
 
-from database import Base, AccountState, Position, RuntimePositionState, DailyPNL, WeeklyPNL, MonthlyPNL, Drawdown, OrderHistory, ExecutionHistory, Trade, WhaleActivity, NewsArticle, TrendSnapshot, AIObservation, MarketPattern, SystemLog, OrderIntent, ReconciliationSnapshot, ProtectionOrder, KillSwitchEvent, MarketType, OrderStatus, utc_now
+from database import Base, AccountState, Position, RuntimePositionState, DailyPNL, WeeklyPNL, MonthlyPNL, Drawdown, OrderHistory, ExecutionHistory, Trade, WhaleActivity, NewsArticle, TrendSnapshot, AIObservation, MarketPattern, SystemLog, OrderIntent, ReconciliationSnapshot, ProtectionOrder, KillSwitchEvent, BacktestRun, MarketType, OrderStatus, utc_now
 
 class DatabaseManager:
     def __init__(self, database_url: str):
-        self.engine = create_engine(database_url, connect_args={"check_same_thread": False} if "sqlite" in database_url else {})
+        engine_options = {"pool_pre_ping": True, "pool_recycle": 1800}
+        if "sqlite" in database_url:
+            engine_options["connect_args"] = {"check_same_thread": False}
+        self.engine = create_engine(database_url, **engine_options)
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
 
     def create_tables(self):
@@ -597,5 +601,94 @@ class DatabaseManager:
             db.commit()
             db.refresh(row)
             return {"id": row.id, "account_id": account_id, "enabled": enabled, "reason": reason, "actor": actor}
+        finally:
+            db.close()
+
+    @staticmethod
+    def _json_safe(value):
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
+        if isinstance(value, dict):
+            return {str(key): DatabaseManager._json_safe(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [DatabaseManager._json_safe(item) for item in value]
+        return value
+
+    @staticmethod
+    def _parse_datetime(value: object) -> datetime:
+        if isinstance(value, datetime):
+            return value.replace(tzinfo=None)
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None)
+            except ValueError:
+                pass
+        return utc_now()
+
+    def create_backtest_run(
+        self,
+        run_id: str,
+        symbol: str,
+        timeframe: str,
+        dataset_path: str,
+        dataset_sha256: str,
+        result: Dict,
+        configuration: Optional[Dict] = None,
+        mode: str = "historical",
+    ) -> Dict:
+        """Grava uma execução histórica sem alterar modelos ou habilitar ordens."""
+        db = self.SessionLocal()
+        try:
+            safe_result = self._json_safe(dict(result))
+            existing = db.query(BacktestRun).filter(BacktestRun.run_id == run_id).first()
+            if existing is None:
+                existing = BacktestRun(run_id=run_id, symbol=symbol, timeframe=timeframe, mode=mode, dataset_path=dataset_path, dataset_sha256=dataset_sha256)
+                db.add(existing)
+            existing.start_time = self._parse_datetime(result.get("start_date"))
+            existing.end_time = self._parse_datetime(result.get("end_date"))
+            existing.status = str(result.get("status", "completed"))
+            existing.initial_capital = result.get("initial_capital")
+            existing.final_capital = result.get("final_capital")
+            existing.total_pnl = result.get("total_pnl")
+            existing.return_pct = result.get("return_pct")
+            existing.sharpe_ratio = result.get("sharpe_ratio")
+            existing.maximum_drawdown = result.get("maximum_drawdown", result.get("max_drawdown"))
+            existing.trades_executed = int(result.get("trades_executed", 0) or 0)
+            existing.configuration_json = self._json_safe(configuration or {})
+            existing.result_json = safe_result
+            db.commit()
+            db.refresh(existing)
+            return {"run_id": existing.run_id, "id": existing.id, "symbol": existing.symbol, "status": existing.status}
+        finally:
+            db.close()
+
+    def list_backtest_runs(self, symbol: Optional[str] = None, limit: int = 100) -> List[Dict]:
+        db = self.SessionLocal()
+        try:
+            query = db.query(BacktestRun)
+            if symbol:
+                query = query.filter(BacktestRun.symbol == symbol)
+            rows = query.order_by(BacktestRun.created_at.desc()).limit(max(1, min(int(limit), 1000))).all()
+            return [
+                {
+                    "run_id": row.run_id,
+                    "symbol": row.symbol,
+                    "timeframe": row.timeframe,
+                    "mode": row.mode,
+                    "dataset_path": row.dataset_path,
+                    "dataset_sha256": row.dataset_sha256,
+                    "start_time": row.start_time.isoformat() if row.start_time else None,
+                    "end_time": row.end_time.isoformat() if row.end_time else None,
+                    "status": row.status,
+                    "initial_capital": row.initial_capital,
+                    "final_capital": row.final_capital,
+                    "total_pnl": row.total_pnl,
+                    "return_pct": row.return_pct,
+                    "sharpe_ratio": row.sharpe_ratio,
+                    "maximum_drawdown": row.maximum_drawdown,
+                    "trades_executed": row.trades_executed,
+                }
+                for row in rows
+            ]
         finally:
             db.close()

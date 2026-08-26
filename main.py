@@ -18,7 +18,6 @@ from monitoring.telemetry.telemetry_setup import setup_telemetry
 from security.jwt_utils import create_access_token, verify_token
 from security.rbac_utils import is_admin, is_trader
 from risk.strategy_optimizer import OptimizationBudget, StrategyOptimizer
-from security.rate_limiter import RateLimiter
 from api.middleware import RequestRateLimitMiddleware
 
 logging.basicConfig(level=logging.INFO)
@@ -27,10 +26,6 @@ logger = logging.getLogger(__name__)
 
 db_manager = DatabaseManager(settings.DATABASE_URL)
 db_manager.create_tables()
-rate_limiter = RateLimiter(
-    rate_limit=settings.API_RATE_LIMIT,
-    interval=settings.API_RATE_LIMIT_INTERVAL,
-)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 # Usuários de demonstração somente. Em produção, substitua esta camada pelo banco de usuários.
@@ -175,14 +170,22 @@ async def _stop_engine_tasks() -> None:
 
 @app.get("/healthz")
 async def healthz() -> Dict[str, Any]:
-    """Liveness sem autenticação; não expõe segredos ou dados de conta."""
+    """Liveness/readiness sem autenticação; não expõe segredos ou dados de conta."""
     try:
         db_manager.get_account_state("default_account")
+        database_persistent = not settings.DATABASE_URL.startswith("sqlite:")
+        redis_health = trading_manager.redis_cache.health()
+        if settings.REQUIRE_PERSISTENT_DATABASE and not database_persistent:
+            raise RuntimeError("PostgreSQL persistente obrigatório")
+        if settings.REQUIRE_PERSISTENT_REDIS and not bool(redis_health.get("persistent")):
+            raise RuntimeError("Redis persistente obrigatório")
         return {
             "status": "ok",
             "service": settings.PROJECT_NAME,
             "version": settings.VERSION,
             "exchange_connected": trading_manager.exchange_connector.is_connected,
+            "database": {"persistent": database_persistent},
+            "redis": redis_health,
             "news_providers": trading_manager.news_processor.health(),
         }
     except Exception as exc:
@@ -277,7 +280,6 @@ async def admin_kill_switch(
 async def status_alias(
     current_user: Dict[str, Any] = Depends(get_trader_user),
 ) -> Dict[str, Any]:
-    await rate_limiter(current_user["username"])
     account = db_manager.get_account_state("default_account")
     positions = db_manager.get_open_positions("default_account")
     daily = db_manager.get_daily_pnl("default_account", datetime.now(timezone.utc).replace(tzinfo=None))
@@ -299,7 +301,6 @@ async def create_order(
     order: Dict[str, Any] = Body(...),
     current_user: Dict[str, Any] = Depends(get_trader_user),
 ) -> Dict[str, Any]:
-    await rate_limiter(current_user["username"])
     source = str(order.pop("source", "manual")).lower()
     confirmed = bool(order.pop("confirmed", False))
     try:
@@ -313,7 +314,6 @@ async def confirm_order(
     request: Dict[str, Any] = Body(...),
     current_user: Dict[str, Any] = Depends(get_trader_user),
 ) -> Dict[str, Any]:
-    await rate_limiter(current_user["username"])
     token = str(request.get("confirmation_token", ""))
     approved = bool(request.get("approved", True))
     try:
@@ -327,7 +327,6 @@ async def market_alias(
     symbol: str,
     current_user: Dict[str, Any] = Depends(get_trader_user),
 ) -> Dict[str, Any]:
-    await rate_limiter(current_user["username"])
     try:
         normalized = trading_manager.market_connector.normalize_symbol(symbol)
         market_data = await trading_manager.market_connector.get_market_data(normalized)
@@ -341,7 +340,6 @@ async def market_alias(
 async def logs_alias(
     current_user: Dict[str, Any] = Depends(get_trader_user),
 ) -> Dict[str, Any]:
-    await rate_limiter(current_user["username"])
     cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=24)
     logs = [item for item in db_manager.get_system_logs("default_account") if item.timestamp and item.timestamp >= cutoff]
     return {"since": cutoff.isoformat(), "logs": [{"timestamp": item.timestamp.isoformat(), "level": item.level, "module": item.module, "message": item.message} for item in logs]}
@@ -351,7 +349,6 @@ async def logs_alias(
 async def dashboard_status(
     current_user: Dict[str, Any] = Depends(get_trader_user),
 ) -> Dict[str, Any]:
-    await rate_limiter(current_user["username"])
     return _runtime_status_payload()
 
 
@@ -362,7 +359,6 @@ async def analyze_core_symbol(
     current_user: Dict[str, Any] = Depends(get_trader_user),
 ) -> Dict[str, Any]:
     """Executa leitura explicável de mercado sem enviar ordem."""
-    await rate_limiter(current_user["username"])
     try:
         return await trading_manager.command_manager.analyze_symbol(symbol, offline=offline)
     except Exception as exc:
@@ -376,7 +372,6 @@ async def sync_core_data(
     current_user: Dict[str, Any] = Depends(get_trader_user),
 ) -> Dict[str, Any]:
     """Sincroniza feeds e retorna snapshots; não executa ordens."""
-    await rate_limiter(current_user["username"])
     raw_symbols = request.get("symbols") or settings.SYMBOLS
     symbols = [raw_symbols] if isinstance(raw_symbols, str) else raw_symbols
     try:
@@ -397,7 +392,6 @@ async def optimize_sharpe(
     asset_list: str,
     current_user: Dict[str, Any] = Depends(get_trader_user),
 ) -> Dict[str, Any]:
-    await rate_limiter(current_user["username"])
     requested_assets = [value.strip() for value in asset_list.split(",") if value.strip()]
     if not requested_assets:
         raise HTTPException(status_code=400, detail="asset_list não pode ser vazio")
@@ -434,7 +428,6 @@ async def optimize_sharpe(
 async def reload_runtime(
     current_user: Dict[str, Any] = Depends(get_admin_user),
 ) -> Dict[str, Any]:
-    await rate_limiter(current_user["username"])
     profile = trading_manager.reload_runtime_config()
     return {"reloaded": True, "profile": profile, "status": _runtime_status_payload()}
 
@@ -465,7 +458,6 @@ async def dashboard_websocket(websocket: WebSocket):
 async def root_rate_limited(
     current_user: Dict[str, Any] = Depends(get_current_active_user),
 ) -> Dict[str, str]:
-    await rate_limiter(current_user["username"])
     return {
         "project": settings.PROJECT_NAME,
         "version": settings.VERSION,
@@ -477,7 +469,6 @@ async def root_rate_limited(
 async def start_trading(
     current_user: Dict[str, Any] = Depends(get_trader_user),
 ) -> Dict[str, Any]:
-    await rate_limiter(current_user["username"])
     started = await _start_engine("trading", trading_manager.start_trading)
     return {"message": "Motor de Trading iniciado." if started else "Motor de Trading já estava em execução.", "started": started}
 
@@ -486,7 +477,6 @@ async def start_trading(
 async def start_sniper(
     current_user: Dict[str, Any] = Depends(get_trader_user),
 ) -> Dict[str, Any]:
-    await rate_limiter(current_user["username"])
     started = await _start_engine("sniper", trading_manager.start_sniper)
     return {"message": "Motor Sniper iniciado." if started else "Motor Sniper já estava em execução.", "started": started}
 
@@ -495,7 +485,6 @@ async def start_sniper(
 async def stop_trading(
     current_user: Dict[str, Any] = Depends(get_trader_user),
 ) -> Dict[str, str]:
-    await rate_limiter(current_user["username"])
     await trading_manager.stop_all()
     await _stop_engine_tasks()
     return {"message": "Todos os motores parados."}

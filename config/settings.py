@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
     REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    REQUIRE_PERSISTENT_DATABASE: bool = os.getenv("REQUIRE_PERSISTENT_DATABASE", "false").lower() == "true"
+    REQUIRE_PERSISTENT_REDIS: bool = os.getenv("REQUIRE_PERSISTENT_REDIS", "false").lower() == "true"
     
     # Kafka
     KAFKA_BOOTSTRAP_SERVERS: str = os.getenv("KAFKA_SERVERS", "localhost:9092")

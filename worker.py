@@ -15,8 +15,12 @@ logger = logging.getLogger(__name__)
 
 async def run_worker() -> None:
     db_manager = DatabaseManager(settings.DATABASE_URL)
+    if settings.REQUIRE_PERSISTENT_DATABASE and settings.DATABASE_URL.startswith("sqlite:"):
+        raise RuntimeError("PostgreSQL persistente obrigatório no ambiente do worker")
     db_manager.create_tables()
     manager = TradingManager(settings, db_manager)
+    if settings.REQUIRE_PERSISTENT_REDIS and not manager.redis_cache.is_persistent:
+        raise RuntimeError("Redis persistente obrigatório no ambiente do worker")
     await manager.exchange_connector.connect()
     reconciliation = await manager.reconcile()
     logger.info("Reconciliação inicial concluída: %s", reconciliation.get("status"))
