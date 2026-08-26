@@ -1,0 +1,93 @@
+flowchart TB
+    OP[Operador / API / Worker] --> AUTH[JWT + RBAC + Rate Limit planejado]
+    AUTH --> CMD[CoreCommandManager\nsync / analyze / label]
+    AUTH --> LIFE[FastAPI lifespan\nhealthz / metrics / control]
+    LIFE --> TM[TradingManager\ncomposição e ciclo de vida]
+    OP --> TM
+
+    subgraph DATA[Dados e adaptadores]
+        PUBLIC[Market data público\nBinance data-api / Yahoo / Forex]
+        SANDBOX[Binance Demo/Testnet\nHTTPS + HMAC + filtros]
+        SIM[Exchange simulada\npaper / shadow]
+        NEWS[RSS / GDELT / CoinGecko\nproviders opcionais]
+        SNAP[MarketSnapshot\nOHLCV + livro + notícias + tendências]
+        PUBLIC --> SNAP
+        SANDBOX --> SNAP
+        SIM --> SNAP
+        NEWS --> SNAP
+    end
+    TM --> SNAP
+    CMD --> SNAP
+
+    subgraph ANALYSIS[Análise causal]
+        IND[EMA / RSI / MACD / ATR / volume]
+        FLOW[FlowAnalysis\ncomprador/vendedor 2x1]
+        TREND[Tendência externa\nsentimento e regime]
+        PB[Pullback\ncorreção e trigger]
+        MTF[Multi-timeframe\nconfirmação]
+        SIGNAL[MarketSignal\nscore + confiança + razões]
+        SNAP --> IND
+        SNAP --> FLOW
+        SNAP --> TREND
+        SNAP --> PB
+        IND --> SIGNAL
+        FLOW --> SIGNAL
+        TREND --> SIGNAL
+        PB --> SIGNAL
+        SIGNAL --> MTF
+    end
+
+    subgraph GUARDS[Gates de segurança]
+        NEWSG[NewsGate + EventGuard]
+        PRE[PreMarketGate]
+        COST[Microestrutura\nspread + slippage + impacto]
+        RISK[RiskAI\nsaldo + risco + exposição + circuit]
+        DAY[DailyState 5x2]
+        MTF --> NEWSG
+        NEWSG --> PRE
+        PRE --> COST
+        COST --> RISK
+        RISK --> DAY
+    end
+
+    subgraph EXEC[Execução controlada]
+        OM[OrderManager\nmanual/auto + confirmação]
+        ENGINE[ExecutionEngine]
+        ORDER[Ordem Demo/Testnet\nou paper/simulada]
+        DAY --> OM
+        OM --> ENGINE
+        ENGINE --> ORDER
+        ORDER -. resultado .-> RECON[Reconciliação\npendente de completar]
+    end
+
+    subgraph LEARN[Aprendizado supervisionado]
+        BEFORE[AIObservation BEFORE\nfeatures + contexto + decisão]
+        AFTER[LearningLayer AFTER\ncandles futuros + retorno]
+        DATASET[Dataset versionado\nsplit temporal + purge gap]
+        MODEL[Ensemble / Transformer / LSTM\nartefato aprovado]
+        SIGNAL --> BEFORE
+        SNAP --> BEFORE
+        ORDER -. resultado .-> AFTER
+        BEFORE --> AFTER
+        AFTER --> DATASET
+        DATASET --> MODEL
+        MODEL -. consenso validado .-> SIGNAL
+    end
+
+    subgraph INFRA[Infraestrutura operacional]
+        DB[(PostgreSQL\nSQLite local)]
+        REDIS[(Redis\ncache/estado)]
+        OBS[Prometheus + OpenTelemetry\nlogs e alertas]
+        CI[CI / testes / imagem]
+    end
+    TM --> DB
+    TM --> REDIS
+    LIFE --> OBS
+    ORDER --> DB
+    RECON --> DB
+    MODEL --> OBS
+    CI --> LIFE
+
+    HOLD[HOLD seguro\ndados insuficientes, neutro, contraditório\nou gate reprovado] -. bloqueia .-> OM
+    SIGNAL --> HOLD
+    NOTE[Sem alavancagem automática\nSem mainnet no estado atual] -. política .-> OM
