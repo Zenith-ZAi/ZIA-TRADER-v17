@@ -378,8 +378,12 @@ class MarketConnector:
     async def normalize_order_values(self, symbol: str, quantity: float, price: Optional[float] = None) -> Dict[str, float]:
         return await self._adapter.normalize_order_values(self.normalize_symbol(symbol), quantity, price)
 
-    async def place_order(self, symbol: str, action: str, order_type: str, quantity: float, price: Optional[float] = None) -> Dict[str, Any]:
-        return await self._adapter.place_order(self.normalize_symbol(symbol), action, order_type, quantity, price)
+    async def place_order(self, symbol: str, action: str, order_type: str, quantity: float, price: Optional[float] = None, client_order_id: Optional[str] = None) -> Dict[str, Any]:
+        method = self._adapter.place_order
+        try:
+            return await method(self.normalize_symbol(symbol), action, order_type, quantity, price, client_order_id=client_order_id)
+        except TypeError:
+            return await method(self.normalize_symbol(symbol), action, order_type, quantity, price)
 
     async def cancel_order(self, order_id: str, symbol: Optional[str] = None) -> Dict[str, Any]:
         if symbol is None:
@@ -393,3 +397,31 @@ class MarketConnector:
 
     async def get_account_balance(self) -> Dict[str, float]:
         return await self._adapter.get_account_balance()
+
+    async def get_open_orders(self) -> list[Dict[str, Any]]:
+        method = getattr(self._adapter, "get_open_orders", None)
+        return list(await method()) if method is not None else []
+
+    async def get_positions(self) -> list[Dict[str, Any]]:
+        method = getattr(self._adapter, "get_positions", None)
+        return list(await method()) if method is not None else []
+
+    async def place_protection_order(self, protection: Dict[str, Any]) -> Dict[str, Any]:
+        method = getattr(self._adapter, "place_protection_order", None)
+        payload = dict(protection)
+        payload["symbol"] = self.normalize_symbol(payload["symbol"])
+        if method is not None:
+            return await method(payload)
+        return await self.place_order(payload["symbol"], payload["action"], payload.get("order_type", "market"), float(payload["quantity"]), payload.get("limit_price") or payload.get("stop_price"), payload.get("client_order_id"))
+
+    async def place_oco_orders(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        method = getattr(self._adapter, "place_oco_orders", None)
+        if method is None:
+            return {"status": "unsupported", "reason": "adapter sem OCO nativo"}
+        return await method({**payload, "symbol": self.normalize_symbol(payload["symbol"])})
+
+    async def trigger_kill_switch(self, reason: str = "manual") -> Dict[str, Any]:
+        method = getattr(self._adapter, "trigger_kill_switch", None)
+        if method is None:
+            return {"status": "unsupported", "reason": "adapter sem kill switch"}
+        return await method(reason)

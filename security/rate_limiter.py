@@ -1,40 +1,41 @@
+from __future__ import annotations
+
 import asyncio
 import time
 from collections import defaultdict
 from typing import Dict
 
+
 class RateLimiter:
-    """Implementa um limitador de taxa simples baseado em tokens ou tempo."""
+    """Limitador local por janela fixa, sem bloquear o event loop no middleware."""
+
     def __init__(self, rate_limit: int, interval: int):
-        self.rate_limit = rate_limit  # Número máximo de requisições
-        self.interval = interval      # Intervalo de tempo em segundos
-        self.clients: Dict[str, list] = defaultdict(list) # {client_id: [timestamps]}
+        self.rate_limit = max(1, int(rate_limit))
+        self.interval = max(1, int(interval))
+        self.clients: Dict[str, list[float]] = defaultdict(list)
 
-    async def __call__(self, client_id: str):
-        now = time.time()
-        # Remove timestamps antigos
-        self.clients[client_id] = [t for t in self.clients[client_id] if t > now - self.interval]
+    def _prune(self, client_id: str, now: float) -> list[float]:
+        recent = [timestamp for timestamp in self.clients[client_id] if timestamp > now - self.interval]
+        self.clients[client_id] = recent
+        return recent
 
-        if len(self.clients[client_id]) >= self.rate_limit:
-            # Calcular tempo de espera até que a próxima requisição seja permitida
-            wait_time = self.clients[client_id][0] + self.interval - now
-            if wait_time > 0:
-                await asyncio.sleep(wait_time)
-            
-            # Após a espera, re-verificar e ajustar
-            now = time.time()
-            self.clients[client_id] = [t for t in self.clients[client_id] if t > now - self.interval]
-            if len(self.clients[client_id]) >= self.rate_limit:
-                # Se ainda exceder, significa que o intervalo de espera não foi suficiente
-                # Isso pode acontecer se o rate_limit for muito baixo ou o intervalo muito curto
-                # Para simplificar, vamos apenas adicionar o timestamp e permitir, mas em um sistema real
-                # poderíamos lançar uma exceção ou ter uma política de retry mais sofisticada.
-                pass
+    def allow(self, client_id: str) -> bool:
+        now = time.monotonic()
+        recent = self._prune(str(client_id), now)
+        if len(recent) >= self.rate_limit:
+            return False
+        recent.append(now)
+        return True
 
-        self.clients[client_id].append(now)
+    def retry_after(self, client_id: str) -> int:
+        now = time.monotonic()
+        recent = self._prune(str(client_id), now)
+        if not recent:
+            return 0
+        return max(1, int(recent[0] + self.interval - now))
 
-# Exemplo de uso:
-# rate_limiter = RateLimiter(rate_limit=5, interval=10) # 5 requisições a cada 10 segundos
-# async def some_api_call(client_id):
-#     await rate_limiter(client_id)
-#     print(f"Requisição de {client_id} processada.")
+    async def __call__(self, client_id: str) -> bool:
+        """Compatibilidade com os endpoints existentes: aguarda a janela quando necessário."""
+        while not self.allow(client_id):
+            await asyncio.sleep(min(1.0, max(0.05, self.retry_after(client_id))))
+        return True

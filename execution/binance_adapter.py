@@ -260,7 +260,7 @@ class BinanceSpotAdapter:
 
         return {"symbol": symbol, "bids": levels(payload.get("bids", [])), "asks": levels(payload.get("asks", [])), "last_update_id": payload.get("lastUpdateId")}
 
-    async def place_order(self, symbol: str, action: str, order_type: str, quantity: float, price: Optional[float] = None) -> Dict[str, Any]:
+    async def place_order(self, symbol: str, action: str, order_type: str, quantity: float, price: Optional[float] = None, client_order_id: Optional[str] = None) -> Dict[str, Any]:
         code = self.symbol_code(symbol)
         side = action.upper()
         if side not in {"BUY", "SELL"}:
@@ -271,6 +271,7 @@ class BinanceSpotAdapter:
             "side": side,
             "type": order_type.upper(),
             "quantity": normalized["quantity"],
+            "newClientOrderId": client_order_id,
             "newOrderRespType": "RESULT",
         }
         if order_type.lower() == "limit":
@@ -308,6 +309,54 @@ class BinanceSpotAdapter:
             raise BinanceAdapterError("Símbolo da ordem desconhecido; mantenha o mapeamento da ordem no storage.")
         payload = await self._request("GET", "/v3/order", {"symbol": code, "orderId": order_id}, signed=True)
         return {"status": payload.get("status", "UNKNOWN"), "order_id": str(payload.get("orderId", order_id)), "raw": payload}
+
+    async def get_open_orders(self) -> list[Dict[str, Any]]:
+        payload = await self._request("GET", "/v3/openOrders", signed=True)
+        return [
+            {
+                "order_id": str(item.get("orderId")),
+                "client_order_id": item.get("clientOrderId"),
+                "symbol": item.get("symbol"),
+                "status": str(item.get("status", "UNKNOWN")).lower(),
+                "side": str(item.get("side", "")).lower(),
+                "orig_qty": float(item.get("origQty", 0.0)),
+                "executed_qty": float(item.get("executedQty", 0.0)),
+            }
+            for item in payload
+        ]
+
+    async def get_positions(self) -> list[Dict[str, Any]]:
+        balances = await self.get_account_balance()
+        return [{"symbol": asset, "quantity": quantity} for asset, quantity in balances.items() if quantity > 0]
+
+    async def place_protection_order(self, protection: Dict[str, Any]) -> Dict[str, Any]:
+        code = self.symbol_code(protection["symbol"])
+        normalized = await self.normalize_order_values(protection["symbol"], protection["quantity"], protection.get("limit_price"))
+        params: Dict[str, Any] = {
+            "symbol": code,
+            "side": str(protection["action"]).upper(),
+            "type": str(protection.get("order_type", "STOP_LOSS_LIMIT")).upper(),
+            "quantity": normalized["quantity"],
+            "price": normalized.get("price", protection.get("limit_price")),
+            "stopPrice": protection.get("stop_price"),
+            "timeInForce": "GTC",
+            "newClientOrderId": protection.get("client_order_id"),
+            "newOrderRespType": "RESULT",
+        }
+        payload = await self._request("POST", "/v3/order", params, signed=True)
+        order_id = str(payload["orderId"])
+        self._order_symbols[order_id] = code
+        executed_qty = float(payload.get("executedQty", 0.0))
+        quote_qty = float(payload.get("cummulativeQuoteQty", 0.0))
+        return {
+            "status": "success" if payload.get("status") not in {"REJECTED", "EXPIRED"} else "failed",
+            "order_id": order_id,
+            "client_order_id": payload.get("clientOrderId") or protection.get("client_order_id"),
+            "filled_price": quote_qty / executed_qty if executed_qty else float(protection.get("limit_price") or protection.get("stop_price") or 0.0),
+            "filled_quantity": executed_qty,
+            "exchange_status": payload.get("status"),
+            "raw": payload,
+        }
 
     async def get_account_balance(self) -> Dict[str, float]:
         payload = await self._request("GET", "/v3/account", signed=True)

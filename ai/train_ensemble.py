@@ -17,7 +17,7 @@ import pandas as pd
 from sklearn.metrics import accuracy_score, balanced_accuracy_score, f1_score, precision_score, recall_score
 
 from ai.ensemble_model import EnsembleModel
-from ai.feature_pipeline import build_supervised_dataset
+from core.feature_pipeline import FeaturePipeline
 
 
 def load_ohlcv(path: str | Path) -> pd.DataFrame:
@@ -47,7 +47,8 @@ def train_from_ohlcv(
     sell_threshold: float = -0.001,
 ) -> Dict[str, Any]:
     ohlcv = load_ohlcv(source)
-    X, y = build_supervised_dataset(ohlcv, horizon, buy_threshold, sell_threshold)
+    pipeline = FeaturePipeline()
+    X, y = pipeline.build_supervised(ohlcv, horizon, buy_threshold, sell_threshold)
     if len(X) < 120:
         raise ValueError("dataset supervisionado insuficiente; são necessárias pelo menos 120 amostras")
     split = int(len(X) * 0.80)

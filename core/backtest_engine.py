@@ -10,7 +10,7 @@ import pandas as pd
 
 from config.settings import Settings
 from ai.ensemble_model import EnsembleModel
-from ai.feature_pipeline import build_feature_frame
+from core.feature_pipeline import FeaturePipeline
 from core.market_signals import MarketSignal, MarketSignalCache
 from core.pullback_strategy import PullbackSignalCache
 from core.pattern_memory import PatternMemory, build_pattern_signature
@@ -29,6 +29,7 @@ class BacktestEngine:
     def __init__(self, settings: Settings, db_manager):
         self.settings = settings
         self.db_manager = db_manager
+        self.feature_pipeline = FeaturePipeline(settings)
         self.event_guard = EconomicEventGuard(
             settings.ECONOMIC_EVENTS_FILE,
             settings.EVENT_BLOCK_BEFORE_SECONDS,
@@ -153,7 +154,7 @@ class BacktestEngine:
             breakeven_atr_trigger=float(self.settings.PULLBACK_BREAKEVEN_ATR_TRIGGER),
         ) if self.settings.PULLBACK_STRATEGY_ENABLED else None
         ensemble_model = EnsembleModel(self.settings.ENSEMBLE_MODEL_DIR) if self.settings.BACKTEST_USE_ENSEMBLE else None
-        model_features = build_feature_frame(data).dropna() if ensemble_model and ensemble_model.is_trained else None
+        model_features = self.feature_pipeline.build_features(data).dropna() if ensemble_model and ensemble_model.is_trained else None
 
         start_index = max(35, int(self.settings.BACKTEST_WARMUP_BARS))
         for index in range(start_index, len(data)):

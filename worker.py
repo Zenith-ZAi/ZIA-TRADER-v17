@@ -18,6 +18,10 @@ async def run_worker() -> None:
     db_manager.create_tables()
     manager = TradingManager(settings, db_manager)
     await manager.exchange_connector.connect()
+    reconciliation = await manager.reconcile()
+    logger.info("Reconciliação inicial concluída: %s", reconciliation.get("status"))
+    if reconciliation.get("status") == "error" and settings.AUTONOMOUS_TRADING_ENABLED:
+        raise RuntimeError("reconciliação inicial falhou; autonomia permanece bloqueada")
     tasks = [asyncio.create_task(manager.start_trading(), name="zia-worker-trading")]
     if settings.SNIPER_ENABLED:
         tasks.append(asyncio.create_task(manager.start_sniper(), name="zia-worker-sniper"))

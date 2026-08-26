@@ -234,3 +234,62 @@ def get_session_local(engine):
 
 def init_db(engine):
     Base.metadata.create_all(engine)
+
+
+class OrderIntent(Base):
+    """Intenção local idempotente antes e durante o envio à exchange."""
+    __tablename__ = "order_intents"
+    id = Column(Integer, primary_key=True)
+    account_id = Column(String, nullable=False, index=True)
+    client_order_id = Column(String, unique=True, nullable=False, index=True)
+    symbol = Column(String, nullable=False)
+    action = Column(String, nullable=False)
+    order_type = Column(String, nullable=False, default="market")
+    quantity = Column(Float, nullable=False)
+    price = Column(Float)
+    status = Column(String, nullable=False, default="reserved")
+    exchange_order_id = Column(String)
+    attempts = Column(Integer, nullable=False, default=0)
+    last_error = Column(String)
+    payload_json = Column(JSON)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+
+class ReconciliationSnapshot(Base):
+    __tablename__ = "reconciliation_snapshots"
+    id = Column(Integer, primary_key=True)
+    account_id = Column(String, nullable=False, index=True)
+    status = Column(String, nullable=False)
+    open_orders_count = Column(Integer, default=0)
+    positions_count = Column(Integer, default=0)
+    payload_json = Column(JSON)
+    observed_at = Column(DateTime, default=utc_now, index=True)
+
+
+class ProtectionOrder(Base):
+    __tablename__ = "protection_orders"
+    id = Column(Integer, primary_key=True)
+    account_id = Column(String, nullable=False, index=True)
+    parent_client_order_id = Column(String, nullable=False, index=True)
+    client_order_id = Column(String, unique=True, nullable=False)
+    exchange_order_id = Column(String)
+    symbol = Column(String, nullable=False)
+    action = Column(String, nullable=False)
+    order_type = Column(String, nullable=False)
+    quantity = Column(Float, nullable=False)
+    stop_price = Column(Float)
+    limit_price = Column(Float)
+    status = Column(String, nullable=False, default="pending")
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+
+class KillSwitchEvent(Base):
+    __tablename__ = "kill_switch_events"
+    id = Column(Integer, primary_key=True)
+    account_id = Column(String, nullable=False, index=True)
+    enabled = Column(Boolean, nullable=False, default=True)
+    reason = Column(String, nullable=False)
+    actor = Column(String, nullable=False, default="system")
+    created_at = Column(DateTime, default=utc_now, index=True)

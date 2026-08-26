@@ -28,11 +28,12 @@ def main() -> int:
     parser.add_argument("--skip-diagram", action="store_true")
     args = parser.parse_args()
 
-    checks = [_run([sys.executable, "-m", "compileall", "-q", "core", "data", "execution", "config", "scripts"])]
+    checks = [_run([sys.executable, "-m", "compileall", "-q", "core", "data", "execution", "api", "learning", "config", "scripts"])]
     if not args.skip_tests:
         checks.append(_run([sys.executable, "-m", "pytest", "-q"]))
     if not args.skip_diagram:
         checks.append(_run(["manus-render-diagram", "docs/core_refinement.mmd", "docs/core_refinement.png"]))
+        checks.append(_run(["manus-render-diagram", "docs/live_trading_architecture.mmd", "docs/live_trading_architecture.png"]))
     summary = {
         "project": "ZIA-TRADER-v17",
         "orders_sent": 0,

@@ -6,7 +6,7 @@ from sqlalchemy.orm import sessionmaker
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict
 
-from database import Base, AccountState, Position, RuntimePositionState, DailyPNL, WeeklyPNL, MonthlyPNL, Drawdown, OrderHistory, ExecutionHistory, Trade, WhaleActivity, NewsArticle, TrendSnapshot, AIObservation, MarketPattern, SystemLog, MarketType, OrderStatus, utc_now
+from database import Base, AccountState, Position, RuntimePositionState, DailyPNL, WeeklyPNL, MonthlyPNL, Drawdown, OrderHistory, ExecutionHistory, Trade, WhaleActivity, NewsArticle, TrendSnapshot, AIObservation, MarketPattern, SystemLog, OrderIntent, ReconciliationSnapshot, ProtectionOrder, KillSwitchEvent, MarketType, OrderStatus, utc_now
 
 class DatabaseManager:
     def __init__(self, database_url: str):
@@ -450,3 +450,152 @@ class DatabaseManager:
 
         db.close()
         return {"total_pnl": total_pnl, "drawdown": drawdown}
+
+
+    # Order intent, reconciliation and protection operations
+    @staticmethod
+    def _intent_dict(intent: OrderIntent) -> Dict:
+        return {
+            "client_order_id": intent.client_order_id,
+            "account_id": intent.account_id,
+            "symbol": intent.symbol,
+            "action": intent.action,
+            "order_type": intent.order_type,
+            "quantity": intent.quantity,
+            "price": intent.price,
+            "status": intent.status,
+            "exchange_order_id": intent.exchange_order_id,
+            "attempts": intent.attempts,
+            "last_error": intent.last_error,
+        }
+
+    def reserve_order_intent(self, account_id: str, client_order_id: str, order_data: Dict) -> Dict:
+        db = self.SessionLocal()
+        try:
+            intent = db.query(OrderIntent).filter(OrderIntent.client_order_id == client_order_id).first()
+            if intent is None:
+                safe_payload = {
+                    key: (value.value if hasattr(value, "value") else value)
+                    for key, value in dict(order_data).items()
+                }
+                intent = OrderIntent(
+                    account_id=account_id,
+                    client_order_id=client_order_id,
+                    symbol=str(order_data["symbol"]),
+                    action=str(order_data["action"]).lower(),
+                    order_type=str(order_data.get("order_type", "market")).lower(),
+                    quantity=float(order_data["quantity"]),
+                    price=float(order_data["price"]) if order_data.get("price") is not None else None,
+                    payload_json=safe_payload,
+                )
+                db.add(intent)
+                db.commit()
+                db.refresh(intent)
+            return self._intent_dict(intent)
+        finally:
+            db.close()
+
+    def update_order_intent(self, client_order_id: str, **changes) -> Optional[Dict]:
+        db = self.SessionLocal()
+        try:
+            intent = db.query(OrderIntent).filter(OrderIntent.client_order_id == client_order_id).first()
+            if intent is None:
+                return None
+            allowed = {"status", "exchange_order_id", "attempts", "last_error", "payload_json"}
+            for key, value in changes.items():
+                if key in allowed:
+                    setattr(intent, key, value)
+            db.commit()
+            db.refresh(intent)
+            return self._intent_dict(intent)
+        finally:
+            db.close()
+
+    def get_order_intent(self, client_order_id: str) -> Optional[Dict]:
+        db = self.SessionLocal()
+        try:
+            intent = db.query(OrderIntent).filter(OrderIntent.client_order_id == client_order_id).first()
+            return self._intent_dict(intent) if intent else None
+        finally:
+            db.close()
+
+    def list_open_order_intents(self, account_id: str) -> List[Dict]:
+        db = self.SessionLocal()
+        try:
+            rows = db.query(OrderIntent).filter(
+                OrderIntent.account_id == account_id,
+                OrderIntent.status.in_(["reserved", "submitted", "partially_filled"]),
+            ).all()
+            return [self._intent_dict(row) for row in rows]
+        finally:
+            db.close()
+
+    def create_reconciliation_snapshot(self, account_id: str, status: str, payload: Dict) -> Dict:
+        db = self.SessionLocal()
+        try:
+            snapshot = ReconciliationSnapshot(
+                account_id=account_id,
+                status=status,
+                open_orders_count=int(payload.get("open_orders_count", 0)),
+                positions_count=int(payload.get("positions_count", 0)),
+                payload_json=payload,
+            )
+            db.add(snapshot)
+            db.commit()
+            db.refresh(snapshot)
+            return {"id": snapshot.id, "account_id": account_id, "status": status, **payload}
+        finally:
+            db.close()
+
+    def upsert_protection_order(self, account_id: str, protection: Dict) -> Dict:
+        db = self.SessionLocal()
+        try:
+            row = db.query(ProtectionOrder).filter(ProtectionOrder.client_order_id == protection["client_order_id"]).first()
+            if row is None:
+                row = ProtectionOrder(account_id=account_id, client_order_id=protection["client_order_id"])
+                db.add(row)
+            for key in ("parent_client_order_id", "exchange_order_id", "symbol", "action", "order_type", "quantity", "stop_price", "limit_price", "status"):
+                if key in protection:
+                    setattr(row, key, protection[key])
+            db.commit()
+            db.refresh(row)
+            return {"id": row.id, "account_id": row.account_id, "client_order_id": row.client_order_id, "parent_client_order_id": row.parent_client_order_id, "exchange_order_id": row.exchange_order_id, "symbol": row.symbol, "action": row.action, "order_type": row.order_type, "quantity": row.quantity, "stop_price": row.stop_price, "limit_price": row.limit_price, "status": row.status}
+        finally:
+            db.close()
+
+    def list_active_protection_orders(self, account_id: str, parent_client_order_id: Optional[str] = None) -> List[Dict]:
+        db = self.SessionLocal()
+        try:
+            query = db.query(ProtectionOrder).filter(ProtectionOrder.account_id == account_id, ProtectionOrder.status.in_(["pending", "open", "partially_filled"]))
+            if parent_client_order_id:
+                query = query.filter(ProtectionOrder.parent_client_order_id == parent_client_order_id)
+            rows = query.all()
+            return [{"client_order_id": row.client_order_id, "parent_client_order_id": row.parent_client_order_id, "exchange_order_id": row.exchange_order_id, "symbol": row.symbol, "action": row.action, "order_type": row.order_type, "quantity": row.quantity, "stop_price": row.stop_price, "limit_price": row.limit_price, "status": row.status} for row in rows]
+        finally:
+            db.close()
+
+    def update_protection_order(self, client_order_id: str, **changes) -> Optional[Dict]:
+        db = self.SessionLocal()
+        try:
+            row = db.query(ProtectionOrder).filter(ProtectionOrder.client_order_id == client_order_id).first()
+            if row is None:
+                return None
+            for key in ("exchange_order_id", "status"):
+                if key in changes:
+                    setattr(row, key, changes[key])
+            db.commit()
+            db.refresh(row)
+            return {"client_order_id": row.client_order_id, "exchange_order_id": row.exchange_order_id, "status": row.status}
+        finally:
+            db.close()
+
+    def record_kill_switch(self, account_id: str, enabled: bool, reason: str, actor: str = "system") -> Dict:
+        db = self.SessionLocal()
+        try:
+            row = KillSwitchEvent(account_id=account_id, enabled=enabled, reason=reason, actor=actor)
+            db.add(row)
+            db.commit()
+            db.refresh(row)
+            return {"id": row.id, "account_id": account_id, "enabled": enabled, "reason": reason, "actor": actor}
+        finally:
+            db.close()

@@ -43,6 +43,9 @@ def run(db_session: Any, current_user: Any) -> None:
             ("4", "Iniciar trading supervisionado"),
             ("5", "Visualizar relatório de performance"),
             ("6", "Enviar ordem manual com confirmação"),
+            ("11", "Executar reconciliação de posições"),
+            ("12", "Executar pipeline de treinamento IA"),
+            ("13", "Preflight/alternar modo mainnet (confirmação dupla)"),
             ("0", "Voltar"),
         ])
         if choice == "1":
@@ -91,6 +94,44 @@ def run(db_session: Any, current_user: Any) -> None:
                 console.print(result)
             except Exception as exc:
                 warn(f"Ordem rejeitada: {exc}")
+        elif choice == "11":
+            reconciler = getattr(getattr(order_manager, "execution_engine", None), "reconciler", None)
+            if reconciler is None:
+                warn("Reconciler indisponível neste adapter.")
+                continue
+            try:
+                if not connected:
+                    asyncio.run(connector.connect())
+                    connected = True
+                result = asyncio.run(reconciler.sync_positions())
+                console.print(result)
+            except Exception as exc:
+                warn(f"Reconciliação falhou e novas entradas devem permanecer bloqueadas: {exc}")
+        elif choice == "12":
+            from pathlib import Path
+            from learning.training_pipeline import train_oos
+
+            dataset = console.input("Dataset CSV/Parquet OHLCV (obrigatório): ").strip()
+            if not dataset or not Path(dataset).exists():
+                warn("Dataset não encontrado; nenhum treinamento foi executado e nenhum dado foi fabricado.")
+                continue
+            model_dir = console.input("Diretório do modelo [models]: ").strip() or "models"
+            try:
+                result = train_oos(dataset, model_dir=model_dir)
+                console.print(result)
+            except Exception as exc:
+                warn(f"Treinamento OOS não aprovado: {exc}")
+        elif choice == "13":
+            first = console.input("Digite ATIVAR-MAINNET para continuar: ").strip()
+            second = console.input("Digite ATIVAR-MAINNET novamente para confirmar: ").strip()
+            if first != "ATIVAR-MAINNET" or second != "ATIVAR-MAINNET":
+                warn("Confirmação dupla não concluída; mainnet continua bloqueada.")
+                continue
+            if not settings.LIVE_TRADING_ENABLED:
+                warn("Preflight recusado: LIVE_TRADING_ENABLED=false. Nenhuma flag foi alterada.")
+                continue
+            settings.LIVE_MODE = not bool(settings.LIVE_MODE)
+            success(f"LIVE_MODE alterado apenas no processo atual para {settings.LIVE_MODE}; reinício exige configuração explícita no ambiente.")
         elif choice == "0":
             if connected:
                 asyncio.run(connector.close())

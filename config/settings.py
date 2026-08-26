@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     MANUAL_TRADING_ENABLED: bool = os.getenv("MANUAL_TRADING_ENABLED", "false").lower() == "true"
     AUTONOMOUS_TRADING_ENABLED: bool = os.getenv("AUTONOMOUS_TRADING_ENABLED", "false").lower() == "true"
     SHADOW_MODE_ENABLED: bool = os.getenv("SHADOW_MODE_ENABLED", "true").lower() == "true"
+    LIVE_TRADING_ENABLED: bool = os.getenv("LIVE_TRADING_ENABLED", "false").lower() == "true"
+    LIVE_MODE: bool = os.getenv("LIVE_MODE", "false").lower() == "true"
+    LIVE_KILL_SWITCH: bool = os.getenv("LIVE_KILL_SWITCH", "false").lower() == "true"
     NEURAL_MODELS_ENABLED: bool = os.getenv("NEURAL_MODELS_ENABLED", "false").lower() == "true"
     DEMO_AUTH_ENABLED: bool = os.getenv("DEMO_AUTH_ENABLED", "true").lower() == "true"
     DEMO_USER_PASSWORD: str = os.getenv("DEMO_USER_PASSWORD", "password")
@@ -145,6 +148,7 @@ class Settings(BaseSettings):
     BINANCE_BASE_URL: str = os.getenv(
         "BINANCE_BASE_URL"
     ) or (BINANCE_BASE_URL_DEMO if BINANCE_MODE.lower() == "demo" else BINANCE_BASE_URL_TESTNET)
+    BINANCE_LIVE_BASE_URL: str = os.getenv("BINANCE_LIVE_BASE_URL", "https://api.binance.com/api")
     BINANCE_PUBLIC_BASE_URL: str = os.getenv("BINANCE_PUBLIC_BASE_URL", "https://data-api.binance.vision")
     BINANCE_DEMO_API_KEY: Optional[str] = os.getenv("BINANCE_DEMO_API_KEY")
     BINANCE_DEMO_SECRET_KEY: Optional[str] = os.getenv("BINANCE_DEMO_SECRET_KEY")
@@ -202,6 +206,8 @@ class Settings(BaseSettings):
     # API Rate Limiting
     API_RATE_LIMIT: int = int(os.getenv("API_RATE_LIMIT", "100")) # requests per interval
     API_RATE_LIMIT_INTERVAL: int = int(os.getenv("API_RATE_LIMIT_INTERVAL", "60")) # seconds
+    API_RATE_LIMIT_BY_IP: int = int(os.getenv("API_RATE_LIMIT_BY_IP", "100"))
+    API_RATE_LIMIT_BY_USER: int = int(os.getenv("API_RATE_LIMIT_BY_USER", "100"))
 
     # Pullback LTA/LTB / softskill em três camadas
     PULLBACK_STRATEGY_ENABLED: bool = os.getenv("PULLBACK_STRATEGY_ENABLED", "true").lower() == "true"
@@ -226,6 +232,12 @@ class Settings(BaseSettings):
     MAX_BOOK_IMPACT: float = float(os.getenv("MAX_BOOK_IMPACT", "0.10"))
     ORDER_FLOW_RATIO_THRESHOLD: float = float(os.getenv("ORDER_FLOW_RATIO_THRESHOLD", "2.0"))
     ORDER_FLOW_CONFIRMATION_REQUIRED: bool = os.getenv("ORDER_FLOW_CONFIRMATION_REQUIRED", "true").lower() == "true"
+    RECONCILIATION_INTERVAL_SECONDS: int = int(os.getenv("RECONCILIATION_INTERVAL_SECONDS", "30"))
+    RECONCILIATION_MAX_ATTEMPTS: int = int(os.getenv("RECONCILIATION_MAX_ATTEMPTS", "3"))
+    RECONCILIATION_BASE_DELAY_SECONDS: float = float(os.getenv("RECONCILIATION_BASE_DELAY_SECONDS", "0.25"))
+    RECONCILIATION_MAX_DELAY_SECONDS: float = float(os.getenv("RECONCILIATION_MAX_DELAY_SECONDS", "4.0"))
+    OCO_ENABLED: bool = os.getenv("OCO_ENABLED", "true").lower() == "true"
+    OCO_TIMEOUT_SECONDS: float = float(os.getenv("OCO_TIMEOUT_SECONDS", "5"))
     SIMULATED_ORDER_FLOW_BIAS: str = os.getenv("SIMULATED_ORDER_FLOW_BIAS", "neutral")
     SIMULATED_ORDER_FLOW_RATIO: float = float(os.getenv("SIMULATED_ORDER_FLOW_RATIO", "2.2"))
 

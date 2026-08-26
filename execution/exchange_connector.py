@@ -67,13 +67,14 @@ class SimulatedExchangeAdapter:
             "simulation_bias": bias,
         }
 
-    async def place_order(self, symbol: str, action: str, order_type: str, quantity: float, price: Optional[float] = None) -> Dict[str, Any]:
+    async def place_order(self, symbol: str, action: str, order_type: str, quantity: float, price: Optional[float] = None, client_order_id: Optional[str] = None) -> Dict[str, Any]:
         await asyncio.sleep(0.01)
         order_id = f"sim_{datetime.now(timezone.utc).timestamp()}_{random.randint(0, 9999)}"
         filled_price = price if price else random.uniform(1000, 50000)
         return {
             "status": "success",
             "order_id": order_id,
+            "client_order_id": client_order_id,
             "symbol": symbol,
             "action": action,
             "order_type": order_type,
@@ -88,6 +89,24 @@ class SimulatedExchangeAdapter:
 
     async def get_order_status(self, order_id: str) -> Dict[str, Any]:
         return {"status": "FILLED", "order_id": order_id}
+
+    async def get_open_orders(self) -> list[Dict[str, Any]]:
+        return []
+
+    async def get_positions(self) -> list[Dict[str, Any]]:
+        return []
+
+    async def place_protection_order(self, protection: Dict[str, Any]) -> Dict[str, Any]:
+        return await self.place_order(
+            protection["symbol"],
+            protection["action"],
+            protection.get("order_type", "market"),
+            float(protection["quantity"]),
+            protection.get("limit_price") or protection.get("stop_price"),
+        )
+
+    async def place_oco_orders(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return {"status": "unsupported", "reason": "adapter simulado usa ordens separadas"}
 
     async def get_account_balance(self) -> Dict[str, float]:
         return {"USDT": 10000.0, "BTC": 0.5}
@@ -117,6 +136,11 @@ class ExchangeConnector:
 
             self._adapter = BinanceSpotAdapter(settings)
             logger.info("ExchangeConnector inicializado em modo Binance %s.", mode)
+        elif mode == "live":
+            from execution.mainnet_adapter import BinanceMainnetAdapter
+
+            self._adapter = BinanceMainnetAdapter(settings)
+            logger.warning("ExchangeConnector mainnet selecionado explicitamente; kill switch=%s", getattr(self._adapter, "kill_switch_enabled", False))
         elif mode in {"simulated", "simulation", "mock"}:
             self._adapter = SimulatedExchangeAdapter(settings)
             logger.info("ExchangeConnector inicializado em modo de simulação.")
@@ -151,8 +175,11 @@ class ExchangeConnector:
             return result
         return await normalizer(symbol, quantity, price)
 
-    async def place_order(self, symbol: str, action: str, order_type: str, quantity: float, price: Optional[float] = None) -> Dict[str, Any]:
-        return await self._adapter.place_order(symbol, action, order_type, quantity, price)
+    async def place_order(self, symbol: str, action: str, order_type: str, quantity: float, price: Optional[float] = None, client_order_id: Optional[str] = None) -> Dict[str, Any]:
+        try:
+            return await self._adapter.place_order(symbol, action, order_type, quantity, price, client_order_id=client_order_id)
+        except TypeError:
+            return await self._adapter.place_order(symbol, action, order_type, quantity, price)
 
     async def cancel_order(self, order_id: str) -> Dict[str, Any]:
         return await self._adapter.cancel_order(order_id)
@@ -162,3 +189,29 @@ class ExchangeConnector:
 
     async def get_account_balance(self) -> Dict[str, float]:
         return await self._adapter.get_account_balance()
+
+    async def get_open_orders(self) -> list[Dict[str, Any]]:
+        method = getattr(self._adapter, "get_open_orders", None)
+        return list(await method()) if method is not None else []
+
+    async def get_positions(self) -> list[Dict[str, Any]]:
+        method = getattr(self._adapter, "get_positions", None)
+        return list(await method()) if method is not None else []
+
+    async def place_protection_order(self, protection: Dict[str, Any]) -> Dict[str, Any]:
+        method = getattr(self._adapter, "place_protection_order", None)
+        if method is not None:
+            return await method(protection)
+        return await self.place_order(protection["symbol"], protection["action"], protection.get("order_type", "market"), float(protection["quantity"]), protection.get("limit_price") or protection.get("stop_price"))
+
+    async def place_oco_orders(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        method = getattr(self._adapter, "place_oco_orders", None)
+        if method is None:
+            return {"status": "unsupported", "reason": "adapter sem OCO nativo"}
+        return await method(payload)
+
+    async def trigger_kill_switch(self, reason: str = "manual") -> Dict[str, Any]:
+        method = getattr(self._adapter, "trigger_kill_switch", None)
+        if method is None:
+            return {"status": "unsupported", "reason": "adapter sem kill switch"}
+        return await method(reason)

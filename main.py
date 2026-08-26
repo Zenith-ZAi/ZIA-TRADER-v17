@@ -19,6 +19,7 @@ from security.jwt_utils import create_access_token, verify_token
 from security.rbac_utils import is_admin, is_trader
 from risk.strategy_optimizer import OptimizationBudget, StrategyOptimizer
 from security.rate_limiter import RateLimiter
+from api.middleware import RequestRateLimitMiddleware
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -81,6 +82,7 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
+app.add_middleware(RequestRateLimitMiddleware, settings=settings)
 
 
 def _public_user(user: Dict[str, Any]) -> Dict[str, Any]:
@@ -224,6 +226,13 @@ async def read_users_me(
     return _public_user(current_user)
 
 
+@app.get("/test_rate_limit")
+async def test_rate_limit(
+    current_user: Dict[str, Any] = Depends(get_current_active_user),
+):
+    return {"status": "ok", "user": current_user["username"]}
+
+
 @app.get("/users/me/items/")
 async def read_own_items(
     current_user: Dict[str, Any] = Depends(get_trader_user),
@@ -254,6 +263,14 @@ async def admin_dashboard(
     current_user: Dict[str, Any] = Depends(get_admin_user),
 ):
     return {"message": f"Welcome, admin {current_user['username']}", "status": _runtime_status_payload()}
+
+
+@app.post("/admin/kill-switch")
+async def admin_kill_switch(
+    reason: str = Body(..., embed=True, min_length=3, max_length=200),
+    current_user: Dict[str, Any] = Depends(get_admin_user),
+):
+    return await trading_manager.trigger_kill_switch(reason, actor=current_user["username"])
 
 
 @app.get("/status")

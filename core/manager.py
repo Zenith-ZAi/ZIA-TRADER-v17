@@ -44,6 +44,7 @@ class TradingManager:
         )
 
         self.order_manager = OrderManager(settings, self.market_connector, self.execution_engine)
+        self.reconciler = self.execution_engine.reconciler
         self.command_manager = CoreCommandManager(settings, db_manager, self.market_connector, self.news_processor)
         self.trading_engine = RoboTraderUnified(settings, self.news_processor, self.market_connector, db_manager)
         self.trading_engine.order_manager = self.order_manager
@@ -87,6 +88,24 @@ class TradingManager:
                 "daily_state": self.daily_state.status(),
             },
         }
+
+    async def trigger_kill_switch(self, reason: str = "manual", actor: str = "system") -> Dict[str, Any]:
+        result = await self.exchange_connector.trigger_kill_switch(reason)
+        if hasattr(self.settings, "LIVE_KILL_SWITCH"):
+            self.settings.LIVE_KILL_SWITCH = True
+        if hasattr(self, "reconciler") and self.reconciler is not None:
+            self.db_manager.record_kill_switch(self.reconciler.account_id, True, reason, actor)
+        return result
+
+    async def reconcile(self) -> Dict[str, Any]:
+        if self.reconciler is None:
+            return {"status": "unsupported", "reason": "reconciler indisponível"}
+        return await self.reconciler.reconcile()
+
+    async def sync_positions(self) -> Dict[str, Any]:
+        if self.reconciler is None:
+            return {"status": "unsupported", "reason": "reconciler indisponível"}
+        return await self.reconciler.sync_positions()
 
     async def start_trading(self):
         """Inicia o motor de trading principal (RoboTraderUnified)."""

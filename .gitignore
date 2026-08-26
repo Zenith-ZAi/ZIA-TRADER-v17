@@ -32,6 +32,7 @@ data/shadow_label_summary.json
 data/*.sqlite
 data/*.sqlite3
 *.log
+!logs/test_report.log
 models/
 checkpoints/
 *.tar.gz

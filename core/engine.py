@@ -14,7 +14,7 @@ from infra.redis_cache import RedisCache
 from ai.price_transformer_model import PriceTransformerModel
 from ai.price_lstm_model import PriceLSTMModel
 from ai.ensemble_model import EnsembleModel
-from ai.feature_pipeline import build_feature_frame
+from core.feature_pipeline import FeaturePipeline
 import torch
 from risk.risk_ai import RiskAI
 from execution.execution_engine import ExecutionEngine
@@ -41,6 +41,7 @@ class RoboTraderUnified:
     def __init__(self, settings: Settings, news_processor: NewsProcessor, exchange_connector: ExchangeConnector, db_manager):
         self.settings = settings
         self.news_processor = news_processor
+        self.feature_pipeline = FeaturePipeline(settings)
         self.is_running = False
         self.symbols = self.settings.SYMBOLS
         self.timeframe = self.settings.TIMEFRAME
@@ -200,7 +201,7 @@ class RoboTraderUnified:
                     input_dim = self.settings.TRANSFORMER_INPUT_DIM
                     model_features = pd.DataFrame()
                     try:
-                        model_features = build_feature_frame(historical_data).dropna()
+                        model_features = self.feature_pipeline.build_features(historical_data).dropna()
                     except (TypeError, ValueError) as exc:
                         logger.warning("[%s] Features de modelo indisponíveis: %s", symbol, exc)
 
