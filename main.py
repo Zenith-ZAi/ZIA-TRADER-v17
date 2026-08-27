@@ -18,9 +18,10 @@ from monitoring.telemetry.telemetry_setup import setup_telemetry
 from security.jwt_utils import create_access_token, verify_token
 from security.rbac_utils import is_admin, is_trader
 from risk.strategy_optimizer import OptimizationBudget, StrategyOptimizer
-from api.middleware import RequestRateLimitMiddleware
+from api.middleware import CorrelationIdMiddleware, RequestRateLimitMiddleware
+from monitoring.structured_logging import configure_json_logging
 
-logging.basicConfig(level=logging.INFO)
+configure_json_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -78,6 +79,7 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 app.add_middleware(RequestRateLimitMiddleware, settings=settings)
+app.add_middleware(CorrelationIdMiddleware)
 
 
 def _public_user(user: Dict[str, Any]) -> Dict[str, Any]:
@@ -168,29 +170,52 @@ async def _stop_engine_tasks() -> None:
     engine_tasks.clear()
 
 
-@app.get("/healthz")
-async def healthz() -> Dict[str, Any]:
-    """Liveness/readiness sem autenticação; não expõe segredos ou dados de conta."""
+def _health_payload() -> Dict[str, Any]:
+    """Health detalhado sem expor credenciais, saldos ou payloads privados."""
     try:
-        db_manager.get_account_state("default_account")
+        with db_manager.engine.connect() as connection:
+            connection.exec_driver_sql("SELECT 1")
         database_persistent = not settings.DATABASE_URL.startswith("sqlite:")
         redis_health = trading_manager.redis_cache.health()
         if settings.REQUIRE_PERSISTENT_DATABASE and not database_persistent:
             raise RuntimeError("PostgreSQL persistente obrigatório")
         if settings.REQUIRE_PERSISTENT_REDIS and not bool(redis_health.get("persistent")):
             raise RuntimeError("Redis persistente obrigatório")
+        providers = trading_manager.news_processor.health()
+        latest = db_manager.get_ai_observations(limit=1)
+        last_data_timestamp = latest[0].observed_at.isoformat() if latest and latest[0].observed_at else None
+        provider_degraded = any(not bool(value.get("ok", False)) for value in providers.values()) if providers else False
         return {
-            "status": "ok",
+            "status": "degraded" if provider_degraded else "ok",
             "service": settings.PROJECT_NAME,
             "version": settings.VERSION,
             "exchange_connected": trading_manager.exchange_connector.is_connected,
-            "database": {"persistent": database_persistent},
+            "database": {"persistent": database_persistent, "reachable": True},
             "redis": redis_health,
-            "news_providers": trading_manager.news_processor.health(),
+            "news_providers": providers,
+            "last_data_timestamp": last_data_timestamp,
+            "engines": {
+                name: bool(task and not task.done())
+                for name, task in engine_tasks.items()
+            },
+            "live_trading_enabled": False,
+            "live_mode": False,
         }
     except Exception as exc:
         logger.error("Falha no healthcheck: %s", exc)
         raise HTTPException(status_code=503, detail="service_unhealthy") from exc
+
+
+@app.get("/healthz")
+async def healthz() -> Dict[str, Any]:
+    """Liveness/readiness sem autenticação; não expõe segredos ou dados de conta."""
+    return _health_payload()
+
+
+@app.get("/health")
+async def health() -> Dict[str, Any]:
+    """Health detalhado para proxy, Prometheus e operação supervisionada."""
+    return _health_payload()
 
 
 @app.get("/metrics")

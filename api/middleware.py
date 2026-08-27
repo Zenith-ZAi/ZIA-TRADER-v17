@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import uuid
 from typing import Callable
 
 from fastapi import Request
@@ -8,6 +9,22 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from security.rate_limiter import RateLimiter
+from monitoring.structured_logging import correlation_id_var
+
+
+class CorrelationIdMiddleware(BaseHTTPMiddleware):
+    """Propaga um ID não sensível para correlacionar request, logs e métricas."""
+
+    async def dispatch(self, request: Request, call_next: Callable):
+        correlation_id = request.headers.get("x-correlation-id", "").strip()[:128] or uuid.uuid4().hex
+        token = correlation_id_var.set(correlation_id)
+        request.state.correlation_id = correlation_id
+        try:
+            response = await call_next(request)
+            response.headers["X-Correlation-ID"] = correlation_id
+            return response
+        finally:
+            correlation_id_var.reset(token)
 
 
 class RequestRateLimitMiddleware(BaseHTTPMiddleware):

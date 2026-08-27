@@ -238,6 +238,8 @@ class Settings(BaseSettings):
     RECONCILIATION_MAX_ATTEMPTS: int = int(os.getenv("RECONCILIATION_MAX_ATTEMPTS", "3"))
     RECONCILIATION_BASE_DELAY_SECONDS: float = float(os.getenv("RECONCILIATION_BASE_DELAY_SECONDS", "0.25"))
     RECONCILIATION_MAX_DELAY_SECONDS: float = float(os.getenv("RECONCILIATION_MAX_DELAY_SECONDS", "4.0"))
+    DECISION_LOCK_TTL_SECONDS: int = int(os.getenv("DECISION_LOCK_TTL_SECONDS", "30"))
+    DECISION_LOCK_RENEW_SECONDS: int = int(os.getenv("DECISION_LOCK_RENEW_SECONDS", "10"))
     OCO_ENABLED: bool = os.getenv("OCO_ENABLED", "true").lower() == "true"
     OCO_TIMEOUT_SECONDS: float = float(os.getenv("OCO_TIMEOUT_SECONDS", "5"))
     SIMULATED_ORDER_FLOW_BIAS: str = os.getenv("SIMULATED_ORDER_FLOW_BIAS", "neutral")
@@ -281,6 +283,14 @@ class Settings(BaseSettings):
 
     # News and trend providers
     NEWS_HTTP_TIMEOUT_SECONDS: float = float(os.getenv("NEWS_HTTP_TIMEOUT_SECONDS", "8"))
+    HTTP_CONNECT_TIMEOUT_SECONDS: float = float(os.getenv("HTTP_CONNECT_TIMEOUT_SECONDS", "5"))
+    HTTP_READ_TIMEOUT_SECONDS: float = float(os.getenv("HTTP_READ_TIMEOUT_SECONDS", "15"))
+    HTTP_MAX_CONNECTIONS: int = int(os.getenv("HTTP_MAX_CONNECTIONS", "50"))
+    HTTP_MAX_KEEPALIVE_CONNECTIONS: int = int(os.getenv("HTTP_MAX_KEEPALIVE_CONNECTIONS", "20"))
+    HTTP_PROVIDER_CONCURRENCY: int = int(os.getenv("HTTP_PROVIDER_CONCURRENCY", "10"))
+    PROVIDER_FAILURE_THRESHOLD: int = int(os.getenv("PROVIDER_FAILURE_THRESHOLD", "3"))
+    PROVIDER_CIRCUIT_COOLDOWN_SECONDS: float = float(os.getenv("PROVIDER_CIRCUIT_COOLDOWN_SECONDS", "60"))
+    QUOTE_CACHE_TTL_SECONDS: int = int(os.getenv("QUOTE_CACHE_TTL_SECONDS", "30"))
     NEWS_CACHE_TTL_SECONDS: int = int(os.getenv("NEWS_CACHE_TTL_SECONDS", "300"))
     NEWS_MAX_ARTICLES: int = int(os.getenv("NEWS_MAX_ARTICLES", "20"))
     NEWS_PROVIDER_ARTICLES: int = int(os.getenv("NEWS_PROVIDER_ARTICLES", "10"))

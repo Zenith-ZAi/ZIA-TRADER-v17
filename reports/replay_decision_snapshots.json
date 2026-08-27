@@ -1,0 +1,11 @@
+{
+  "status": "passed",
+  "dataset": "/tmp/zia_benchmark_btcusdt_1h.csv",
+  "symbol": "BTC/USDT",
+  "timeframe": "1h",
+  "snapshots_available": 564,
+  "snapshots_checked": 564,
+  "mismatches": [],
+  "orders_sent": 0,
+  "live_trading_enabled": false
+}

@@ -12,10 +12,10 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import pandas as pd
-import requests
 
 from config.settings import Settings
 from execution.exchange_connector import ExchangeConnector
+from infra.async_http import AsyncProviderHTTP
 
 logger = logging.getLogger(__name__)
 
@@ -44,11 +44,20 @@ def normalize_symbol(symbol: str, market: str = "crypto") -> str:
 class YahooB3Adapter:
     """Dados públicos Yahoo para B3, sem caminho de escrita."""
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, http_client: AsyncProviderHTTP | None = None):
         self.settings = settings
         self.is_connected = False
         self.base_url = str(getattr(settings, "YAHOO_FINANCE_BASE_URL", "https://query1.finance.yahoo.com/v8/finance/chart"))
-        self.timeout = float(getattr(settings, "NEWS_HTTP_TIMEOUT_SECONDS", 8.0))
+        self.timeout = float(getattr(settings, "HTTP_READ_TIMEOUT_SECONDS", getattr(settings, "NEWS_HTTP_TIMEOUT_SECONDS", 8.0)))
+        self.http_client = http_client or AsyncProviderHTTP(
+            connect_timeout=float(getattr(settings, "HTTP_CONNECT_TIMEOUT_SECONDS", 5.0)),
+            read_timeout=self.timeout,
+            max_connections=int(getattr(settings, "HTTP_MAX_CONNECTIONS", 50)),
+            max_keepalive_connections=int(getattr(settings, "HTTP_MAX_KEEPALIVE_CONNECTIONS", 20)),
+            provider_concurrency=int(getattr(settings, "HTTP_PROVIDER_CONCURRENCY", 10)),
+            failure_threshold=int(getattr(settings, "PROVIDER_FAILURE_THRESHOLD", 3)),
+            cooldown_seconds=float(getattr(settings, "PROVIDER_CIRCUIT_COOLDOWN_SECONDS", 60.0)),
+        )
 
     async def connect(self) -> None:
         self.is_connected = True
@@ -56,17 +65,17 @@ class YahooB3Adapter:
     async def close(self) -> None:
         self.is_connected = False
 
-    def _chart(self, symbol: str, interval: str = "1h", limit: int = 100) -> pd.DataFrame:
+    async def _chart(self, symbol: str, interval: str = "1h", limit: int = 100) -> pd.DataFrame:
         normalized = normalize_symbol(symbol, "b3")
         period = max(2, int(limit))
-        response = requests.get(
+        payload = await self.http_client.get_json(
+            "yahoo",
             f"{self.base_url}/{normalized}",
             params={"range": "1y", "interval": interval, "events": "history"},
             headers={"User-Agent": "ZIA-Trader-readonly/1.0"},
-            timeout=self.timeout,
+            ttl_seconds=float(getattr(self.settings, "QUOTE_CACHE_TTL_SECONDS", 30)),
         )
-        response.raise_for_status()
-        payload = response.json().get("chart", {}).get("result", [])
+        payload = payload.get("chart", {}).get("result", []) if isinstance(payload, dict) else []
         if not payload:
             raise MarketConnectorError(f"Yahoo não retornou dados para {normalized}")
         result = payload[0]
@@ -88,7 +97,7 @@ class YahooB3Adapter:
         if not self.is_connected:
             raise MarketConnectorError("Yahoo B3 não está conectado")
         interval = timeframe if timeframe in {"1m", "5m", "15m", "30m", "1h", "1d", "1wk"} else "1h"
-        return self._chart(symbol, interval=interval, limit=limit)
+        return await self._chart(symbol, interval=interval, limit=limit)
 
     async def get_market_data(self, symbol: str) -> Dict[str, Any]:
         frame = await self.get_historical_data(symbol, "1h", 2)
@@ -119,12 +128,21 @@ class YahooB3Adapter:
 
 class ForexPublicReadOnlyAdapter:
     """Cotações públicas Forex: forex-python primeiro, Yahoo como fallback."""
-
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, http_client: AsyncProviderHTTP | None = None):
         self.settings = settings
         self.is_connected = False
         self.base_url = str(getattr(settings, "YAHOO_FINANCE_BASE_URL", "https://query1.finance.yahoo.com/v8/finance/chart"))
-        self.timeout = float(getattr(settings, "NEWS_HTTP_TIMEOUT_SECONDS", 8.0))
+        self.timeout = float(getattr(settings, "HTTP_READ_TIMEOUT_SECONDS", getattr(settings, "NEWS_HTTP_TIMEOUT_SECONDS", 8.0)))
+        self.http_client = http_client or AsyncProviderHTTP(
+            connect_timeout=float(getattr(settings, "HTTP_CONNECT_TIMEOUT_SECONDS", 5.0)),
+            read_timeout=self.timeout,
+            max_connections=int(getattr(settings, "HTTP_MAX_CONNECTIONS", 50)),
+            max_keepalive_connections=int(getattr(settings, "HTTP_MAX_KEEPALIVE_CONNECTIONS", 20)),
+            provider_concurrency=int(getattr(settings, "HTTP_PROVIDER_CONCURRENCY", 10)),
+            failure_threshold=int(getattr(settings, "PROVIDER_FAILURE_THRESHOLD", 3)),
+            cooldown_seconds=float(getattr(settings, "PROVIDER_CIRCUIT_COOLDOWN_SECONDS", 60.0)),
+        )
+
 
     async def connect(self) -> None:
         self.is_connected = True
@@ -144,15 +162,15 @@ class ForexPublicReadOnlyAdapter:
         base, quote = self._parts(symbol)
         return f"{base}{quote}=X"
 
-    def _yahoo_price(self, symbol: str) -> float:
-        response = requests.get(
+    async def _yahoo_price(self, symbol: str) -> float:
+        payload = await self.http_client.get_json(
+            "yahoo_forex",
             f"{self.base_url}/{self._yahoo_ticker(symbol)}",
             params={"range": "1d", "interval": "1m"},
             headers={"User-Agent": "ZIA-Trader-readonly/1.0"},
-            timeout=self.timeout,
+            ttl_seconds=float(getattr(self.settings, "QUOTE_CACHE_TTL_SECONDS", 30)),
         )
-        response.raise_for_status()
-        result = response.json().get("chart", {}).get("result", [])
+        result = payload.get("chart", {}).get("result", []) if isinstance(payload, dict) else []
         if not result:
             raise MarketConnectorError("Yahoo não retornou cotação Forex")
         quote = (result[0].get("indicators", {}).get("quote", [{}]) or [{}])[0]
@@ -171,7 +189,7 @@ class ForexPublicReadOnlyAdapter:
         except Exception as exc:
             logger.warning("forex-python indisponível para %s; usando Yahoo: %s", symbol, exc)
             source = "yahoo-finance"
-            price = self._yahoo_price(symbol)
+            price = await self._yahoo_price(symbol)
         return {
             "symbol": f"{base}/{quote}",
             "last": price,
@@ -188,14 +206,14 @@ class ForexPublicReadOnlyAdapter:
             raise MarketConnectorError("Forex público não está conectado")
         ticker = self._yahoo_ticker(symbol)
         interval = timeframe if timeframe in {"1m", "5m", "15m", "30m", "1h", "1d"} else "1h"
-        response = requests.get(
+        payload = await self.http_client.get_json(
+            "yahoo_forex",
             f"{self.base_url}/{ticker}",
             params={"range": "1y", "interval": interval},
             headers={"User-Agent": "ZIA-Trader-readonly/1.0"},
-            timeout=self.timeout,
+            ttl_seconds=float(getattr(self.settings, "NEWS_CACHE_TTL_SECONDS", 300)),
         )
-        response.raise_for_status()
-        result = response.json().get("chart", {}).get("result", [])
+        result = payload.get("chart", {}).get("result", []) if isinstance(payload, dict) else []
         if not result:
             raise MarketConnectorError("Yahoo não retornou histórico Forex")
         payload = result[0]
@@ -325,16 +343,16 @@ class CCXTAdapter:
 class MarketConnector:
     """Contrato único de mercado para os serviços do backend."""
 
-    def __init__(self, settings: Settings, exchange_connector: ExchangeConnector | None = None):
+    def __init__(self, settings: Settings, exchange_connector: ExchangeConnector | None = None, http_client: AsyncProviderHTTP | None = None):
         self.settings = settings
         adapter_name = str(getattr(settings, "MARKET_ADAPTER", "binance")).lower()
         market_type = str(getattr(settings, "MARKET_TYPE", "spot")).lower()
         if adapter_name in {"b3", "yahoo", "stocks"}:
             self.market = "b3"
-            self._adapter = YahooB3Adapter(settings)
+            self._adapter = YahooB3Adapter(settings, http_client=http_client)
         elif adapter_name in {"forex", "fx"} and str(getattr(settings, "FOREX_MODE", "paper")).lower() in {"public", "readonly", "read_only"}:
             self.market = "forex"
-            self._adapter = ForexPublicReadOnlyAdapter(settings)
+            self._adapter = ForexPublicReadOnlyAdapter(settings, http_client=http_client)
         elif adapter_name == "ccxt" or (adapter_name == "binance" and market_type == "futures"):
             self.market = "crypto"
             self._adapter = CCXTAdapter(settings)

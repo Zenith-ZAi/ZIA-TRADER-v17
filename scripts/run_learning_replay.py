@@ -17,6 +17,8 @@ if str(ROOT) not in sys.path:
 
 from config.settings import Settings
 from core.flow_analysis import analyze_order_flow
+from core.dataset_integrity import sha256_frame, validate_ohlcv
+from core.decision_snapshot import build_decision_snapshot
 from core.learning_layer import SignalLearningLayer
 from core.market_signals import calculate_market_signal
 from database_manager import DatabaseManager
@@ -37,10 +39,12 @@ def _flow_from_candle(row: pd.Series) -> dict[str, object]:
     }
 
 
-def run(dataset: pd.DataFrame, database_url: str, symbol: str, horizon_bars: int) -> dict[str, object]:
+def run(dataset: pd.DataFrame, database_url: str, symbol: str, horizon_bars: int, timeframe: str = "1h") -> dict[str, object]:
     frame = dataset.copy()
     frame["open_time"] = pd.to_datetime(frame["open_time"], utc=True)
     frame = frame.sort_values("open_time").drop_duplicates("open_time").reset_index(drop=True)
+    integrity = validate_ohlcv(frame, timeframe=timeframe, require_closed=True, reject_gaps=False)
+    dataset_sha256 = sha256_frame(frame)
     history = frame.set_index("open_time").sort_index()
     settings = Settings(
         DATABASE_URL=database_url,
@@ -92,6 +96,25 @@ def run(dataset: pd.DataFrame, database_url: str, symbol: str, horizon_bars: int
                 "bar_position": position,
             },
         })
+        db.create_decision_snapshot(build_decision_snapshot(
+            symbol=symbol,
+            timeframe=timeframe,
+            mode="historical-replay",
+            action=signal.action,
+            candidate_action=signal.candidate_action,
+            confidence=signal.confidence,
+            gate_status="allowed" if signal.action in {"buy", "sell"} else "blocked",
+            before_context={
+                "indicators": signal.indicators,
+                "flow": flow,
+                "regime": signal.regime,
+                "reasons": signal.reasons,
+                "bar_position": position,
+            },
+            observed_at=observed_at,
+            dataset_sha256=dataset_sha256,
+            feature_context=signal.indicators,
+        ))
         observed += 1
         action_counts[signal.action] += 1
         flow_counts[str(flow["direction"])] += 1
@@ -103,6 +126,8 @@ def run(dataset: pd.DataFrame, database_url: str, symbol: str, horizon_bars: int
         "dataset_rows": int(len(frame)),
         "dataset_start": frame["open_time"].iloc[0].isoformat(),
         "dataset_end": frame["open_time"].iloc[-1].isoformat(),
+        "dataset_sha256": dataset_sha256,
+        "dataset_integrity": integrity,
         "observations_created": observed,
         "actions": dict(action_counts),
         "flow_directions": dict(flow_counts),
@@ -125,7 +150,7 @@ def main() -> None:
     if args.horizon_bars <= 0:
         raise SystemExit("--horizon-bars precisa ser positivo")
     dataset = fetch(args.symbol, args.interval, args.limit)
-    result = run(dataset, args.database_url, args.symbol, args.horizon_bars)
+    result = run(dataset, args.database_url, args.symbol, args.horizon_bars, args.interval)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

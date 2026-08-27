@@ -11,6 +11,7 @@ import pandas as pd
 from config.settings import Settings
 from ai.ensemble_model import EnsembleModel
 from core.feature_pipeline import FeaturePipeline
+from core.decision_snapshot import build_decision_snapshot, stable_hash
 from core.market_signals import MarketSignal, MarketSignalCache
 from core.pullback_strategy import PullbackSignalCache
 from core.pattern_memory import PatternMemory, build_pattern_signature
@@ -114,6 +115,7 @@ class BacktestEngine:
                 "trades_executed": 0,
             }
         data = data.replace([np.inf, -np.inf], np.nan).dropna(subset=["close"])
+        dataset_hash = stable_hash(data)
         if len(data) < 40:
             return {
                 "symbol": symbol,
@@ -257,6 +259,32 @@ class BacktestEngine:
                     pullback=signal.pullback,
                 )
             quality_counts[signal.status] = quality_counts.get(signal.status, 0) + 1
+            if self.db_manager is not None:
+                model_feature_context = {}
+                if model_features is not None and data.index[index] in model_features.index:
+                    model_feature_context = model_features.loc[data.index[index]].to_dict()
+                self.db_manager.create_decision_snapshot(build_decision_snapshot(
+                    symbol=symbol,
+                    timeframe=str(getattr(self.settings, "TIMEFRAME", "1h")),
+                    mode="backtest",
+                    action=signal.action,
+                    candidate_action=signal.candidate_action,
+                    confidence=signal.confidence,
+                    gate_status="allowed" if signal.action in {"buy", "sell"} else "blocked",
+                    before_context={
+                        "price": price,
+                        "raw_signal_action": raw_signal_action,
+                        "market_signal": signal.to_dict(),
+                        "event_guard": event_status,
+                        "position": position or {},
+                        "bar_index": index,
+                        "model_rejections": ensemble_rejections,
+                        "pattern_rejections": pattern_rejections,
+                    },
+                    observed_at=pd.Timestamp(data.index[index]).to_pydatetime(),
+                    dataset_sha256=dataset_hash,
+                    feature_context=model_feature_context or signal.indicators,
+                ))
 
             high = self._price(row, "high")
             low = self._price(row, "low")

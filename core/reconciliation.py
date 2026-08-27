@@ -7,6 +7,8 @@ import logging
 import uuid
 from typing import Any, Awaitable, Callable, Dict, Iterable, Optional
 
+from monitoring.metrics import RECONCILIATION_DIVERGENCE
+
 logger = logging.getLogger(__name__)
 
 
@@ -70,6 +72,17 @@ class OrderReconciler:
         except Exception:
             logger.warning("Não foi possível cachear a intenção %s", intent.get("client_order_id"))
 
+    async def _remote_intent(self, client_order_id: str) -> Optional[Dict[str, Any]]:
+        try:
+            remote_orders = await self._call_optional("get_open_orders", [])
+        except Exception as exc:
+            logger.warning("Não foi possível consultar ordem remota %s após falha: %s", client_order_id, exc)
+            return None
+        for item in remote_orders or []:
+            if isinstance(item, dict) and str(item.get("client_order_id") or "") == client_order_id:
+                return dict(item)
+        return None
+
     async def submit_with_retry(
         self,
         order_data: Dict[str, Any],
@@ -105,6 +118,18 @@ class OrderReconciler:
             except Exception as exc:
                 last_error = str(exc)
                 logger.warning("Falha no envio idempotente %s tentativa %d/%d: %s", client_id, attempt, self.max_attempts, exc)
+                remote = await self._remote_intent(client_id)
+                if remote is not None:
+                    remote_status = str(remote.get("status", "open")).lower()
+                    intent = self.db_manager.update_order_intent(
+                        client_id,
+                        status=remote_status,
+                        exchange_order_id=str(remote.get("order_id") or remote.get("exchange_order_id") or "") or None,
+                        attempts=attempt,
+                        payload_json=remote,
+                    )
+                    await self._cache_intent(intent or {"client_order_id": client_id, **remote})
+                    return {**remote, "status": "idempotent_recovered", "client_order_id": client_id, "intent": intent}
             self.db_manager.update_order_intent(client_id, status="retrying" if attempt < self.max_attempts else "failed", attempts=attempt, last_error=last_error)
             if attempt < self.max_attempts:
                 await asyncio.sleep(min(self.max_delay_seconds, self.base_delay_seconds * (2 ** (attempt - 1))))
@@ -140,6 +165,8 @@ class OrderReconciler:
                 "local_positions": [self._position_dict(row) for row in local_positions],
             }
             status = "ok" if not payload["untracked_remote_client_order_ids"] else "attention"
+            if status != "ok":
+                RECONCILIATION_DIVERGENCE.inc()
             snapshot = self.db_manager.create_reconciliation_snapshot(self.account_id, status, payload)
             return {"status": status, **snapshot}
         except Exception as exc:

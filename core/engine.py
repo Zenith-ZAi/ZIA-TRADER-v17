@@ -23,6 +23,8 @@ from execution.exchange_connector import ExchangeConnector
 from core.market_signals import calculate_market_signal, detect_reversal_signal
 from core.event_guard import EconomicEventGuard
 from core.pullback_strategy import PullbackSignalCache
+from core.pullback_registry import PullbackCacheRegistry
+from core.decision_snapshot import build_decision_snapshot
 from core.pattern_memory import PatternMemory, build_pattern_signature
 from core.position_policy import evaluate_position_exit
 from core.multi_timeframe import combine_timeframe_signals, parse_timeframes
@@ -38,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 class RoboTraderUnified:
     """Motor de trading principal que coordena a análise e execução."""
-    def __init__(self, settings: Settings, news_processor: NewsProcessor, exchange_connector: ExchangeConnector, db_manager):
+    def __init__(self, settings: Settings, news_processor: NewsProcessor, exchange_connector: ExchangeConnector, db_manager, redis_cache: RedisCache | None = None, pullback_registry: PullbackCacheRegistry | None = None):
         self.settings = settings
         self.news_processor = news_processor
         self.feature_pipeline = FeaturePipeline(settings)
@@ -56,7 +58,8 @@ class RoboTraderUnified:
         self.order_manager = None
 
         self.risk_ai = RiskAI(self.settings, self.db_manager)
-        self.redis_cache = RedisCache(self.settings.REDIS_URL)
+        self.redis_cache = redis_cache or RedisCache(self.settings.REDIS_URL)
+        self.pullback_registry = pullback_registry or PullbackCacheRegistry()
         self.autonomy_blocked = bool(
             self.settings.AUTONOMOUS_TRADING_ENABLED
             and self.settings.REDIS_REQUIRED_FOR_AUTONOMOUS
@@ -160,6 +163,7 @@ class RoboTraderUnified:
         await self.reconcile_runtime_positions()
         logger.info("Motor de Trading ZIA iniciado.")
         
+        decision_lease = None
         while self.is_running:
             try:
                 for symbol in self.symbols:
@@ -185,6 +189,17 @@ class RoboTraderUnified:
                     if current_price is None:
                         logger.warning(f"[{symbol}] Preço indisponível. Pulando ciclo.")
                         SYSTEM_LOG_COUNT.labels(level='WARNING').inc()
+                        continue
+
+                    lock_key = f"zia:decision-lock:{self.account_id}:{symbol}:{self.timeframe}"
+                    decision_lease = await self.redis_cache.acquire_lock(
+                        lock_key,
+                        ttl_seconds=int(getattr(self.settings, "DECISION_LOCK_TTL_SECONDS", 30)),
+                        renew_seconds=int(getattr(self.settings, "DECISION_LOCK_RENEW_SECONDS", 10)),
+                    )
+                    if decision_lease is None:
+                        logger.warning("[%s] Concorrência evitada: lock de decisão não adquirido.", symbol)
+                        self.db_manager.create_system_log("INFO", f"Concorrência evitada para {symbol}", "RoboTraderUnified", self.account_id)
                         continue
 
                     current_order_flow = {
@@ -267,7 +282,9 @@ class RoboTraderUnified:
 
                     pullback_signal_cached = None
                     if self.settings.PULLBACK_STRATEGY_ENABLED:
-                        pullback_signal_cached = PullbackSignalCache(
+                        pullback_signal_cached = self.pullback_registry.latest_signal(
+                            symbol,
+                            self.timeframe,
                             historical_data,
                             ema_period=int(self.settings.PULLBACK_EMA_PERIOD),
                             rsi_period=int(self.settings.PULLBACK_RSI_PERIOD),
@@ -279,7 +296,7 @@ class RoboTraderUnified:
                             stop_atr_multiple=float(self.settings.PULLBACK_STOP_ATR_MULTIPLE),
                             target_atr_multiple=float(self.settings.PULLBACK_TARGET_ATR_MULTIPLE),
                             breakeven_atr_trigger=float(self.settings.PULLBACK_BREAKEVEN_ATR_TRIGGER),
-                        ).at(len(historical_data) - 1)
+                        )
                     market_signal = calculate_market_signal(
                         historical_data,
                         news_sentiment=avg_sentiment,
@@ -504,6 +521,37 @@ class RoboTraderUnified:
                                 "risk_reason": shadow_risk.get("reason", ""),
                             },
                         })
+                        snapshot_context = {
+                            "price": current_price,
+                            "news_sentiment": avg_sentiment,
+                            "trend_score": trend_score,
+                            "news_count": len(processed_news),
+                            "news_provider_health": self.news_processor.health(),
+                            "market_signal": market_signal.to_dict(),
+                            "reversal_signal": reversal_signal,
+                            "pullback_signal": market_signal.pullback,
+                            "event_guard": event_status,
+                            "news_gate": news_gate,
+                            "multi_timeframe": multi_timeframe,
+                            "circuit_breaker": circuit_breaker,
+                            "microstructure": microstructure,
+                            "emergency_exit": emergency_exit,
+                            "pattern_match": pattern_match.to_dict(),
+                            "order_flow": snapshot.order_flow,
+                            "risk_valid": bool(shadow_risk.get("valid", False)),
+                            "risk_reason": shadow_risk.get("reason", ""),
+                        }
+                        self.db_manager.create_decision_snapshot(build_decision_snapshot(
+                            symbol=symbol,
+                            timeframe=self.timeframe,
+                            mode="shadow",
+                            action=analysis["prediction"],
+                            candidate_action=market_signal.candidate_action,
+                            confidence=analysis["confidence"],
+                            gate_status="allowed" if shadow_risk.get("valid") else "blocked",
+                            before_context=snapshot_context,
+                            feature_context=feature_snapshot,
+                        ))
                     
                     # 4. Risco e Execução: primeiro fecha; somente depois pode avaliar nova entrada.
                     exit_executed = False
@@ -587,9 +635,16 @@ class RoboTraderUnified:
                                 logger.error(f"Falha crítica na execução da ordem para {symbol}: {e}")
                                 self.db_manager.create_system_log("ERROR", f"Falha crítica na execução da ordem para {symbol}: {e}", "RoboTraderUnified")
                                 SYSTEM_ERROR_COUNT.inc()
-                                
+
+                    if decision_lease is not None:
+                        await decision_lease.release()
+                        decision_lease = None
                 await asyncio.sleep(self.settings.TRADING_LOOP_INTERVAL)
+
             except Exception as e:
+                if decision_lease is not None:
+                    await decision_lease.release()
+                    decision_lease = None
                 logger.error(f"Erro no loop principal: {e}")
                 SYSTEM_ERROR_COUNT.inc()
                 await asyncio.sleep(self.settings.ERROR_RETRY_INTERVAL)

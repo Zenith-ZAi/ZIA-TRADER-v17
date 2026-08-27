@@ -15,3 +15,7 @@ AI_NEWS_FETCH_LATENCY = Histogram("zia_trader_ai_news_fetch_latency_seconds", "L
 # Métricas do Sistema
 SYSTEM_ERROR_COUNT = Counter("zia_trader_system_error_count", "Contador de erros do sistema")
 SYSTEM_LOG_COUNT = Counter("zia_trader_system_log_count", "Contador de logs do sistema por nível", ["level"])
+RECONCILIATION_DIVERGENCE = Counter("reconciliation_divergence_total", "Divergências detectadas pela reconciliação")
+KILL_SWITCH_ACTIVE = Gauge("zia_kill_switch_active", "Estado do kill switch: 1 ativo, 0 inativo")
+DAILY_DRAWDOWN_RATIO = Gauge("zia_daily_drawdown_ratio", "Drawdown diário relativo")
+PROVIDER_REQUESTS = Counter("zia_provider_requests_total", "Chamadas a provedores por resultado", ["provider", "status"])

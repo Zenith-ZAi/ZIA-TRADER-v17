@@ -21,7 +21,9 @@ from ai.feature_pipeline import build_feature_frame
 from ai.whale_detector import WhaleDetector
 from config.settings import Settings
 from core.market_signals import calculate_market_signal
+from core.feature_pipeline import FeaturePipeline
 from core.pullback_strategy import PullbackSignalCache, calculate_pullback_signal
+from core.pullback_registry import PullbackCacheRegistry
 
 
 def percentile(values: list[float], fraction: float) -> float:
@@ -64,7 +66,8 @@ def main() -> None:
         ENSEMBLE_MODEL_DIR=args.model_dir,
         NEWS_HTTP_TIMEOUT_SECONDS=1,
     )
-    features = build_feature_frame(frame).dropna()
+    feature_pipeline = FeaturePipeline(settings)
+    features = feature_pipeline.build_features(frame).dropna()
     model = EnsembleModel(args.model_dir)
     whale = WhaleDetector(settings, None)
     pullback_kwargs = {
@@ -82,25 +85,29 @@ def main() -> None:
     order_flow = {"symbol": "BTC/USDT", "buys": [], "sells": []}
     pullback_cache = PullbackSignalCache(frame, **pullback_kwargs)
     cached_pullback = pullback_cache.at(len(frame) - 1)
+    pullback_registry = PullbackCacheRegistry()
+    pullback_registry.get("BTCUSDT", "1h", frame, **pullback_kwargs)
 
     def local_decision() -> None:
-        local_features = build_feature_frame(frame).dropna()
+        local_features = feature_pipeline.build_features(frame).dropna()
         if model.is_trained and not local_features.empty:
             model.predict(local_features.tail(1))
         calculate_market_signal(frame, min_confidence=settings.MIN_CONFIDENCE_THRESHOLD, max_volatility=settings.BACKTEST_MAX_VOLATILITY, pullback_kwargs=pullback_kwargs)
         whale.detect_whale_activity(frame, order_flow)
 
     def local_decision_cached() -> None:
-        local_features = build_feature_frame(frame).dropna()
+        local_features = feature_pipeline.build_features(frame).dropna()
         if model.is_trained and not local_features.empty:
             model.predict(local_features.tail(1))
         calculate_market_signal(frame, min_confidence=settings.MIN_CONFIDENCE_THRESHOLD, max_volatility=settings.BACKTEST_MAX_VOLATILITY, precomputed_pullback=cached_pullback)
         whale.detect_whale_activity(frame, order_flow)
 
     results = [
-        measure("causal_feature_frame", lambda: build_feature_frame(frame).dropna(), args.runs),
+        measure("causal_feature_frame_uncached", lambda: build_feature_frame(frame).dropna(), args.runs),
+        measure("causal_feature_frame_cached", lambda: feature_pipeline.build_features(frame).dropna(), args.runs),
         measure("ensemble_predict", lambda: model.predict(features.tail(1)) if model.is_trained and not features.empty else None, args.runs),
         measure("pullback_cache_build", lambda: PullbackSignalCache(frame, **pullback_kwargs), args.runs),
+        measure("pullback_registry_reuse", lambda: pullback_registry.get("BTCUSDT", "1h", frame, **pullback_kwargs), args.runs),
         measure("market_signal_with_pullback", lambda: calculate_market_signal(frame, min_confidence=settings.MIN_CONFIDENCE_THRESHOLD, max_volatility=settings.BACKTEST_MAX_VOLATILITY, pullback_kwargs=pullback_kwargs), args.runs),
         measure("market_signal_cached_pullback", lambda: calculate_market_signal(frame, min_confidence=settings.MIN_CONFIDENCE_THRESHOLD, max_volatility=settings.BACKTEST_MAX_VOLATILITY, precomputed_pullback=cached_pullback), args.runs),
         measure("pullback_only", lambda: calculate_pullback_signal(frame, **pullback_kwargs), args.runs),

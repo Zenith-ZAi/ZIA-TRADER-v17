@@ -1,0 +1,118 @@
+{
+  "status": "passed",
+  "snapshots": 15,
+  "repetitions": 3,
+  "average_decision_ms": 4.899239733333333,
+  "max_decision_ms": 5.691055,
+  "target_average_ms": 200.0,
+  "network_in_timer": false,
+  "live_trading_enabled": false,
+  "orders_sent": 0,
+  "per_snapshot": [
+    {
+      "symbol": "BTCUSDT",
+      "timeframe": "1h",
+      "runs": 3,
+      "mean_ms": 4.863386333333334,
+      "max_ms": 5.122143
+    },
+    {
+      "symbol": "BTCUSDT",
+      "timeframe": "4h",
+      "runs": 3,
+      "mean_ms": 4.595677333333334,
+      "max_ms": 4.740469
+    },
+    {
+      "symbol": "BTCUSDT",
+      "timeframe": "1d",
+      "runs": 3,
+      "mean_ms": 5.235918333333333,
+      "max_ms": 5.691055
+    },
+    {
+      "symbol": "ETHUSDT",
+      "timeframe": "1h",
+      "runs": 3,
+      "mean_ms": 4.829995333333334,
+      "max_ms": 5.1695
+    },
+    {
+      "symbol": "ETHUSDT",
+      "timeframe": "4h",
+      "runs": 3,
+      "mean_ms": 4.801271,
+      "max_ms": 4.923383
+    },
+    {
+      "symbol": "ETHUSDT",
+      "timeframe": "1d",
+      "runs": 3,
+      "mean_ms": 4.8276666666666666,
+      "max_ms": 5.032045
+    },
+    {
+      "symbol": "SOLUSDT",
+      "timeframe": "1h",
+      "runs": 3,
+      "mean_ms": 4.980011666666667,
+      "max_ms": 5.258137
+    },
+    {
+      "symbol": "SOLUSDT",
+      "timeframe": "4h",
+      "runs": 3,
+      "mean_ms": 4.796266,
+      "max_ms": 4.882833
+    },
+    {
+      "symbol": "SOLUSDT",
+      "timeframe": "1d",
+      "runs": 3,
+      "mean_ms": 4.752131666666666,
+      "max_ms": 4.878257
+    },
+    {
+      "symbol": "BNBUSDT",
+      "timeframe": "1h",
+      "runs": 3,
+      "mean_ms": 5.101466,
+      "max_ms": 5.320852
+    },
+    {
+      "symbol": "BNBUSDT",
+      "timeframe": "4h",
+      "runs": 3,
+      "mean_ms": 4.767054666666667,
+      "max_ms": 4.804277
+    },
+    {
+      "symbol": "BNBUSDT",
+      "timeframe": "1d",
+      "runs": 3,
+      "mean_ms": 4.850947000000001,
+      "max_ms": 5.308594
+    },
+    {
+      "symbol": "XRPUSDT",
+      "timeframe": "1h",
+      "runs": 3,
+      "mean_ms": 4.908078,
+      "max_ms": 5.463005
+    },
+    {
+      "symbol": "XRPUSDT",
+      "timeframe": "4h",
+      "runs": 3,
+      "mean_ms": 5.324020999999999,
+      "max_ms": 5.635426
+    },
+    {
+      "symbol": "XRPUSDT",
+      "timeframe": "1d",
+      "runs": 3,
+      "mean_ms": 4.854705,
+      "max_ms": 4.991069
+    }
+  ]
+}

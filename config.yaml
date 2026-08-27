@@ -1,0 +1,45 @@
+# Manifesto declarativo do runtime. Os valores secretos continuam somente em .env.vps.
+version: 18
+environment: vps-shadow
+runtime:
+  api: fastapi
+  worker: python
+  database: postgresql
+  cache: redis
+  proxy: nginx
+safety:
+  binance_mode: simulated
+  shadow_mode_enabled: true
+  autonomous_trading_enabled: false
+  manual_trading_enabled: false
+  live_trading_enabled: false
+  live_mode: false
+  live_kill_switch: true
+  order_confirmation_required: true
+  require_persistent_database: true
+  require_persistent_redis: true
+performance:
+  http_connect_timeout_seconds: 5
+  http_read_timeout_seconds: 15
+  http_max_connections: 50
+  http_max_keepalive_connections: 20
+  http_provider_concurrency: 10
+  provider_failure_threshold: 3
+  provider_circuit_cooldown_seconds: 60
+  quote_cache_ttl_seconds: 30
+  news_cache_ttl_seconds: 300
+  decision_lock_ttl_seconds: 30
+  decision_lock_renew_seconds: 10
+data:
+  candle_policy: closed_only
+  dataset_hash: sha256
+  quality_gate_min_coverage: 0.95
+  decision_snapshot_schema: decision_snapshots
+operations:
+  nginx_profile: optional
+  prometheus_profile: optional
+  firewall_default: dry_run
+  external_waf_required_for_public_exposure: true
+notes:
+  - "Este arquivo é um manifesto sem segredos; .env.vps é a fonte de valores sensíveis."
+  - "Nenhuma configuração deste manifesto autoriza capital real."

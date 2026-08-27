@@ -16,8 +16,8 @@ from decimal import Decimal, ROUND_DOWN
 from typing import Any, Dict, Iterable, Optional
 from urllib.parse import urlencode, urlparse
 
+import httpx
 import pandas as pd
-import requests
 
 from config.settings import Settings
 
@@ -42,12 +42,26 @@ class BinanceSpotAdapter:
     ALLOWED_HOSTS = {"testnet.binance.vision", "demo-api.binance.com"}
     INTERVALS = {"1m", "3m", "5m", "10m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w", "1M"}
 
-    def __init__(self, settings: Settings, session: Optional[requests.Session] = None):
+    def __init__(self, settings: Settings, session: Optional[Any] = None):
         self.settings = settings
         self.api_key = settings.BINANCE_API_KEY
         self.secret_key = settings.BINANCE_SECRET_KEY
         self.base_url = self._normalize_base_url(settings.BINANCE_BASE_URL)
-        self.session = session or requests.Session()
+        self.session = session
+        self.http_client = None if session is not None else httpx.AsyncClient(
+            timeout=httpx.Timeout(
+                timeout=float(getattr(settings, "BINANCE_TIMEOUT_SECONDS", 10.0)),
+                connect=float(getattr(settings, "HTTP_CONNECT_TIMEOUT_SECONDS", 5.0)),
+                read=float(getattr(settings, "HTTP_READ_TIMEOUT_SECONDS", 15.0)),
+                write=float(getattr(settings, "HTTP_READ_TIMEOUT_SECONDS", 15.0)),
+                pool=float(getattr(settings, "HTTP_CONNECT_TIMEOUT_SECONDS", 5.0)),
+            ),
+            limits=httpx.Limits(
+                max_connections=int(getattr(settings, "HTTP_MAX_CONNECTIONS", 50)),
+                max_keepalive_connections=int(getattr(settings, "HTTP_MAX_KEEPALIVE_CONNECTIONS", 20)),
+            ),
+            follow_redirects=False,
+        )
         self.is_connected = False
         self.server_time_offset_ms = 0
         self.exchange_info: Dict[str, Any] = {}
@@ -91,7 +105,32 @@ class BinanceSpotAdapter:
         signature = hmac.new(self.secret_key.encode("utf-8"), query.encode("utf-8"), hashlib.sha256).hexdigest()
         return f"{query}&signature={signature}"
 
-    def _request_sync(
+    @staticmethod
+    def _parse_response(response: Any) -> Any:
+        if response.status_code in {418, 429}:
+            retry_after = response.headers.get("Retry-After", "unknown")
+            raise BinanceRateLimitError(f"Binance rate limit status={response.status_code}; retry_after={retry_after}")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise BinanceAdapterError(f"Resposta Binance não é JSON: HTTP {response.status_code}") from exc
+        return payload
+
+    def _validate_payload(self, response: Any, payload: Any) -> Any:
+        if response.status_code >= 400 or (isinstance(payload, dict) and payload.get("code", 0) < 0):
+            code = payload.get("code") if isinstance(payload, dict) else response.status_code
+            message = payload.get("msg") if isinstance(payload, dict) else str(payload)
+            if code in {-2015, -2014, -1022, -1021}:
+                raise BinanceAuthenticationError(
+                    f"Binance authentication error code={code}: {message}. "
+                    "Confirme que a chave foi criada no Spot Testnet/Demo correto, "
+                    "que USER_DATA está permitido, TRADE só é habilitado se necessário, "
+                    "e que a whitelist de IP não bloqueia este servidor."
+                )
+            raise BinanceAdapterError(f"Binance error code={code}: {message}")
+        return payload
+
+    def _request_legacy_session(
         self,
         method: str,
         path: str,
@@ -116,28 +155,32 @@ class BinanceSpotAdapter:
             headers=headers,
             timeout=self.settings.BINANCE_TIMEOUT_SECONDS,
         )
-        if response.status_code in {418, 429}:
-            retry_after = response.headers.get("Retry-After", "unknown")
-            raise BinanceRateLimitError(f"Binance rate limit status={response.status_code}; retry_after={retry_after}")
-        try:
-            payload = response.json()
-        except ValueError as exc:
-            raise BinanceAdapterError(f"Resposta Binance não é JSON: HTTP {response.status_code}") from exc
-        if response.status_code >= 400 or (isinstance(payload, dict) and payload.get("code", 0) < 0):
-            code = payload.get("code") if isinstance(payload, dict) else response.status_code
-            message = payload.get("msg") if isinstance(payload, dict) else str(payload)
-            if code in {-2015, -2014, -1022, -1021}:
-                raise BinanceAuthenticationError(
-                    f"Binance authentication error code={code}: {message}. "
-                    "Confirme que a chave foi criada no Spot Testnet/Demo correto, "
-                    "que USER_DATA está permitido, TRADE só é habilitado se necessário, "
-                    "e que a whitelist de IP não bloqueia este servidor."
-                )
-            raise BinanceAdapterError(f"Binance error code={code}: {message}")
-        return payload
+        payload = self._parse_response(response)
+        return self._validate_payload(response, payload)
 
     async def _request(self, method: str, path: str, params: Optional[Dict[str, Any]] = None, signed: bool = False) -> Any:
-        return await asyncio.to_thread(self._request_sync, method, path, params, signed)
+        params = dict(params or {})
+        headers = {"X-MBX-APIKEY": self.api_key} if self.api_key else {}
+        if signed:
+            params.setdefault("timestamp", self._timestamp())
+            params.setdefault("recvWindow", self.settings.BINANCE_RECV_WINDOW_MS)
+            query = self._signed_query(params)
+        else:
+            query = urlencode({key: value for key, value in params.items() if value is not None}, doseq=True)
+        url = f"{self.base_url}{path}"
+        is_body_method = method.upper() in {"POST", "DELETE"}
+        if self.session is not None:
+            # Compatibilidade exclusiva com FakeSession em testes; produção usa httpx.AsyncClient.
+            return await asyncio.to_thread(self._request_legacy_session, method, path, params, signed)
+        response = await self.http_client.request(
+            method.upper(),
+            url,
+            params=None if is_body_method else query,
+            content=query if is_body_method else None,
+            headers=headers,
+        )
+        payload = self._parse_response(response)
+        return self._validate_payload(response, payload)
 
     async def connect(self) -> None:
         server_time = await self._request("GET", "/v3/time")
@@ -149,7 +192,10 @@ class BinanceSpotAdapter:
         logger.info("Binance Spot conectado em modo %s: %s", self.settings.BINANCE_MODE, self.base_url)
 
     async def close(self) -> None:
-        self.session.close()
+        if self.session is not None and hasattr(self.session, "close"):
+            self.session.close()
+        if self.http_client is not None:
+            await self.http_client.aclose()
         self.is_connected = False
 
     def _index_filters(self, payload: Dict[str, Any]) -> None:

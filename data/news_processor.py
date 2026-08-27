@@ -10,9 +10,8 @@ from urllib.parse import quote_plus
 from xml.etree import ElementTree
 from typing import Any, Dict, Iterable, List, Optional
 
-import requests
-
 from config.settings import Settings
+from infra.async_http import AsyncProviderHTTP, ProviderCircuitOpen
 
 logger = logging.getLogger(__name__)
 
@@ -20,11 +19,25 @@ logger = logging.getLogger(__name__)
 class NewsProcessor:
     """Busca sinais externos sem fabricar notícias quando um provedor falha."""
 
-    def __init__(self, settings: Settings, db_manager: Any | None = None):
+    def __init__(
+        self,
+        settings: Settings,
+        db_manager: Any | None = None,
+        http_client: AsyncProviderHTTP | None = None,
+    ):
         self.settings = settings
         self.db_manager = db_manager
         self._cache: Dict[str, tuple[float, Any]] = {}
         self.provider_status: Dict[str, Dict[str, Any]] = {}
+        self.http_client = http_client or AsyncProviderHTTP(
+            connect_timeout=float(getattr(settings, "HTTP_CONNECT_TIMEOUT_SECONDS", 5.0)),
+            read_timeout=float(getattr(settings, "HTTP_READ_TIMEOUT_SECONDS", 15.0)),
+            max_connections=int(getattr(settings, "HTTP_MAX_CONNECTIONS", 50)),
+            max_keepalive_connections=int(getattr(settings, "HTTP_MAX_KEEPALIVE_CONNECTIONS", 20)),
+            provider_concurrency=int(getattr(settings, "HTTP_PROVIDER_CONCURRENCY", 10)),
+            failure_threshold=int(getattr(settings, "PROVIDER_FAILURE_THRESHOLD", 3)),
+            cooldown_seconds=float(getattr(settings, "PROVIDER_CIRCUIT_COOLDOWN_SECONDS", 60.0)),
+        )
         logger.info("NewsProcessor inicializado com provedores gratuitos e pagos opcionais.")
 
     def _cache_get(self, key: str) -> Any | None:
@@ -39,31 +52,14 @@ class NewsProcessor:
         return value
 
     def _record_status(self, provider: str, ok: bool, detail: str = "") -> None:
+        transport_health = self.http_client.health(provider).get(provider, {})
         self.provider_status[provider] = {
-            "ok": ok,
-            "detail": detail,
+            "ok": ok and bool(transport_health.get("ok", True)),
+            "detail": detail or str(transport_health.get("last_error", "")),
             "checked_at": datetime.now(timezone.utc).isoformat(),
+            "failures": int(transport_health.get("failures", 0)),
+            "circuit_open": bool(transport_health.get("circuit_open", False)),
         }
-
-    def _request_json_sync(
-        self,
-        provider: str,
-        url: str,
-        params: Dict[str, Any],
-        headers: Optional[Dict[str, str]] = None,
-    ) -> Any:
-        response = requests.get(
-            url,
-            params=params,
-            headers=headers or {},
-            timeout=self.settings.NEWS_HTTP_TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-        payload = response.json()
-        if isinstance(payload, dict) and (payload.get("Error Message") or payload.get("Note") or payload.get("error") or payload.get("status") == "error"):
-            raise ValueError(str(payload.get("Error Message") or payload.get("Note") or payload.get("error") or payload.get("message") or "provider error"))
-        self._record_status(provider, True)
-        return payload
 
     async def _request_json(
         self,
@@ -73,25 +69,51 @@ class NewsProcessor:
         headers: Optional[Dict[str, str]] = None,
     ) -> Any:
         try:
-            return await asyncio.to_thread(self._request_json_sync, provider, url, params, headers)
-        except Exception as exc:
+            payload = await self.http_client.get_json(
+                provider,
+                url,
+                params=params,
+                headers=headers,
+                ttl_seconds=float(getattr(self.settings, "NEWS_CACHE_TTL_SECONDS", 300)),
+            )
+            if isinstance(payload, dict) and (
+                payload.get("Error Message")
+                or payload.get("Note")
+                or payload.get("error")
+                or payload.get("status") == "error"
+            ):
+                raise ValueError(
+                    str(
+                        payload.get("Error Message")
+                        or payload.get("Note")
+                        or payload.get("error")
+                        or payload.get("message")
+                        or "provider error"
+                    )
+                )
+            self._record_status(provider, True)
+            return payload
+        except (ProviderCircuitOpen, Exception) as exc:
             self._record_status(provider, False, str(exc))
             logger.warning("Falha no provedor %s: %s", provider, exc)
             return {}
 
-    def _request_text_sync(self, provider: str, url: str) -> str:
-        response = requests.get(url, timeout=self.settings.NEWS_HTTP_TIMEOUT_SECONDS)
-        response.raise_for_status()
-        self._record_status(provider, True)
-        return response.text
-
     async def _request_text(self, provider: str, url: str) -> str:
         try:
-            return await asyncio.to_thread(self._request_text_sync, provider, url)
-        except Exception as exc:
+            value = await self.http_client.get_text(
+                provider,
+                url,
+                ttl_seconds=float(getattr(self.settings, "NEWS_CACHE_TTL_SECONDS", 300)),
+            )
+            self._record_status(provider, True)
+            return value
+        except (ProviderCircuitOpen, Exception) as exc:
             self._record_status(provider, False, str(exc))
             logger.warning("Falha no provedor %s: %s", provider, exc)
             return ""
+
+    async def aclose(self) -> None:
+        await self.http_client.aclose()
 
     @staticmethod
     def _symbols(tickers: Iterable[str]) -> List[str]:

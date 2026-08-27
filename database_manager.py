@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict
 
-from database import Base, AccountState, Position, RuntimePositionState, DailyPNL, WeeklyPNL, MonthlyPNL, Drawdown, OrderHistory, ExecutionHistory, Trade, WhaleActivity, NewsArticle, TrendSnapshot, AIObservation, MarketPattern, SystemLog, OrderIntent, ReconciliationSnapshot, ProtectionOrder, KillSwitchEvent, BacktestRun, MarketType, OrderStatus, utc_now
+from database import Base, AccountState, Position, RuntimePositionState, DailyPNL, WeeklyPNL, MonthlyPNL, Drawdown, OrderHistory, ExecutionHistory, Trade, WhaleActivity, NewsArticle, TrendSnapshot, AIObservation, MarketPattern, SystemLog, OrderIntent, ReconciliationSnapshot, ProtectionOrder, KillSwitchEvent, BacktestRun, DecisionSnapshot, MarketType, OrderStatus, utc_now
 
 class DatabaseManager:
     def __init__(self, database_url: str):
@@ -333,6 +333,81 @@ class DatabaseManager:
         db.close()
         return record
 
+    def create_decision_snapshot(self, snapshot: Dict[str, object]) -> DecisionSnapshot:
+        observed_at = snapshot.get("observed_at") if isinstance(snapshot.get("observed_at"), datetime) else utc_now()
+        symbol = str(snapshot.get("symbol") or "unknown")
+        before_context = self._json_safe(dict(snapshot.get("before_context") or {}))
+        snapshot_id = str(snapshot.get("snapshot_id") or hashlib.sha256(
+            f"{symbol}:{observed_at.isoformat()}:{snapshot.get('action', 'hold')}".encode("utf-8")
+        ).hexdigest()[:32])
+        db = self.SessionLocal()
+        try:
+            record = db.query(DecisionSnapshot).filter(DecisionSnapshot.snapshot_id == snapshot_id).first()
+            if record is None:
+                record = DecisionSnapshot(
+                    snapshot_id=snapshot_id,
+                    symbol=symbol,
+                    timeframe=str(snapshot.get("timeframe") or "1h"),
+                    mode=str(snapshot.get("mode") or "shadow"),
+                    observed_at=observed_at,
+                    dataset_path=(str(snapshot["dataset_path"]) if snapshot.get("dataset_path") else None),
+                    dataset_sha256=(str(snapshot["dataset_sha256"]) if snapshot.get("dataset_sha256") else None),
+                    feature_hash=(str(snapshot["feature_hash"]) if snapshot.get("feature_hash") else None),
+                    action=str(snapshot.get("action") or "hold"),
+                    candidate_action=str(snapshot.get("candidate_action") or "hold"),
+                    confidence=float(snapshot.get("confidence") or 0.0),
+                    gate_status=str(snapshot.get("gate_status") or "blocked"),
+                    before_context_json=before_context,
+                    after_context_json=self._json_safe(dict(snapshot.get("after_context") or {})) if snapshot.get("after_context") else None,
+                )
+                db.add(record)
+            db.commit()
+            db.refresh(record)
+            return record
+        finally:
+            db.close()
+
+    def update_decision_snapshot_after(self, snapshot_id: str, after_context: Dict[str, object]) -> Optional[DecisionSnapshot]:
+        db = self.SessionLocal()
+        try:
+            record = db.query(DecisionSnapshot).filter(DecisionSnapshot.snapshot_id == str(snapshot_id)).first()
+            if record is not None:
+                record.after_context_json = self._json_safe(dict(after_context or {}))
+                db.commit()
+                db.refresh(record)
+            return record
+        finally:
+            db.close()
+
+    def list_decision_snapshots(self, symbol: Optional[str] = None, limit: int = 100) -> List[Dict[str, object]]:
+        db = self.SessionLocal()
+        try:
+            query = db.query(DecisionSnapshot)
+            if symbol:
+                query = query.filter(DecisionSnapshot.symbol == symbol)
+            rows = query.order_by(DecisionSnapshot.observed_at.desc()).limit(max(1, min(int(limit), 1000))).all()
+            return [
+                {
+                    "snapshot_id": row.snapshot_id,
+                    "symbol": row.symbol,
+                    "timeframe": row.timeframe,
+                    "mode": row.mode,
+                    "observed_at": row.observed_at.isoformat() if row.observed_at else None,
+                    "dataset_path": row.dataset_path,
+                    "dataset_sha256": row.dataset_sha256,
+                    "feature_hash": row.feature_hash,
+                    "action": row.action,
+                    "candidate_action": row.candidate_action,
+                    "confidence": row.confidence,
+                    "gate_status": row.gate_status,
+                    "before_context": row.before_context_json or {},
+                    "after_context": row.after_context_json or {},
+                }
+                for row in rows
+            ]
+        finally:
+            db.close()
+
     def get_unlabeled_ai_observations(self, symbol: Optional[str] = None, limit: int = 1000) -> List[AIObservation]:
         db = self.SessionLocal()
         query = db.query(AIObservation).filter(AIObservation.outcome_label.is_(None))
@@ -528,7 +603,7 @@ class DatabaseManager:
         try:
             rows = db.query(OrderIntent).filter(
                 OrderIntent.account_id == account_id,
-                OrderIntent.status.in_(["reserved", "submitted", "partially_filled"]),
+                OrderIntent.status.in_(["reserved", "submitted", "pending", "open", "partially_filled"]),
             ).all()
             return [self._intent_dict(row) for row in rows]
         finally:

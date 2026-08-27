@@ -16,6 +16,8 @@ from core.event_guard import EconomicEventGuard
 from execution.exchange_connector import ExchangeConnector
 from risk.risk_ai import RiskAI
 from core.pullback_strategy import PullbackSignalCache
+from core.pullback_registry import PullbackCacheRegistry
+from core.decision_snapshot import build_decision_snapshot
 from core.news_gate import evaluate_news_gate
 from core.risk_guard import evaluate_circuit_breaker, evaluate_emergency_exit
 from core.position_policy import evaluate_position_exit
@@ -27,12 +29,13 @@ logger = logging.getLogger(__name__)
 
 class SniperEngine:
     """Motor Sniper para execução rápida em eventos de alta volatilidade."""
-    def __init__(self, settings: Settings, exchange_connector: ExchangeConnector, execution_engine: ExecutionEngine, whale_detector: WhaleDetector, redis_cache: RedisCache, db_manager, news_processor=None):
+    def __init__(self, settings: Settings, exchange_connector: ExchangeConnector, execution_engine: ExecutionEngine, whale_detector: WhaleDetector, redis_cache: RedisCache, db_manager, news_processor=None, pullback_registry: PullbackCacheRegistry | None = None):
         self.settings = settings
         self.exchange_connector = exchange_connector
         self.execution_engine = execution_engine
         self.whale_detector = whale_detector
         self.redis_cache = redis_cache
+        self.pullback_registry = pullback_registry or PullbackCacheRegistry()
         self.db_manager = db_manager
         self.news_processor = news_processor
         self.account_id = "default_account" # Pode ser dinâmico em um sistema real
@@ -60,6 +63,7 @@ class SniperEngine:
         self.is_running = True
         logger.info("Motor Sniper ZIA iniciado.")
         
+        decision_lease = None
         while self.is_running:
             try:
                 for symbol in self.symbols:
@@ -74,6 +78,17 @@ class SniperEngine:
                     
                     if current_price is None:
                         logger.warning(f"[{symbol}] Sniper: Não foi possível obter o preço atual. Pulando ciclo.")
+                        continue
+
+                    lock_key = f"zia:decision-lock:{self.account_id}:{symbol}:{self.settings.SNIPER_TIMEFRAME}"
+                    decision_lease = await self.redis_cache.acquire_lock(
+                        lock_key,
+                        ttl_seconds=int(getattr(self.settings, "DECISION_LOCK_TTL_SECONDS", 30)),
+                        renew_seconds=int(getattr(self.settings, "DECISION_LOCK_RENEW_SECONDS", 10)),
+                    )
+                    if decision_lease is None:
+                        logger.warning("[%s] Sniper: concorrência evitada; lock não adquirido.", symbol)
+                        self.db_manager.create_system_log("INFO", f"Concorrência Sniper evitada para {symbol}", "SniperEngine", self.account_id)
                         continue
 
                     live_position = await self.redis_cache.get_state(f"position_{symbol}")
@@ -137,7 +152,9 @@ class SniperEngine:
                             news_gate = evaluate_news_gate(processed_news, news_health, self.settings)
                             pullback_signal_cached = None
                             if self.settings.PULLBACK_STRATEGY_ENABLED:
-                                pullback_signal_cached = PullbackSignalCache(
+                                pullback_signal_cached = self.pullback_registry.latest_signal(
+                                    symbol,
+                                    self.settings.SNIPER_TIMEFRAME,
                                     historical_data,
                                     ema_period=int(self.settings.PULLBACK_EMA_PERIOD),
                                     rsi_period=int(self.settings.PULLBACK_RSI_PERIOD),
@@ -149,7 +166,7 @@ class SniperEngine:
                                     stop_atr_multiple=float(self.settings.PULLBACK_STOP_ATR_MULTIPLE),
                                     target_atr_multiple=float(self.settings.PULLBACK_TARGET_ATR_MULTIPLE),
                                     breakeven_atr_trigger=float(self.settings.PULLBACK_BREAKEVEN_ATR_TRIGGER),
-                                ).at(len(historical_data) - 1)
+                                )
                             market_signal = calculate_market_signal(
                                 historical_data,
                                 news_sentiment=news_sentiment,
@@ -257,6 +274,30 @@ class SniperEngine:
                                         "autonomous_enabled": self.settings.AUTONOMOUS_TRADING_ENABLED,
                                     },
                                 })
+                                self.db_manager.create_decision_snapshot(build_decision_snapshot(
+                                    symbol=symbol,
+                                    timeframe=self.settings.SNIPER_TIMEFRAME,
+                                    mode="sniper-shadow",
+                                    action=shadow_action,
+                                    candidate_action=action,
+                                    confidence=min(float(market_signal.confidence), float(whale_activity.get("confidence", 0.0))),
+                                    gate_status="allowed" if microstructure.get("allowed") and news_gate.get("entry_allowed") and not circuit_breaker.get("tripped") else "blocked",
+                                    before_context={
+                                        "price": current_price,
+                                        "price_change": price_change,
+                                        "news_sentiment": news_sentiment,
+                                        "trend_score": trend_score,
+                                        "whale_activity": whale_activity,
+                                        "market_signal": market_signal.to_dict(),
+                                        "pullback_signal": market_signal.pullback,
+                                        "event_guard": event_status,
+                                        "news_gate": news_gate,
+                                        "circuit_breaker": circuit_breaker,
+                                        "microstructure": microstructure,
+                                        "order_flow": current_order_flow,
+                                    },
+                                    feature_context=market_signal.to_dict(),
+                                ))
                             logger.info(
                                 "Sniper: evento=%s ação=%s sinal=%s confiança=%.2f confirmado=%s",
                                 symbol,
@@ -327,9 +368,15 @@ class SniperEngine:
                                 
                     # 5. Atualiza o preço anterior no cache Redis
                     await self.redis_cache.set_state(previous_price_key, str(current_price), expire=self.settings.SNIPER_PRICE_CACHE_EXPIRE)
+                    if decision_lease is not None:
+                        await decision_lease.release()
+                        decision_lease = None
                     
                 await asyncio.sleep(self.settings.SNIPER_CYCLE_INTERVAL_SECONDS)  # Ciclo rápido configurável
             except Exception as e:
+                if decision_lease is not None:
+                    await decision_lease.release()
+                    decision_lease = None
                 logger.error(f"Erro no loop do motor Sniper: {e}")
                 self.db_manager.create_system_log("ERROR", f"Erro no loop do motor Sniper: {e}", "SniperEngine")
                 await asyncio.sleep(self.settings.ERROR_RETRY_INTERVAL)

@@ -3,31 +3,37 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 from pathlib import Path
 
+import httpx
 import pandas as pd
-import requests
 
 
 BASE_URL = "https://query1.finance.yahoo.com/v8/finance/chart"
 
 
-def fetch(ticker: str, range_value: str = "60d", interval: str = "1h") -> pd.DataFrame:
-    response = requests.get(
-        f"{BASE_URL}/{ticker}",
-        params={"range": range_value, "interval": interval, "events": "history"},
-        headers={"User-Agent": "ZIA-Trader-public-readonly/1.0"},
-        timeout=30,
-    )
-    response.raise_for_status()
-    result = response.json().get("chart", {}).get("result", [])
+async def fetch_async(ticker: str, range_value: str = "60d", interval: str = "1h") -> pd.DataFrame:
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(30.0, connect=5.0),
+        limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+        follow_redirects=False,
+    ) as client:
+        response = await client.get(
+            f"{BASE_URL}/{ticker}",
+            params={"range": range_value, "interval": interval, "events": "history"},
+            headers={"User-Agent": "ZIA-Trader-public-readonly/1.1"},
+        )
+        response.raise_for_status()
+        payload = response.json()
+    result = payload.get("chart", {}).get("result", [])
     if not result:
         raise RuntimeError(f"Yahoo não retornou dados para {ticker}")
-    payload = result[0]
-    quote = (payload.get("indicators", {}).get("quote", [{}]) or [{}])[0]
+    chart = result[0]
+    quote = (chart.get("indicators", {}).get("quote", [{}]) or [{}])[0]
     frame = pd.DataFrame({
-        "open_time": pd.to_datetime(payload.get("timestamp", []), unit="s", utc=True),
+        "open_time": pd.to_datetime(chart.get("timestamp", []), unit="s", utc=True),
         "open": quote.get("open", []),
         "high": quote.get("high", []),
         "low": quote.get("low", []),
@@ -37,6 +43,11 @@ def fetch(ticker: str, range_value: str = "60d", interval: str = "1h") -> pd.Dat
     if frame.empty:
         raise RuntimeError(f"Yahoo retornou série vazia para {ticker}")
     return frame.reset_index(drop=True)
+
+
+def fetch(ticker: str, range_value: str = "60d", interval: str = "1h") -> pd.DataFrame:
+    """Compatibilidade síncrona de CLI; o transporte é executado via AsyncClient."""
+    return asyncio.run(fetch_async(ticker, range_value, interval))
 
 
 def main() -> None:

@@ -1,0 +1,48 @@
+groups:
+  - name: zia-trader-critical
+    interval: 30s
+    rules:
+      - alert: ZiaDecisionLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(ai_local_decision_latency_seconds_bucket[5m]))) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Latência p95 da decisão acima de 500ms"
+          description: "A latência local de decisão do ZIA excedeu 500ms por cinco minutos."
+
+      - alert: ZiaProviderErrorRateHigh
+        expr: sum(rate(system_error_count_total{module=~".*News.*|.*Market.*"}[5m])) / clamp_min(sum(rate(system_log_count_total[5m])), 1) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Taxa de erro de provedor acima de 5%"
+          description: "Verifique health, circuit breakers e conectividade externa."
+
+      - alert: ZiaReconciliationDivergence
+        expr: increase(reconciliation_divergence_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Divergência detectada na reconciliação"
+          description: "O sistema deve permanecer em hold até a divergência ser resolvida."
+
+      - alert: ZiaKillSwitchActive
+        expr: zia_kill_switch_active == 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Kill switch do ZIA está acionado"
+          description: "Nenhuma nova entrada deve ser autorizada enquanto o kill switch estiver ativo."
+
+      - alert: ZiaDailyDrawdownHigh
+        expr: zia_daily_drawdown_ratio < -0.02
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Drawdown diário acima de 2%"
+          description: "Revisar circuito de risco e interromper entradas novas."

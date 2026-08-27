@@ -12,11 +12,14 @@ from execution.exchange_connector import ExchangeConnector
 from execution.market_connector import MarketConnector
 from execution.order_manager import OrderManager
 from infra.redis_cache import RedisCache
+from infra.async_http import AsyncProviderHTTP
+from core.pullback_registry import PullbackCacheRegistry
 from ai.whale_detector import WhaleDetector
 from execution.execution_engine import ExecutionEngine
 from core.runtime_registry import RuntimeConfigRegistry
 from core.command_manager import CoreCommandManager
 from core.daily_state_manager import DailyStateManager
+from monitoring.metrics import KILL_SWITCH_ACTIVE
 
 logger = logging.getLogger(__name__)
 
@@ -29,12 +32,22 @@ class TradingManager:
         self.runtime_registry = RuntimeConfigRegistry(db_manager)
         self.runtime_profile = self.runtime_registry.apply_to_settings(settings)
         self.daily_state = DailyStateManager(max_wins=5, max_losses=2)
-        self.news_processor = NewsProcessor(settings, db_manager)
+        self.http_client = AsyncProviderHTTP(
+            connect_timeout=float(getattr(settings, "HTTP_CONNECT_TIMEOUT_SECONDS", 5.0)),
+            read_timeout=float(getattr(settings, "HTTP_READ_TIMEOUT_SECONDS", 15.0)),
+            max_connections=int(getattr(settings, "HTTP_MAX_CONNECTIONS", 50)),
+            max_keepalive_connections=int(getattr(settings, "HTTP_MAX_KEEPALIVE_CONNECTIONS", 20)),
+            provider_concurrency=int(getattr(settings, "HTTP_PROVIDER_CONCURRENCY", 10)),
+            failure_threshold=int(getattr(settings, "PROVIDER_FAILURE_THRESHOLD", 3)),
+            cooldown_seconds=float(getattr(settings, "PROVIDER_CIRCUIT_COOLDOWN_SECONDS", 60.0)),
+        )
+        self.news_processor = NewsProcessor(settings, db_manager, http_client=self.http_client)
         base_exchange_connector = ExchangeConnector(settings)
-        self.market_connector = MarketConnector(settings, base_exchange_connector)
+        self.market_connector = MarketConnector(settings, base_exchange_connector, http_client=self.http_client)
         self.exchange_connector = self.market_connector
         
         self.redis_cache = RedisCache(settings.REDIS_URL)
+        self.pullback_registry = PullbackCacheRegistry()
         self.whale_detector = WhaleDetector(settings, db_manager)
         self.execution_engine = ExecutionEngine(
             settings,
@@ -47,7 +60,7 @@ class TradingManager:
         self.order_manager = OrderManager(settings, self.market_connector, self.execution_engine)
         self.reconciler = self.execution_engine.reconciler
         self.command_manager = CoreCommandManager(settings, db_manager, self.market_connector, self.news_processor)
-        self.trading_engine = RoboTraderUnified(settings, self.news_processor, self.market_connector, db_manager)
+        self.trading_engine = RoboTraderUnified(settings, self.news_processor, self.market_connector, db_manager, redis_cache=self.redis_cache, pullback_registry=self.pullback_registry)
         self.trading_engine.order_manager = self.order_manager
         self.sniper_engine = SniperEngine(
             settings,
@@ -57,6 +70,7 @@ class TradingManager:
             self.redis_cache,
             db_manager,
             news_processor=self.news_processor,
+            pullback_registry=self.pullback_registry,
         )
         self.sniper_engine.order_manager = self.order_manager
         self.backtest_engine = BacktestEngine(settings, db_manager)
@@ -94,6 +108,7 @@ class TradingManager:
         result = await self.exchange_connector.trigger_kill_switch(reason)
         if hasattr(self.settings, "LIVE_KILL_SWITCH"):
             self.settings.LIVE_KILL_SWITCH = True
+        KILL_SWITCH_ACTIVE.set(1)
         if hasattr(self, "reconciler") and self.reconciler is not None:
             self.db_manager.record_kill_switch(self.reconciler.account_id, True, reason, actor)
         return result
@@ -129,5 +144,6 @@ class TradingManager:
         await self.trading_engine.stop()
         await self.sniper_engine.stop() # Se o sniper_engine tiver um método stop
         await self.news_processor.close()
+        await self.http_client.aclose()
         await self.exchange_connector.close()
         logger.info("Todos os motores parados.")

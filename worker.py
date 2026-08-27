@@ -8,8 +8,9 @@ import logging
 from config.settings import settings
 from core.manager import TradingManager
 from database_manager import DatabaseManager
+from monitoring.structured_logging import configure_json_logging
 
-logging.basicConfig(level=logging.INFO)
+configure_json_logging()
 logger = logging.getLogger(__name__)
 
 

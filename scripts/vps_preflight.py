@@ -9,8 +9,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
+import socket
+import ssl
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 from typing import Any
 
 from sqlalchemy import inspect, text
@@ -32,6 +36,7 @@ REQUIRED_TABLES = {
     "protection_orders",
     "kill_switch_events",
     "backtest_runs",
+    "decision_snapshots",
 }
 
 
@@ -87,6 +92,35 @@ def run_preflight(strict: bool = False) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         add("redis_reachable", False, f"falha: {type(exc).__name__}")
         add("redis_persistent", False, "não foi possível confirmar persistência")
+
+    add("alert_rules_file", (PROJECT_ROOT / "deploy" / "alert_rules.yml").is_file(), "regras Prometheus presentes")
+    if _bool_env("REQUIRE_TLS_PROXY", False):
+        cert_dir = Path(os.getenv("TLS_CERT_DIR", str(PROJECT_ROOT / "deploy" / "tls")))
+        cert_path = cert_dir / "fullchain.pem"
+        key_path = cert_dir / "privkey.pem"
+        add("nginx_config", (PROJECT_ROOT / "deploy" / "nginx.conf").is_file(), "configuração Nginx presente")
+        add("tls_certificate", cert_path.is_file(), "certificado TLS presente" if cert_path.is_file() else "gere certificado real; autoassinado só serve para teste")
+        add("tls_private_key", key_path.is_file() and key_path.stat().st_mode & 0o077 == 0, "chave TLS presente e restrita")
+        tls_url = os.getenv("TLS_PREFLIGHT_URL", "https://127.0.0.1:8443/")
+        parsed = urlparse(tls_url)
+        tls_ok = False
+        tls_detail = "endpoint TLS não testado"
+        try:
+            if parsed.scheme != "https" or not parsed.hostname:
+                raise ValueError("TLS_PREFLIGHT_URL inválida")
+            port = parsed.port or 443
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            with socket.create_connection((parsed.hostname, port), timeout=3) as raw:
+                with context.wrap_socket(raw, server_hostname=parsed.hostname) as secure:
+                    tls_ok = secure.version() in {"TLSv1.2", "TLSv1.3"}
+                    tls_detail = secure.version() or "versão TLS desconhecida"
+        except Exception as exc:
+            tls_detail = f"falha: {type(exc).__name__}"
+        add("nginx_tls_reachable", tls_ok, tls_detail)
+    if _bool_env("FIREWALL_PREFLIGHT_REQUIRED", False):
+        add("firewall_tool", shutil.which("iptables") is not None, "iptables disponível; regras devem ser auditadas no VPS")
 
     for path_value in (os.getenv("DATA_DIR", "data"), os.getenv("MODEL_DIR", "models"), os.getenv("LOG_DIR", "logs")):
         path = Path(path_value)

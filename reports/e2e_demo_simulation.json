@@ -1,0 +1,759 @@
+{
+  "status": "passed",
+  "orders_requested": 100,
+  "unique_client_order_ids": 100,
+  "result_counts": {
+    "filled": 71,
+    "partially_filled": 21,
+    "idempotent_recovered": 8
+  },
+  "fault_counts": {
+    "filled": 71,
+    "rejected": 10,
+    "partial_fill": 21,
+    "timeout": 8
+  },
+  "timeout_recoveries": 8,
+  "protection_orders": 184,
+  "fallback_cancel_status": "success",
+  "native_oco_mode": "native_oco",
+  "native_oco_protections": 2,
+  "reconciliation": {
+    "status": "ok",
+    "id": 1,
+    "account_id": "default_account",
+    "open_orders_count": 29,
+    "positions_count": 92,
+    "remote_orders": [
+      {
+        "order_id": "demo-3",
+        "client_order_id": "demo-parent-0001",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "partially_filled",
+        "filled_quantity": 0.005,
+        "filled_price": 100.0
+      },
+      {
+        "order_id": "demo-4",
+        "client_order_id": "demo-parent-0002",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "partially_filled",
+        "filled_quantity": 0.005,
+        "filled_price": 100.0
+      },
+      {
+        "order_id": "demo-8",
+        "client_order_id": "demo-parent-0006",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "open",
+        "filled_quantity": 0.0,
+        "filled_price": 100.0
+      },
+      {
+        "order_id": "demo-11",
+        "client_order_id": "demo-parent-0008",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "partially_filled",
+        "filled_quantity": 0.005,
+        "filled_price": 100.0
+      },
+      {
+        "order_id": "demo-14",
+        "client_order_id": "demo-parent-0010",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "partially_filled",
+        "filled_quantity": 0.005,
+        "filled_price": 100.0
+      },
+      {
+        "order_id": "demo-17",
+        "client_order_id": "demo-parent-0013",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "partially_filled",
+        "filled_quantity": 0.005,
+        "filled_price": 100.0
+      },
+      {
+        "order_id": "demo-24",
+        "client_order_id": "demo-parent-0019",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "open",
+        "filled_quantity": 0.0,
+        "filled_price": 100.0
+      },
+      {
+        "order_id": "demo-27",
+        "client_order_id": "demo-parent-0022",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "open",
+        "filled_quantity": 0.0,
+        "filled_price": 100.0
+      },
+      {
+        "order_id": "demo-28",
+        "client_order_id": "demo-parent-0023",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "open",
+        "filled_quantity": 0.0,
+        "filled_price": 100.0
+      },
+      {
+        "order_id": "demo-43",
+        "client_order_id": "demo-parent-0037",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "partially_filled",
+        "filled_quantity": 0.005,
+        "filled_price": 100.0
+      },
+      {
+        "order_id": "demo-44",
+        "client_order_id": "demo-parent-0038",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "partially_filled",
+        "filled_quantity": 0.005,
+        "filled_price": 100.0
+      },
+      {
+        "order_id": "demo-46",
+        "client_order_id": "demo-parent-0039",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "partially_filled",
+        "filled_quantity": 0.005,
+        "filled_price": 100.0
+      },
+      {
+        "order_id": "demo-47",
+        "client_order_id": "demo-parent-0040",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "open",
+        "filled_quantity": 0.0,
+        "filled_price": 100.0
+      },
+      {
+        "order_id": "demo-48",
+        "client_order_id": "demo-parent-0041",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "partially_filled",
+        "filled_quantity": 0.005,
+        "filled_price": 100.0
+      },
+      {
+        "order_id": "demo-52",
+        "client_order_id": "demo-parent-0045",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "partially_filled",
+        "filled_quantity": 0.005,
+        "filled_price": 100.0
+      },
+      {
+        "order_id": "demo-53",
+        "client_order_id": "demo-parent-0046",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "partially_filled",
+        "filled_quantity": 0.005,
+        "filled_price": 100.0
+      },
+      {
+        "order_id": "demo-57",
+        "client_order_id": "demo-parent-0050",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "partially_filled",
+        "filled_quantity": 0.005,
+        "filled_price": 100.0
+      },
+      {
+        "order_id": "demo-59",
+        "client_order_id": "demo-parent-0052",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "partially_filled",
+        "filled_quantity": 0.005,
+        "filled_price": 100.0
+      },
+      {
+        "order_id": "demo-67",
+        "client_order_id": "demo-parent-0060",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "partially_filled",
+        "filled_quantity": 0.005,
+        "filled_price": 100.0
+      },
+      {
+        "order_id": "demo-70",
+        "client_order_id": "demo-parent-0062",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "partially_filled",
+        "filled_quantity": 0.005,
+        "filled_price": 100.0
+      },
+      {
+        "order_id": "demo-71",
+        "client_order_id": "demo-parent-0063",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "partially_filled",
+        "filled_quantity": 0.005,
+        "filled_price": 100.0
+      },
+      {
+        "order_id": "demo-79",
+        "client_order_id": "demo-parent-0071",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "partially_filled",
+        "filled_quantity": 0.005,
+        "filled_price": 100.0
+      },
+      {
+        "order_id": "demo-80",
+        "client_order_id": "demo-parent-0072",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "partially_filled",
+        "filled_quantity": 0.005,
+        "filled_price": 100.0
+      },
+      {
+        "order_id": "demo-82",
+        "client_order_id": "demo-parent-0074",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "partially_filled",
+        "filled_quantity": 0.005,
+        "filled_price": 100.0
+      },
+      {
+        "order_id": "demo-86",
+        "client_order_id": "demo-parent-0078",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "partially_filled",
+        "filled_quantity": 0.005,
+        "filled_price": 100.0
+      },
+      {
+        "order_id": "demo-89",
+        "client_order_id": "demo-parent-0081",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "open",
+        "filled_quantity": 0.0,
+        "filled_price": 100.0
+      },
+      {
+        "order_id": "demo-91",
+        "client_order_id": "demo-parent-0082",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "open",
+        "filled_quantity": 0.0,
+        "filled_price": 100.0
+      },
+      {
+        "order_id": "demo-105",
+        "client_order_id": "demo-parent-0094",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "partially_filled",
+        "filled_quantity": 0.005,
+        "filled_price": 100.0
+      },
+      {
+        "order_id": "demo-107",
+        "client_order_id": "demo-parent-0096",
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "status": "open",
+        "filled_quantity": 0.0,
+        "filled_price": 100.0
+      }
+    ],
+    "remote_positions": [
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.005
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.005
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.005
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.005
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.005
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.005
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.005
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.005
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.005
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.005
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.005
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.005
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.005
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.005
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.005
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.005
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.005
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.005
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.005
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.005
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.005
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      },
+      {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01
+      }
+    ],
+    "untracked_remote_client_order_ids": [],
+    "local_intents_without_remote_order": [],
+    "local_positions": []
+  },
+  "consistent": true,
+  "live_trading_enabled": false,
+  "orders_sent_to_real_broker": 0
+}

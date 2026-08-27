@@ -14,7 +14,6 @@ def setup_telemetry(app):
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
         from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-        from opentelemetry.instrumentation.requests import RequestsInstrumentor
 
         resource = Resource.create({
             "service.name": settings.OTEL_SERVICE_NAME,
@@ -28,7 +27,6 @@ def setup_telemetry(app):
         trace.set_tracer_provider(provider)
 
         FastAPIInstrumentor.instrument_app(app)
-        RequestsInstrumentor().instrument()
         logger.info("OpenTelemetry configurado com sucesso.")
     except Exception as e:
         logger.warning(

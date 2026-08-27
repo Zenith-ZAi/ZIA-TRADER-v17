@@ -25,8 +25,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from config.settings import Settings, settings as default_settings
 from core.backtest_engine import BacktestEngine
+from core.dataset_integrity import validate_ohlcv
 from database_manager import DatabaseManager
-from scripts.fetch_binance_ohlcv import INTERVAL_MS, fetch
+from scripts.fetch_binance_ohlcv import INTERVAL_MS, fetch_async
 
 
 def _parse_datetime(value: str | None) -> datetime | None:
@@ -120,7 +121,7 @@ async def run_monthly_backtest(
             continue
         dataset_path = data_dir / f"{symbol.lower()}_{interval}.csv"
         try:
-            frame_raw = fetch(
+            frame_raw = await fetch_async(
                 symbol,
                 interval,
                 interval_bars,
@@ -129,6 +130,7 @@ async def run_monthly_backtest(
             )
             frame_raw.to_csv(dataset_path, index=False, date_format="%Y-%m-%dT%H:%M:%S.%fZ")
             frame = _dataset_frame(dataset_path)
+            integrity = validate_ohlcv(frame, timeframe=interval, require_closed=True, reject_gaps=False, min_coverage=0.95)
             if len(frame) < 40:
                 raise RuntimeError(f"dataset insuficiente após remover candles abertos: {len(frame)} barras")
             backtest = await engine.run(symbol.replace("USDT", "/USDT"), frame, "VPS Monthly Historical")
@@ -156,6 +158,7 @@ async def run_monthly_backtest(
                     "path": str(dataset_path),
                     "rows": len(frame),
                     "sha256": _sha256(dataset_path),
+                    "integrity": integrity,
                     "start": frame.index.min().isoformat(),
                     "end": frame.index.max().isoformat(),
                 },

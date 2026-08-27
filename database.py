@@ -318,3 +318,24 @@ class BacktestRun(Base):
     configuration_json = Column(JSON)
     result_json = Column(JSON)
     created_at = Column(DateTime, default=utc_now, index=True)
+
+
+class DecisionSnapshot(Base):
+    """Contexto imutável de uma decisão para paridade live, shadow e replay."""
+    __tablename__ = "decision_snapshots"
+    id = Column(Integer, primary_key=True)
+    snapshot_id = Column(String, unique=True, nullable=False, index=True)
+    symbol = Column(String, nullable=False, index=True)
+    timeframe = Column(String, nullable=False, default="1h")
+    mode = Column(String, nullable=False, default="shadow")
+    observed_at = Column(DateTime, nullable=False, default=utc_now, index=True)
+    dataset_path = Column(String)
+    dataset_sha256 = Column(String)
+    feature_hash = Column(String)
+    action = Column(String, nullable=False, default="hold")
+    candidate_action = Column(String, nullable=False, default="hold")
+    confidence = Column(Float, default=0.0)
+    gate_status = Column(String, nullable=False, default="blocked")
+    before_context_json = Column(JSON, nullable=False, default=dict)
+    after_context_json = Column(JSON)
+    created_at = Column(DateTime, default=utc_now, index=True)

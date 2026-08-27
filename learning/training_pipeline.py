@@ -16,6 +16,7 @@ from sklearn.metrics import f1_score, precision_score, recall_score, balanced_ac
 from ai.ensemble_model import EnsembleModel
 from ai.train_ensemble import load_ohlcv
 from core.feature_pipeline import FeaturePipeline
+from core.dataset_integrity import sha256_file, sha256_frame, validate_ohlcv
 
 
 LABEL_TO_ACTION = {0: "sell", 1: "hold", 2: "buy"}
@@ -70,6 +71,20 @@ def _predict(model: EnsembleModel, features: pd.DataFrame) -> list[tuple[str, fl
     return [model.predict(row.to_frame().T) for _, row in features.iterrows()]
 
 
+def _brier_score(predicted: list[tuple[str, float]], y_true: pd.Series) -> float:
+    """Brier multiclasses usando confiança do rótulo previsto e distribuição conservadora."""
+    if not predicted:
+        return 1.0
+    scores = []
+    for (action, confidence), truth in zip(predicted, y_true.astype(int).tolist()):
+        probability = np.full(3, max(0.0, min(1.0, (1.0 - float(confidence)) / 2.0)), dtype=float)
+        probability[ACTION_TO_LABEL.get(action, 1)] = max(0.0, min(1.0, float(confidence)))
+        target = np.zeros(3, dtype=float)
+        target[int(truth)] = 1.0
+        scores.append(float(np.sum((probability - target) ** 2)))
+    return float(np.mean(scores)) if scores else 1.0
+
+
 def train_oos(
     source: str | Path,
     model_dir: str | Path = "models",
@@ -78,10 +93,14 @@ def train_oos(
     sell_threshold: float = -0.001,
     train_fraction: float = 0.60,
     validation_fraction: float = 0.20,
-    min_validation_f1: float = 0.34,
+    min_validation_f1: float = 0.35,
+    min_oos_sharpe: float = 0.5,
+    max_brier: float = 0.2,
 ) -> Dict[str, Any]:
     """Treina candidato e só publica se superar o modelo anterior ou o piso inicial."""
     ohlcv = load_ohlcv(source)
+    dataset_integrity = validate_ohlcv(ohlcv, require_closed=True, reject_gaps=False, min_coverage=0.95)
+    dataset_sha256 = sha256_file(source) if Path(source).is_file() else sha256_frame(ohlcv)
     pipeline = FeaturePipeline()
     features, labels = pipeline.build_supervised(ohlcv, horizon, buy_threshold, sell_threshold)
     if len(features) < 180:
@@ -138,11 +157,17 @@ def train_oos(
         candidate_metadata["validation_metrics"] = valid_metrics
         candidate_metadata["test_metrics"] = test_metrics
         candidate_metadata["calibration"] = _calibration(test_predictions, y_test)
+        candidate_metadata["calibration_brier"] = _brier_score(test_predictions, y_test)
+        candidate_metadata["dataset_sha256"] = dataset_sha256
+        candidate_metadata["dataset_integrity"] = dataset_integrity
         candidate_metadata["decision"] = "candidate_only"
 
         previous_f1 = float(((previous_metadata.get("validation_metrics") or {}).get("f1_macro", -1.0)))
-        accepted = valid_metrics["f1_macro"] >= float(min_validation_f1) and (
-            previous_f1 < 0.0 or valid_metrics["f1_macro"] > previous_f1
+        accepted = (
+            valid_metrics["f1_macro"] >= float(min_validation_f1)
+            and test_metrics["sharpe_proxy"] > float(min_oos_sharpe)
+            and candidate_metadata["calibration_brier"] < float(max_brier)
+            and (previous_f1 < 0.0 or valid_metrics["f1_macro"] > previous_f1)
         )
         if accepted:
             backup = model_path / f"rollback_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
@@ -153,9 +178,9 @@ def train_oos(
                     shutil.copy2(current, backup / filename)
             for filename in ("rf_model.joblib", "xgb_model.joblib"):
                 shutil.copy2(Path(temp_dir) / filename, model_path / filename)
-            (model_path / "ensemble_metadata.json").write_text(json.dumps(candidate_metadata, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
             candidate_metadata["decision"] = "accepted"
             candidate_metadata["rollback_backup"] = str(backup)
+            (model_path / "ensemble_metadata.json").write_text(json.dumps(candidate_metadata, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
         return candidate_metadata
 
 
@@ -168,9 +193,11 @@ def main() -> None:
     parser.add_argument("--horizon", type=int, default=3)
     parser.add_argument("--buy-threshold", type=float, default=0.001)
     parser.add_argument("--sell-threshold", type=float, default=-0.001)
-    parser.add_argument("--min-validation-f1", type=float, default=0.34)
+    parser.add_argument("--min-validation-f1", type=float, default=0.35)
+    parser.add_argument("--min-oos-sharpe", type=float, default=0.5)
+    parser.add_argument("--max-brier", type=float, default=0.2)
     args = parser.parse_args()
-    print(json.dumps(train_oos(args.dataset, args.model_dir, args.horizon, args.buy_threshold, args.sell_threshold, min_validation_f1=args.min_validation_f1), ensure_ascii=False, indent=2, default=str))
+    print(json.dumps(train_oos(args.dataset, args.model_dir, args.horizon, args.buy_threshold, args.sell_threshold, min_validation_f1=args.min_validation_f1, min_oos_sharpe=args.min_oos_sharpe, max_brier=args.max_brier), ensure_ascii=False, indent=2, default=str))
 
 
 if __name__ == "__main__":

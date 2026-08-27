@@ -1,18 +1,17 @@
-#!/usr/bin/env python3
 """Baixa OHLCV público da Binance sem autenticação ou endpoints de trading."""
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hashlib
-import os
 import json
-import time
-from datetime import datetime, timedelta, timezone
+import os
+from datetime import datetime, timezone
 from pathlib import Path
 
+import httpx
 import pandas as pd
-import requests
 
 
 URL = f"{os.getenv('BINANCE_PUBLIC_BASE_URL', 'https://data-api.binance.vision').rstrip('/')}/api/v3/klines"
@@ -30,31 +29,40 @@ INTERVAL_MS = {
 }
 
 
-def _request_page(session: requests.Session, params: dict, timeout: int) -> list:
+async def _request_page(client: httpx.AsyncClient, params: dict, timeout: float) -> list:
     for attempt in range(4):
-        response = session.get(
-            URL,
-            params=params,
-            headers={"User-Agent": "ZIA-TRADER-public-ohlcv/1.1"},
-            timeout=timeout,
-        )
-        if response.status_code in {418, 429, 500, 502, 503, 504}:
-            retry_after = float(response.headers.get("Retry-After", "1"))
-            time.sleep(min(8.0, retry_after * (attempt + 1)))
-            continue
-        response.raise_for_status()
-        payload = response.json()
-        if isinstance(payload, dict):
-            raise RuntimeError(f"Binance retornou erro público: {payload}")
-        return payload
+        try:
+            response = await client.get(
+                URL,
+                params=params,
+                headers={"User-Agent": "ZIA-TRADER-public-ohlcv/1.2"},
+                timeout=timeout,
+            )
+            if response.status_code in {418, 429, 500, 502, 503, 504}:
+                retry_after = response.headers.get("Retry-After", "1")
+                try:
+                    delay = float(retry_after)
+                except (TypeError, ValueError):
+                    delay = 1.0
+                await asyncio.sleep(min(8.0, max(0.1, delay) * (attempt + 1)))
+                continue
+            response.raise_for_status()
+            payload = response.json()
+            if isinstance(payload, dict):
+                raise RuntimeError(f"Binance retornou erro público: {payload}")
+            return payload
+        except (httpx.TimeoutException, httpx.NetworkError):
+            if attempt == 3:
+                raise
+            await asyncio.sleep(min(8.0, 0.5 * (attempt + 1)))
     raise RuntimeError("Binance não respondeu após tentativas de retry")
 
 
-def fetch(
+async def fetch_async(
     symbol: str,
     interval: str,
     limit: int,
-    timeout: int = 20,
+    timeout: float = 20,
     start_time_ms: int | None = None,
     end_time_ms: int | None = None,
 ) -> pd.DataFrame:
@@ -62,31 +70,35 @@ def fetch(
         raise ValueError(f"intervalo não suportado pelo coletor: {interval}")
     if not 1 <= limit <= 100_000:
         raise ValueError("limit deve estar entre 1 e 100000")
-    session = requests.Session()
     step = INTERVAL_MS[interval]
     now_ms = end_time_ms or int(datetime.now(timezone.utc).timestamp() * 1000)
     cursor_ms = start_time_ms if start_time_ms is not None else now_ms - limit * step
     pages: list[list] = []
     remaining = limit
-    while remaining > 0:
-        page_limit = min(1000, remaining)
-        payload = _request_page(
-            session,
-            {"symbol": symbol.upper(), "interval": interval, "limit": page_limit, "startTime": cursor_ms, "endTime": now_ms},
-            timeout,
-        )
-        if not payload:
-            break
-        pages.extend(payload)
-        remaining = limit - len(pages)
-        last_open_ms = int(payload[-1][0])
-        next_cursor = last_open_ms + step
-        if next_cursor <= cursor_ms:
-            break
-        cursor_ms = next_cursor
-        if len(payload) < page_limit:
-            break
-        time.sleep(0.08)
+    async with httpx.AsyncClient(
+        limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+        timeout=httpx.Timeout(timeout, connect=min(5.0, timeout)),
+        follow_redirects=False,
+    ) as client:
+        while remaining > 0:
+            page_limit = min(1000, remaining)
+            payload = await _request_page(
+                client,
+                {"symbol": symbol.upper(), "interval": interval, "limit": page_limit, "startTime": cursor_ms, "endTime": now_ms},
+                timeout,
+            )
+            if not payload:
+                break
+            pages.extend(payload)
+            remaining = limit - len(pages)
+            last_open_ms = int(payload[-1][0])
+            next_cursor = last_open_ms + step
+            if next_cursor <= cursor_ms:
+                break
+            cursor_ms = next_cursor
+            if len(payload) < page_limit:
+                break
+            await asyncio.sleep(0.08)
 
     frame = pd.DataFrame(pages, columns=COLUMNS)
     if frame.empty:
@@ -99,8 +111,7 @@ def fetch(
         frame[column] = pd.to_numeric(frame[column], errors="raise")
     frame["open_time"] = pd.to_datetime(frame["open_time"], unit="ms", utc=True)
     frame["close_time"] = pd.to_datetime(frame["close_time"], unit="ms", utc=True)
-    now = pd.Timestamp.now(tz="UTC")
-    frame = frame[frame["close_time"] < now].copy()
+    frame = frame[frame["close_time"] < pd.Timestamp.now(tz="UTC")].copy()
     frame = frame.sort_values("open_time").drop_duplicates("open_time", keep="last")
     if frame["open_time"].duplicated().any():
         raise RuntimeError("duplicata de open_time após normalização")
@@ -111,6 +122,18 @@ def fetch(
         "quote_asset_volume", "number_of_trades", "taker_buy_base_volume",
         "taker_buy_quote_volume",
     ]].reset_index(drop=True)
+
+
+def fetch(
+    symbol: str,
+    interval: str,
+    limit: int,
+    timeout: float = 20,
+    start_time_ms: int | None = None,
+    end_time_ms: int | None = None,
+) -> pd.DataFrame:
+    """Compatibilidade síncrona para os jobs CLI; o transporte real é assíncrono."""
+    return asyncio.run(fetch_async(symbol, interval, limit, timeout, start_time_ms, end_time_ms))
 
 
 def main() -> None:

@@ -8,6 +8,7 @@ from config.settings import Settings
 from core.backtest_engine import BacktestEngine
 from core.market_signals import calculate_market_signal
 from data.news_processor import NewsProcessor
+from tests.fakes import FakeAsyncHTTP
 from database import MarketType
 from database_manager import DatabaseManager
 from risk.risk_ai import RiskAI
@@ -105,26 +106,15 @@ def test_risk_ai_limits_daily_loss_and_exposure(tmp_path):
     assert "diária" in blocked_loss["reason"]
 
 
-def test_news_processor_uses_free_sources_without_mock_news(monkeypatch):
+def test_news_processor_uses_free_sources_without_mock_news():
     settings = make_settings()
-    processor = NewsProcessor(settings)
 
-    class FakeResponse:
-        def __init__(self, payload):
-            self.payload = payload
-
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return self.payload
-
-    def fake_get(url, params, headers, timeout):
+    def fake_get(url, params, headers):
         if "gdelt" in url:
-            return FakeResponse({"articles": [{"title": "Bitcoin bullish growth", "url": "https://example.test/a", "seendate": "20260817T120000Z"}]})
-        return FakeResponse({"coins": [{"item": {"symbol": "BTC", "name": "Bitcoin", "market_cap_rank": 1, "data": {}}}]})
+            return {"articles": [{"title": "Bitcoin bullish growth", "url": "https://example.test/a", "seendate": "20260817T120000Z"}]}
+        return {"coins": [{"item": {"symbol": "BTC", "name": "Bitcoin", "market_cap_rank": 1, "data": {}}}]}
 
-    monkeypatch.setattr("data.news_processor.requests.get", fake_get)
+    processor = NewsProcessor(settings, http_client=FakeAsyncHTTP(fake_get))
     articles = asyncio.run(processor.fetch_all(["BTC/USDT"]))
     trends = asyncio.run(processor.fetch_trending(["BTC/USDT"]))
 
@@ -134,26 +124,15 @@ def test_news_processor_uses_free_sources_without_mock_news(monkeypatch):
     assert processor.health()["gdelt"]["ok"] is True
 
 
-def test_optional_benzinga_trend_provider(monkeypatch):
+def test_optional_benzinga_trend_provider():
     settings = make_settings(BENZINGA_API_KEY="test-token")
-    processor = NewsProcessor(settings)
 
-    class FakeResponse:
-        def __init__(self, payload):
-            self.payload = payload
-
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return self.payload
-
-    def fake_get(url, params, headers, timeout):
+    def fake_get(url, params, headers):
         if "trending-tickers" in url:
-            return FakeResponse({"data": [{"ticker": "BTC", "metrics": [{"scaled_count_mavg": 0.82, "count": 42}]}]})
-        return FakeResponse({"coins": []})
+            return {"data": [{"ticker": "BTC", "metrics": [{"scaled_count_mavg": 0.82, "count": 42}]}]}
+        return {"coins": []}
 
-    monkeypatch.setattr("data.news_processor.requests.get", fake_get)
+    processor = NewsProcessor(settings, http_client=FakeAsyncHTTP(fake_get))
     trends = asyncio.run(processor.fetch_trending(["BTC/USDT"]))
     paid = [trend for trend in trends if trend["provider"] == "Benzinga"]
     assert paid[0]["trend_score"] == 0.82

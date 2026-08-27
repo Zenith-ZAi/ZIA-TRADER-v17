@@ -21,7 +21,7 @@ from core.backtest_engine import BacktestEngine
 from risk.correlation_manager import CorrelationManager
 from risk.sharpe_analyzer import SharpeAnalyzer
 from risk.strategy_optimizer import OptimizationBudget, StrategyOptimizer
-from scripts.fetch_binance_ohlcv import fetch
+from scripts.fetch_binance_ohlcv import fetch_async
 
 
 DEFAULT_ASSETS = [
@@ -97,13 +97,13 @@ def monte_carlo_sharpe(returns: pd.Series, periods_per_year: int, horizon_period
     }
 
 
-def fetch_assets(symbols: list[str], interval: str, limit: int, output_dir: Path) -> tuple[dict[str, pd.DataFrame], dict[str, str]]:
+async def fetch_assets(symbols: list[str], interval: str, limit: int, output_dir: Path) -> tuple[dict[str, pd.DataFrame], dict[str, str]]:
     output_dir.mkdir(parents=True, exist_ok=True)
     datasets: dict[str, pd.DataFrame] = {}
     errors: dict[str, str] = {}
     for symbol in symbols:
         try:
-            frame = fetch(symbol, interval, limit)
+            frame = await fetch_async(symbol, interval, limit)
             path = output_dir / f"{symbol.lower()}_{interval}.csv"
             frame.to_csv(path, index=False, date_format="%Y-%m-%dT%H:%M:%S.%fZ")
             datasets[symbol] = frame.rename(columns={"open_time": "timestamp"}).set_index("timestamp")[["open", "high", "low", "close", "volume"]]
@@ -148,7 +148,7 @@ async def run_protocol(dataset_path: Path, symbols: list[str], asset_limit: int,
             year_results[str(year)] = {"status": "insufficient_data", "rows": len(year_frame)}
 
     requested_assets = [symbol.upper() for symbol in symbols[: max(1, int(asset_limit))]]
-    asset_data, fetch_errors = fetch_assets(requested_assets, "1h", 8760, assets_dir)
+    asset_data, fetch_errors = await fetch_assets(requested_assets, "1h", 8760, assets_dir)
     price_data = {symbol: frame["close"] for symbol, frame in asset_data.items()}
     correlation = CorrelationManager(
         low_correlation_threshold=settings.PORTFOLIO_LOW_CORRELATION_THRESHOLD,
