@@ -1,0 +1,36 @@
+{
+  "status": "passed",
+  "dataset": {
+    "path": "data/replay_btcusdt_1h.csv",
+    "rows": 499,
+    "start": "2026-08-04T20:00:00+00:00",
+    "end": "2026-08-25T14:00:00+00:00"
+  },
+  "checks": {
+    "feature_schema_nonempty": true,
+    "causal_signal_unchanged_by_future_mutation": true,
+    "bullish_flow_2x1": true,
+    "empty_flow_is_neutral": true,
+    "signal_is_non_executing": true,
+    "microstructure_has_decision": true,
+    "news_fail_closed_without_context": true,
+    "circuit_breaker_trips": true,
+    "backtest_returns_result": true,
+    "no_live_flags": true
+  },
+  "signal": {
+    "action": "hold",
+    "candidate_action": "buy",
+    "score": 0.2943485193394769
+  },
+  "backtest": {
+    "status": "ok",
+    "trades_executed": 12,
+    "total_pnl": 184.4034270411903,
+    "return_pct": 0.018440342704119095,
+    "sharpe_ratio": 1.2319346578661905,
+    "maximum_drawdown": -0.006061013864200751
+  },
+  "live_trading_enabled": false,
+  "orders_sent": 0
+}

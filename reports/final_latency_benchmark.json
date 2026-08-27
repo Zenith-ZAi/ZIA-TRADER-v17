@@ -1,0 +1,103 @@
+{
+  "dataset": {
+    "rows": 499,
+    "start": "2026-08-04T20:00:00+00:00",
+    "end": "2026-08-25T14:00:00+00:00"
+  },
+  "model_trained": false,
+  "runs": 5,
+  "units": "milliseconds; perf_counter_ns; local process only",
+  "network_and_exchange": "not measured by this benchmark; Binance REST/WebSocket, TLS, routing, queueing and matching-engine latency are outside the local decision timer",
+  "results": [
+    {
+      "component": "causal_feature_frame",
+      "runs": 5,
+      "min_ms": 6.874204,
+      "p50_ms": 7.144054,
+      "p95_ms": 8.029705,
+      "p99_ms": 8.029705,
+      "max_ms": 8.029705,
+      "mean_ms": 7.287518799999999
+    },
+    {
+      "component": "ensemble_predict",
+      "runs": 5,
+      "min_ms": 0.000261,
+      "p50_ms": 0.000332,
+      "p95_ms": 0.001492,
+      "p99_ms": 0.001492,
+      "max_ms": 0.001492,
+      "mean_ms": 0.0005826
+    },
+    {
+      "component": "pullback_cache_build",
+      "runs": 5,
+      "min_ms": 68.999821,
+      "p50_ms": 71.090575,
+      "p95_ms": 72.016186,
+      "p99_ms": 72.016186,
+      "max_ms": 72.016186,
+      "mean_ms": 70.98237759999999
+    },
+    {
+      "component": "market_signal_with_pullback",
+      "runs": 5,
+      "min_ms": 53.41231,
+      "p50_ms": 54.850751,
+      "p95_ms": 55.273504,
+      "p99_ms": 55.273504,
+      "max_ms": 55.273504,
+      "mean_ms": 54.5536192
+    },
+    {
+      "component": "market_signal_cached_pullback",
+      "runs": 5,
+      "min_ms": 4.903566,
+      "p50_ms": 4.954544,
+      "p95_ms": 5.117164,
+      "p99_ms": 5.117164,
+      "max_ms": 5.117164,
+      "mean_ms": 4.9935496
+    },
+    {
+      "component": "pullback_only",
+      "runs": 5,
+      "min_ms": 47.377265,
+      "p50_ms": 48.115775,
+      "p95_ms": 48.731448,
+      "p99_ms": 48.731448,
+      "max_ms": 48.731448,
+      "mean_ms": 48.0421546
+    },
+    {
+      "component": "whale_empty_book_baseline",
+      "runs": 5,
+      "min_ms": 0.001075,
+      "p50_ms": 0.001679,
+      "p95_ms": 0.009506,
+      "p99_ms": 0.009506,
+      "max_ms": 0.009506,
+      "mean_ms": 0.0034008000000000003
+    },
+    {
+      "component": "combined_local_decision",
+      "runs": 5,
+      "min_ms": 60.154407,
+      "p50_ms": 62.399563,
+      "p95_ms": 63.842846,
+      "p99_ms": 63.842846,
+      "max_ms": 63.842846,
+      "mean_ms": 62.101902800000005
+    },
+    {
+      "component": "combined_local_decision_cached",
+      "runs": 5,
+      "min_ms": 12.13486,
+      "p50_ms": 12.565228,
+      "p95_ms": 13.724387,
+      "p99_ms": 13.724387,
+      "max_ms": 13.724387,
+      "mean_ms": 12.7194492
+    }
+  ]
+}

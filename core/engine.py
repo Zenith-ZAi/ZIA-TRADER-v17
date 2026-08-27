@@ -374,8 +374,11 @@ class RoboTraderUnified:
                     except Exception as exc:
                         logger.warning("[%s] Saldo privado indisponível para sizing: %s", symbol, exc)
                         exchange_balances = {}
+                    balance_data_available = isinstance(exchange_balances, dict) and bool(exchange_balances)
                     account_state = self.db_manager.get_account_state(self.account_id)
-                    account_balance = self.risk_ai.quote_equivalent_balance(exchange_balances, symbol, current_price) or (account_state.balance if account_state else 0.0)
+                    local_balance = account_state.balance if account_state else 0.0
+                    exchange_balance = self.risk_ai.quote_equivalent_balance(exchange_balances, symbol, current_price) if balance_data_available else 0.0
+                    account_balance = exchange_balance or (local_balance if not self.settings.AUTONOMOUS_TRADING_ENABLED else 0.0)
                     daily_pnl_obj = self.db_manager.get_daily_pnl(self.account_id, datetime.now(timezone.utc).replace(tzinfo=None))
                     daily_pnl = float(daily_pnl_obj.pnl) if daily_pnl_obj else 0.0
                     circuit_breaker = evaluate_circuit_breaker(
@@ -431,6 +434,7 @@ class RoboTraderUnified:
                         "historical_data": historical_data,
                         "current_order_flow": current_order_flow,
                         "exchange_balances": exchange_balances,
+                        "balance_data_available": balance_data_available,
                         "news_sentiment": avg_sentiment,
                         "trend_score": trend_score,
                         "news_count": len(processed_news),
@@ -520,6 +524,7 @@ class RoboTraderUnified:
                     safety_entry_allowed = bool(
                         not self.autonomy_blocked
                         and not circuit_breaker["tripped"]
+                        and (balance_data_available or not self.settings.AUTONOMOUS_TRADING_ENABLED)
                         and news_gate["entry_allowed"]
                         and multi_timeframe_ok
                         and microstructure["allowed"]
