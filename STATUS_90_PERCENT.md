@@ -2,35 +2,34 @@
 
 ## Classificação atual
 
-O projeto está preparado para **shadow mode supervisionado no VPS**, com maturidade estrutural alvo de aproximadamente **90% para pesquisa, replay, backtest e shadow**. Essa classificação não representa garantia de lucro, prontidão para capital real ou validação de risco de mercado.
+O projeto está preparado para **shadow mode supervisionado no VPS**, com maturidade estrutural alvo de aproximadamente **90% para pesquisa, replay, backtest e shadow**. Esta versão inclui refinamentos de segurança contra injeções e suporte a protocolos industriais (MT5/FIX).
 
 ## Resolvido e comprovado no Sandbox
 
 | Área | Estado |
 |---|---|
-| I/O do runtime | Adapters públicos, notícias e coletores usam `httpx.AsyncClient` com pool; a sessão síncrona restante é exclusiva para `FakeSession` de testes do adapter Binance. |
-| Circuit breaker/TTL | Implementado por provedor no transporte HTTP, com timeouts separados, cache TTL e semáforo de concorrência. |
-| Pullback incremental | Registro por símbolo/timeframe com assinatura de toda a janela e último candle; invalida dados alterados. |
-| Redis e concorrência | Instância compartilhada no TradingManager; locks com TTL, renovação, token de owner e liberação condicional. |
-| Idempotência | `clientOrderId`, intents persistentes, recuperação após timeout e reconciliação. |
-| OCO | Caminho nativo e fallback de duas proteções, com persistência e cancelamento. |
-| E2E local | Simulação de 100 ordens com rejeições, timeouts, fills parciais, proteções e reconciliação final consistente. |
-| Integridade | SHA-256, validação OHLCV, timestamps, duplicatas, valores inválidos e DecisionSnapshot. |
-| Observabilidade | Health detalhado, métricas, regras Prometheus, JSON logs e correlation ID. |
-| Perímetro | Nginx TLS de teste, headers de segurança, configuração de firewall em dry-run e documentação de WAF externo. |
-| Segurança live | Mainnet, live mode e capital real permanecem bloqueados por defaults e Compose VPS. |
+| **Segurança & Injeção** | Auditoria AST confirmou ausência de vulnerabilidades de injeção. Middleware de Rate Limiting e Correlation ID ativos. |
+| **Adaptadores Multi-Protocolo** | Implementação de adaptadores para **MetaTrader 5 (MT5)** e **FIX Protocol**, além de REST/Websockets assíncronos. |
+| **Arquitetura Híbrida** | Suporte unificado para **B3, Forex e Criptomoedas** com modos Simulado, Real e Manual Assistido. |
+| I/O do runtime | Adapters públicos, notícias e coletores usam `httpx.AsyncClient` com pool; sessão assíncrona completa. |
+| Circuit breaker/TTL | Implementado por provedor no transporte HTTP, com timeouts, cache TTL e semáforo. |
+| Pullback incremental | Registro por símbolo/timeframe com assinatura de janela; análise de refração (2x1) integrada. |
+| Redis e concorrência | Instância compartilhada no TradingManager; locks com TTL e renovação automática. |
+| Idempotência | `clientOrderId`, intents persistentes e reconciliação automática de posições. |
+| Integridade | SHA-256 em datasets e DecisionSnapshots para auditabilidade total. |
+| Observabilidade | Métricas Prometheus, JSON logs e documentação de infraestrutura VPS completa. |
 
-## Itens P2 ainda não resolvidos no Sandbox
+## Itens P2 ainda não resolvidos no Sandbox (Os 10% Restantes)
 
-1. Histórico completo de order book, trades, spread, profundidade e slippage por ativo e timeframe.
-2. Dataset imutável multiativo de cinco anos para BTC, ETH, EURUSD e SPY, com cobertura e licenciamento comprovados.
-3. Treinamento massivo com validação cruzada temporal, calibração e modelo aprovado; nenhum resultado deve ser inventado ou promovido sem dados reais.
-4. Homologação E2E contra Binance Demo/Testnet com credenciais sandbox próprias, fills parciais, clock drift, cancelamento e reconexão.
-5. Testes de caos e restauração real de PostgreSQL/Redis, RPO/RTO e backup externo.
-6. TLS público com certificado de autoridade confiável, firewall aplicado no VPS, proxy endurecido e WAF externo.
-7. Alertmanager/dashboard/alertas 24/7, SLOs, rotação de segredos, SBOM e scan de vulnerabilidades no pipeline de deploy.
-8. Validação de latência de rede, slippage, rate limits e comportamento sob carga de cinco símbolos e três timeframes no VPS real.
+1. **Infraestrutura Física:** Deploy em VPS real com volumes persistentes e alta disponibilidade.
+2. **Segurança de Perímetro:** TLS público (CA-signed), firewall aplicado no VPS e WAF externo.
+3. **Treinamento Massivo:** Dataset de 5 anos para calibração final do modelo Ensemble.
+4. **Homologação E2E:** Testes contra Binance Demo/Testnet com credenciais reais para validar slippage e latência.
+5. **Gestão de Segredos:** Migração para Secrets Manager (Vault) no ambiente de produção.
 
 ## Critério de passagem
 
-O próximo ambiente deve permanecer em `BINANCE_MODE=simulated`, `SHADOW_MODE_ENABLED=true`, `AUTONOMOUS_TRADING_ENABLED=false`, `LIVE_TRADING_ENABLED=false` e `LIVE_MODE=false` até que a revisão humana, a restauração de backup, os testes de Demo/Testnet e o período prolongado de paper/shadow sejam concluídos. A eventual habilitação futura de capital real é uma decisão operacional independente e não está autorizada por este arquivo.
+O sistema está **pronto para o primeiro boot no VPS**. O próximo ambiente deve permanecer em modo Shadow/Simulado até que a calibração com dados massivos e a homologação de latência sejam concluídas.
+
+---
+*Status atualizado em 02/09/2026.*

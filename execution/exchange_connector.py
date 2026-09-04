@@ -130,6 +130,16 @@ class ExchangeConnector:
             else:
                 raise ValueError("FOREX_MODE deve ser paper ou live.")
             return
+        elif adapter_name == "mt5":
+            from execution.mt5_adapter import MetaTrader5Adapter
+            self._adapter = MetaTrader5Adapter(settings)
+            logger.info("ExchangeConnector inicializado com adaptador MetaTrader 5.")
+            return
+        elif adapter_name == "fix":
+            from execution.fix_adapter import FIXAdapter
+            self._adapter = FIXAdapter(settings)
+            logger.info("ExchangeConnector inicializado com adaptador FIX Protocol.")
+            return
         mode = settings.BINANCE_MODE.lower()
         if mode in {"testnet", "demo"}:
             from execution.binance_adapter import BinanceSpotAdapter
