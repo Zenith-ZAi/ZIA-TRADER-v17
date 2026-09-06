@@ -68,9 +68,17 @@ class SimulatedExchangeAdapter:
         }
 
     async def place_order(self, symbol: str, action: str, order_type: str, quantity: float, price: Optional[float] = None, client_order_id: Optional[str] = None) -> Dict[str, Any]:
-        await asyncio.sleep(0.01)
+        # Refinamento Backend: Simulação de latência de rede real (50ms a 300ms)
+        latency = random.uniform(0.05, 0.3)
+        await asyncio.sleep(latency)
+        
         order_id = f"sim_{datetime.now(timezone.utc).timestamp()}_{random.randint(0, 9999)}"
-        filled_price = price if price else random.uniform(1000, 50000)
+        
+        # Refinamento Backend: Simulação de Slippage Real (0.01% a 0.05%)
+        base_price = price if price else random.uniform(1000, 50000)
+        slippage = base_price * random.uniform(0.0001, 0.0005)
+        filled_price = base_price + slippage if action == "buy" else base_price - slippage
+        
         return {
             "status": "success",
             "order_id": order_id,
@@ -80,6 +88,8 @@ class SimulatedExchangeAdapter:
             "order_type": order_type,
             "filled_price": filled_price,
             "filled_quantity": quantity,
+            "latency_ms": latency * 1000,
+            "slippage_impact": slippage,
             "commission": quantity * filled_price * 0.001,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }

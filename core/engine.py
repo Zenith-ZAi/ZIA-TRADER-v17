@@ -34,6 +34,7 @@ from core.microstructure import estimate_entry_costs
 from execution.cost_aware_executor import CostAwareExecutor
 from core.pre_market_gate import PreMarketGate
 from core.data_feeds import FeedUnavailable, MultiTimeframeFeed
+from core.regime_detector import MarketRegimeDetector
 
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,7 @@ class RoboTraderUnified:
         )
         self.pre_market_gate = PreMarketGate(self.settings)
         self.data_feed = MultiTimeframeFeed(self.exchange_connector, self.news_processor, self.settings)
+        self.regime_detector = MarketRegimeDetector(lookback=20)
         
         # Inicialização de modelos com tratamento de erro
         try:
@@ -272,6 +274,9 @@ class RoboTraderUnified:
                     news_started = time.perf_counter()
                     processed_news = snapshot.news
                     trends = snapshot.trends
+                    regime_info = self.regime_detector.detect(historical_data)
+                    logger.info("[%s] Regime de Mercado: %s (Mult: %.2f)", symbol, regime_info["regime"], regime_info["action_multiplier"])
+                    
                     avg_sentiment = self.news_processor.aggregate_sentiment(processed_news)
                     trend_score = self.news_processor.aggregate_trend_score(trends) if hasattr(self.news_processor, "aggregate_trend_score") else 0.0
                     news_provider_health = self.news_processor.health() if hasattr(self.news_processor, "health") else {}
