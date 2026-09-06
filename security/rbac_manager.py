@@ -11,16 +11,19 @@ class Role(Enum):
     ADMIN = "admin"
     TRADER = "trader"
     AUDITOR = "auditor"
+    OPERATOR = "operator"
 
 class Permission(Enum):
     READ_DATA = "read_data"
     EXECUTE_ORDER = "execute_order"
     MANAGE_CONFIG = "manage_config"
     VIEW_LOGS = "view_logs"
+    FORCE_LIQUIDATE = "force_liquidate"
 
 ROLE_PERMISSIONS = {
-    Role.ADMIN: {Permission.READ_DATA, Permission.EXECUTE_ORDER, Permission.MANAGE_CONFIG, Permission.VIEW_LOGS},
+    Role.ADMIN: {Permission.READ_DATA, Permission.EXECUTE_ORDER, Permission.MANAGE_CONFIG, Permission.VIEW_LOGS, Permission.FORCE_LIQUIDATE},
     Role.TRADER: {Permission.READ_DATA, Permission.EXECUTE_ORDER, Permission.VIEW_LOGS},
+    Role.OPERATOR: {Permission.READ_DATA, Permission.VIEW_LOGS, Permission.EXECUTE_ORDER},
     Role.AUDITOR: {Permission.READ_DATA, Permission.VIEW_LOGS},
 }
 

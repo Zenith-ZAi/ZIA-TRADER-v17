@@ -17,7 +17,9 @@ class AdminUser(Base):
     id              = Column(Integer, primary_key=True)
     username        = Column(String(64), unique=True, nullable=False)
     password_hash   = Column(String(256), nullable=False)
-    role            = Column(String(32), default="operator")   # admin | operator | reader | guest
+    role            = Column(String(32), default="operator")   # admin | trader | auditor
+    mfa_enabled     = Column(Boolean, default=False)
+    mfa_secret      = Column(String(128), nullable=True)
     is_blocked      = Column(Boolean, default=False)
     must_change_pwd = Column(Boolean, default=False)
     created_at      = Column(DateTime, default=datetime.utcnow)
