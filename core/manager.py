@@ -9,17 +9,9 @@ from core.backtest_engine import BacktestEngine
 
 from data.news_processor import NewsProcessor
 from execution.exchange_connector import ExchangeConnector
-from execution.market_connector import MarketConnector
-from execution.order_manager import OrderManager
 from infra.redis_cache import RedisCache
-from infra.async_http import AsyncProviderHTTP
-from core.pullback_registry import PullbackCacheRegistry
 from ai.whale_detector import WhaleDetector
 from execution.execution_engine import ExecutionEngine
-from core.runtime_registry import RuntimeConfigRegistry
-from core.command_manager import CoreCommandManager
-from core.daily_state_manager import DailyStateManager
-from monitoring.metrics import KILL_SWITCH_ACTIVE
 
 logger = logging.getLogger(__name__)
 
@@ -28,110 +20,43 @@ class TradingManager:
 
     def __init__(self, settings: Settings, db_manager):
         self.settings = settings
-        self.db_manager = db_manager
-        self.runtime_registry = RuntimeConfigRegistry(db_manager)
-        self.runtime_profile = self.runtime_registry.apply_to_settings(settings)
-        self.daily_state = DailyStateManager(max_wins=5, max_losses=2)
-        self.http_client = AsyncProviderHTTP(
-            connect_timeout=float(getattr(settings, "HTTP_CONNECT_TIMEOUT_SECONDS", 5.0)),
-            read_timeout=float(getattr(settings, "HTTP_READ_TIMEOUT_SECONDS", 15.0)),
-            max_connections=int(getattr(settings, "HTTP_MAX_CONNECTIONS", 50)),
-            max_keepalive_connections=int(getattr(settings, "HTTP_MAX_KEEPALIVE_CONNECTIONS", 20)),
-            provider_concurrency=int(getattr(settings, "HTTP_PROVIDER_CONCURRENCY", 10)),
-            failure_threshold=int(getattr(settings, "PROVIDER_FAILURE_THRESHOLD", 3)),
-            cooldown_seconds=float(getattr(settings, "PROVIDER_CIRCUIT_COOLDOWN_SECONDS", 60.0)),
-        )
-        self.news_processor = NewsProcessor(settings, db_manager, http_client=self.http_client)
-        base_exchange_connector = ExchangeConnector(settings)
-        self.market_connector = MarketConnector(settings, base_exchange_connector, http_client=self.http_client)
-        self.exchange_connector = self.market_connector
+        self.news_processor = NewsProcessor(settings)
+        self.exchange_connector = ExchangeConnector(settings)
         
         self.redis_cache = RedisCache(settings.REDIS_URL)
-        self.pullback_registry = PullbackCacheRegistry()
         self.whale_detector = WhaleDetector(settings, db_manager)
-        self.execution_engine = ExecutionEngine(
-            settings,
-            self.market_connector,
-            self.redis_cache,
-            db_manager=db_manager,
-            account_id="default_account",
-        )
+        self.execution_engine = ExecutionEngine(settings, self.exchange_connector, self.redis_cache)
 
-        self.order_manager = OrderManager(settings, self.market_connector, self.execution_engine)
-        self.reconciler = self.execution_engine.reconciler
-        self.command_manager = CoreCommandManager(settings, db_manager, self.market_connector, self.news_processor)
-        self.trading_engine = RoboTraderUnified(settings, self.news_processor, self.market_connector, db_manager, redis_cache=self.redis_cache, pullback_registry=self.pullback_registry)
-        self.trading_engine.order_manager = self.order_manager
-        self.sniper_engine = SniperEngine(
-            settings,
-            self.market_connector,
-            self.execution_engine,
-            self.whale_detector,
-            self.redis_cache,
-            db_manager,
-            news_processor=self.news_processor,
-            pullback_registry=self.pullback_registry,
-        )
-        self.sniper_engine.order_manager = self.order_manager
+        self.trading_engine = RoboTraderUnified(settings, self.news_processor, self.exchange_connector, db_manager)
+        self.sniper_engine = SniperEngine(settings, self.exchange_connector, self.execution_engine, self.whale_detector, self.redis_cache, db_manager)
         self.backtest_engine = BacktestEngine(settings, db_manager)
+        self._trading_task = None
+        self._sniper_task = None
         # self.arbitrage_engine = ArbitrageEngine(settings, self.exchange_connector) # Se houver um ArbitrageEngine real
-
-    def reload_runtime_config(self) -> Dict[str, Any]:
-        self.runtime_profile = self.runtime_registry.apply_to_settings(self.settings)
-        self.order_manager.set_mode(self.settings.ORDER_MANAGER_MODE)
-        self.trading_engine.refresh_runtime_config()
-        self.sniper_engine.refresh_runtime_config()
-        return self.runtime_profile
-
-    def runtime_status(self) -> Dict[str, Any]:
-        return {
-            "profile": self.runtime_profile,
-            "settings": {
-                "symbols": list(self.settings.SYMBOLS),
-                "timeframe": self.settings.TIMEFRAME,
-                "analysis_timeframes": self.settings.ANALYSIS_TIMEFRAMES,
-                "multi_timeframe_enabled": self.settings.MULTI_TIMEFRAME_ENABLED,
-                "sniper_timeframe": self.settings.SNIPER_TIMEFRAME,
-                "autonomous_trading_enabled": self.settings.AUTONOMOUS_TRADING_ENABLED,
-                "shadow_mode_enabled": self.settings.SHADOW_MODE_ENABLED,
-                "market_adapter": self.settings.MARKET_ADAPTER,
-                "forex_mode": self.settings.FOREX_MODE,
-                "binance_mode": self.settings.BINANCE_MODE,
-                "order_manager_mode": self.order_manager.mode,
-                "order_confirmation_required": self.order_manager.confirmation_required,
-                "market_type": self.market_connector.market_type,
-                "daily_state": self.daily_state.status(),
-            },
-        }
-
-    async def trigger_kill_switch(self, reason: str = "manual", actor: str = "system") -> Dict[str, Any]:
-        result = await self.exchange_connector.trigger_kill_switch(reason)
-        if hasattr(self.settings, "LIVE_KILL_SWITCH"):
-            self.settings.LIVE_KILL_SWITCH = True
-        KILL_SWITCH_ACTIVE.set(1)
-        if hasattr(self, "reconciler") and self.reconciler is not None:
-            self.db_manager.record_kill_switch(self.reconciler.account_id, True, reason, actor)
-        return result
-
-    async def reconcile(self) -> Dict[str, Any]:
-        if self.reconciler is None:
-            return {"status": "unsupported", "reason": "reconciler indisponível"}
-        return await self.reconciler.reconcile()
-
-    async def sync_positions(self) -> Dict[str, Any]:
-        if self.reconciler is None:
-            return {"status": "unsupported", "reason": "reconciler indisponível"}
-        return await self.reconciler.sync_positions()
 
     async def start_trading(self):
         """Inicia o motor de trading principal (RoboTraderUnified)."""
+        if self.trading_engine.is_running:
+            logger.warning("Motor de trading já está em execução; segunda instância ignorada.")
+            return
         logger.info("Iniciando o motor de trading principal...")
-        await self.trading_engine.start()
+        self._trading_task = asyncio.current_task()
+        try:
+            await self.trading_engine.start()
+        finally:
+            self._trading_task = None
 
     async def start_sniper(self):
         """Inicia o motor Sniper."""
+        if self.sniper_engine.is_running:
+            logger.warning("Motor Sniper já está em execução; segunda instância ignorada.")
+            return
         logger.info("Iniciando o motor Sniper...")
-        await self.sniper_engine.start()
+        self._sniper_task = asyncio.current_task()
+        try:
+            await self.sniper_engine.start()
+        finally:
+            self._sniper_task = None
 
     async def run_backtest(self, symbol: str, historical_data: Any, strategy_name: str) -> Dict[str, Any]:
         """Executa um backtest para uma estratégia específica."""
@@ -144,6 +69,5 @@ class TradingManager:
         await self.trading_engine.stop()
         await self.sniper_engine.stop() # Se o sniper_engine tiver um método stop
         await self.news_processor.close()
-        await self.http_client.aclose()
         await self.exchange_connector.close()
         logger.info("Todos os motores parados.")

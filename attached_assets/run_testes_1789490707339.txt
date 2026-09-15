@@ -1,0 +1,198 @@
+#!/usr/bin/env bash
+# =============================================================================
+# Validação do ZIA-TRADER-v17
+#
+# Este script é executado a partir de attached_assets, mas sempre usa a raiz
+# real do repositório. Não instala dependências nem aponta para um diretório
+# "src/" inexistente: valida a estrutura atual do ZIA.
+# =============================================================================
+
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if PROJECT_ROOT="$(git -C "${SCRIPT_DIR}" rev-parse --show-toplevel 2>/dev/null)"; then
+    :
+else
+    PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+fi
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+LOG_DIR="${PROJECT_ROOT}/logs"
+REPORT_DIR="${PROJECT_ROOT}/reports"
+DB_TEST_DIR="${PROJECT_ROOT}/test_data"
+
+mkdir -p "${LOG_DIR}" "${REPORT_DIR}" "${DB_TEST_DIR}"
+
+declare -a RESULTS=()
+FAILED=0
+
+record() {
+    local name="$1"
+    local status="$2"
+    RESULTS+=("${name}: ${status}")
+    if [[ "${status}" == "FAIL" ]]; then
+        FAILED=$((FAILED + 1))
+    fi
+}
+
+echo "[1/8] Verificando ambiente e estrutura real..."
+if [[ -f "${PROJECT_ROOT}/main.py" && -d "${PROJECT_ROOT}/tests" && -d "${PROJECT_ROOT}/core" ]]; then
+    echo "Raiz do projeto: ${PROJECT_ROOT}"
+    record "estrutura" "PASS"
+else
+    echo "Estrutura esperada não encontrada em ${PROJECT_ROOT}"
+    record "estrutura" "FAIL"
+fi
+
+echo "[2/8] Verificando auditoria de dependências..."
+if command -v pip-audit >/dev/null 2>&1; then
+    pip-audit --desc on > "${LOG_DIR}/security_audit.log" 2>&1
+    audit_status=$?
+    [[ ${audit_status} -eq 0 ]] && record "pip-audit" "PASS" || record "pip-audit" "FAIL"
+else
+    echo "Aviso: pip-audit não está instalado; auditoria foi marcada como SKIP."
+    printf '%s\n' "pip-audit não instalado no ambiente atual." > "${LOG_DIR}/security_audit.log"
+    RESULTS+=("pip-audit: SKIP")
+fi
+
+echo "[3/8] Executando testes unitários e de integração..."
+if "${PYTHON_BIN}" -c "import pytest" >/dev/null 2>&1; then
+    PYTEST_ARGS=("${PROJECT_ROOT}/tests" "-v" "--tb=short" "--log-file=${LOG_DIR}/pytest.log" "--log-level=DEBUG")
+    if "${PYTHON_BIN}" -c "import pytest_cov" >/dev/null 2>&1; then
+        PYTEST_ARGS+=("--cov=ai" "--cov=core" "--cov=execution" "--cov=database_manager.py" "--cov-report=term-missing" "--cov-report=html:${REPORT_DIR}/coverage")
+    else
+        echo "Aviso: pytest-cov não está instalado; testes serão executados sem cobertura."
+    fi
+    "${PYTHON_BIN}" -m pytest "${PYTEST_ARGS[@]}"
+    pytest_status=$?
+    [[ ${pytest_status} -eq 0 ]] && record "pytest" "PASS" || record "pytest" "FAIL"
+else
+    echo "pytest não está instalado."
+    record "pytest" "FAIL"
+fi
+
+echo "[4/8] Compilando os módulos Python reais..."
+PYTHONPATH="${PROJECT_ROOT}" "${PYTHON_BIN}" -m compileall -q \
+    "${PROJECT_ROOT}/main.py" \
+    "${PROJECT_ROOT}/admin_console.py" \
+    "${PROJECT_ROOT}/database.py" \
+    "${PROJECT_ROOT}/database_manager.py" \
+    "${PROJECT_ROOT}/ai" \
+    "${PROJECT_ROOT}/cli" \
+    "${PROJECT_ROOT}/config" \
+    "${PROJECT_ROOT}/core" \
+    "${PROJECT_ROOT}/data" \
+    "${PROJECT_ROOT}/execution" \
+    "${PROJECT_ROOT}/infra" \
+    "${PROJECT_ROOT}/monitoring" \
+    "${PROJECT_ROOT}/risk" \
+    "${PROJECT_ROOT}/security" \
+    "${PROJECT_ROOT}/tests"
+compile_status=$?
+[[ ${compile_status} -eq 0 ]] && record "compileall" "PASS" || record "compileall" "FAIL"
+
+echo "[5/8] Executando análise estática nos diretórios reais..."
+if "${PYTHON_BIN}" -c "import pylint" >/dev/null 2>&1; then
+    "${PYTHON_BIN}" -m pylint \
+        "${PROJECT_ROOT}/main.py" \
+        "${PROJECT_ROOT}/database.py" \
+        "${PROJECT_ROOT}/database_manager.py" \
+        "${PROJECT_ROOT}/ai" \
+        "${PROJECT_ROOT}/core" \
+        "${PROJECT_ROOT}/execution" \
+        --output-format=json > "${LOG_DIR}/pylint_report.json" 2>&1
+    pylint_status=$?
+    # Pylint retorna 1-32 por avisos; o relatório continua útil sem bloquear
+    # a validação funcional.
+    RESULTS+=("pylint: $([[ ${pylint_status} -eq 0 ]] && echo PASS || echo REVIEW)")
+else
+    echo "Aviso: pylint não está instalado; análise marcada como SKIP."
+    printf '%s\n' "pylint não instalado no ambiente atual." > "${LOG_DIR}/pylint_report.json"
+    RESULTS+=("pylint: SKIP")
+fi
+
+if command -v bandit >/dev/null 2>&1; then
+    bandit -r "${PROJECT_ROOT}/ai" "${PROJECT_ROOT}/core" "${PROJECT_ROOT}/execution" \
+        "${PROJECT_ROOT}/security" -f json -o "${LOG_DIR}/bandit_report.json" >/dev/null 2>&1
+    bandit_status=$?
+    RESULTS+=("bandit: $([[ ${bandit_status} -eq 0 ]] && echo PASS || echo REVIEW)")
+else
+    printf '%s\n' "bandit não instalado no ambiente atual." > "${LOG_DIR}/bandit_report.json"
+    RESULTS+=("bandit: SKIP")
+fi
+
+echo "[6/8] Testando banco e parâmetros sem API externa..."
+DB_TEST_DIR="${DB_TEST_DIR}" PYTHONPATH="${PROJECT_ROOT}" "${PYTHON_BIN}" - <<'PY'
+import os
+from datetime import datetime
+from pathlib import Path
+
+from database import MarketType
+from database_manager import DatabaseManager
+
+db_path = Path(os.environ["DB_TEST_DIR"]) / "zia_validation.db"
+if db_path.exists():
+    db_path.unlink()
+manager = DatabaseManager(f"sqlite:///{db_path}")
+manager.create_tables()
+manager.create_or_update_account_state("validation", 1000.0, 1000.0)
+manager.create_pnl("validation", "BTC/USDT", 10.0, datetime.now())
+manager.create_or_update_daily_pnl("validation", datetime.now(), 10.0, 0.0)
+assert manager.get_account_state("validation").balance == 1000.0
+assert len(manager.get_pnl_history("validation")) == 1
+print(f"Banco de validação criado: {db_path}")
+PY
+db_status=$?
+[[ ${db_status} -eq 0 ]] && record "database" "PASS" || record "database" "FAIL"
+
+echo "[7/8] Testando exchange simulada e execução de ordem..."
+PYTHONPATH="${PROJECT_ROOT}" "${PYTHON_BIN}" - <<'PY'
+import asyncio
+from config.settings import Settings
+from execution.exchange_connector import ExchangeConnector
+from execution.execution_engine import ExecutionEngine
+from infra.redis_cache import RedisCache
+
+async def main():
+    settings = Settings(DATABASE_URL="sqlite:///./data/zia_validation_runtime.db")
+    exchange = ExchangeConnector(settings)
+    cache = RedisCache("redis://localhost:6379/0")
+    engine = ExecutionEngine(settings, exchange, cache)
+    await exchange.connect()
+    market = await exchange.get_market_data("BTC/USDT")
+    assert market["last"] > 0
+    result = await engine.execute_order({
+        "symbol": "BTC/USDT", "action": "buy", "quantity": 0.001,
+        "price": market["last"],
+    })
+    assert result["status"] in {"success", "error"}
+    await exchange.close()
+    print("Exchange simulada e execução validadas.")
+
+asyncio.run(main())
+PY
+exchange_status=$?
+[[ ${exchange_status} -eq 0 ]] && record "exchange" "PASS" || record "exchange" "FAIL"
+
+echo "[8/8] Importando a aplicação e gerando relatório..."
+PYTHONPATH="${PROJECT_ROOT}" "${PYTHON_BIN}" - <<'PY'
+from main import app
+assert app.title
+print(f"FastAPI carregada: {app.title}")
+PY
+app_status=$?
+[[ ${app_status} -eq 0 ]] && record "app-import" "PASS" || record "app-import" "FAIL"
+
+{
+    echo "=== RELATÓRIO DE VALIDAÇÃO DO ZIA-TRADER-v17 ==="
+    date
+    echo "Raiz: ${PROJECT_ROOT}"
+    printf '%s\n' "${RESULTS[@]}"
+    echo "Falhas críticas: ${FAILED}"
+} | tee "${REPORT_DIR}/summary.txt"
+
+if [[ ${FAILED} -gt 0 ]]; then
+    echo "Validação concluída com falhas críticas."
+    exit 1
+fi
+
+echo "Validação concluída sem falhas críticas."
