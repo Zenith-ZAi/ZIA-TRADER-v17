@@ -1,7 +1,8 @@
-from sqlalchemy import Boolean, Column, DateTime, Enum, Float, Integer, JSON, String, create_engine
+from sqlalchemy import Boolean, Column, DateTime, Enum, Float, ForeignKey, Index, Integer, JSON, String, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase
 from datetime import datetime, timezone
 import enum
+import os
 
 class Base(DeclarativeBase):
     pass
@@ -100,6 +101,7 @@ class Drawdown(Base):
 
 class OrderHistory(Base):
     __tablename__ = 'order_history'
+    __table_args__ = (Index("ix_order_history_symbol_timestamp", "symbol", "timestamp"),)
     id = Column(Integer, primary_key=True)
     account_id = Column(String, nullable=False)
     order_id = Column(String, unique=True, nullable=False)
@@ -115,6 +117,7 @@ class OrderHistory(Base):
 
 class ExecutionHistory(Base):
     __tablename__ = 'execution_history'
+    __table_args__ = (Index("ix_execution_history_symbol_timestamp", "symbol", "timestamp"),)
     id = Column(Integer, primary_key=True)
     account_id = Column(String, nullable=False)
     execution_id = Column(String, unique=True, nullable=False)
@@ -130,6 +133,7 @@ class ExecutionHistory(Base):
 
 class Trade(Base):
     __tablename__ = 'trades'
+    __table_args__ = (Index("ix_trades_symbol_timestamp", "symbol", "timestamp"),)
     id = Column(Integer, primary_key=True)
     symbol = Column(String, nullable=False)
     market_type = Column(Enum(MarketType), nullable=False)
@@ -177,6 +181,7 @@ class TrendSnapshot(Base):
 
 class AIObservation(Base):
     __tablename__ = 'ai_observations'
+    __table_args__ = (Index("ix_ai_observations_symbol_observed_at", "symbol", "observed_at"),)
     id = Column(Integer, primary_key=True)
     symbol = Column(String, nullable=False, index=True)
     observed_at = Column(DateTime, default=utc_now, index=True)
@@ -233,7 +238,16 @@ def get_session_local(engine):
     return sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db(engine):
-    Base.metadata.create_all(engine)
+    if engine.dialect.name == "sqlite":
+        if os.getenv("ENVIRONMENT", "development").strip().lower() in {"prod", "production"}:
+            raise RuntimeError("SQLite/create_all não é permitido em produção; configure PostgreSQL e execute Alembic")
+        Base.metadata.create_all(engine)
+        return
+    if engine.dialect.name != "postgresql":
+        raise RuntimeError(f"Dialeto de banco não suportado para migrações: {engine.dialect.name}")
+    from infra.db_migrations import upgrade_database
+
+    upgrade_database(engine)
 
 
 class OrderIntent(Base):
@@ -323,6 +337,7 @@ class BacktestRun(Base):
 class DecisionSnapshot(Base):
     """Contexto imutável de uma decisão para paridade live, shadow e replay."""
     __tablename__ = "decision_snapshots"
+    __table_args__ = (Index("ix_decision_snapshots_symbol_timeframe_observed_at", "symbol", "timeframe", "observed_at"),)
     id = Column(Integer, primary_key=True)
     snapshot_id = Column(String, unique=True, nullable=False, index=True)
     symbol = Column(String, nullable=False, index=True)
@@ -339,3 +354,78 @@ class DecisionSnapshot(Base):
     before_context_json = Column(JSON, nullable=False, default=dict)
     after_context_json = Column(JSON)
     created_at = Column(DateTime, default=utc_now, index=True)
+
+
+class MarketCandle(Base):
+    """Candle OHLCV imutável; a chave composta impede duplicatas por origem temporal."""
+    __tablename__ = "market_candles"
+    __table_args__ = (
+        Index("ix_market_candles_symbol_timeframe_timestamp", "symbol", "timeframe", "timestamp"),
+    )
+    symbol = Column(String(64), primary_key=True, nullable=False)
+    timeframe = Column(String(16), primary_key=True, nullable=False)
+    timestamp = Column(DateTime, primary_key=True, nullable=False)
+    open = Column(Float, nullable=False)
+    high = Column(Float, nullable=False)
+    low = Column(Float, nullable=False)
+    close = Column(Float, nullable=False)
+    volume = Column(Float, nullable=False)
+    source = Column(String(64), nullable=False, default="unknown")
+    created_at = Column(DateTime, nullable=False, default=utc_now)
+
+
+class ModelRegistry(Base):
+    """Metadados auditáveis de artefatos; não promove modelos nem altera o gate hold."""
+    __tablename__ = "model_registry"
+    id = Column(Integer, primary_key=True)
+    model_name = Column(String(128), nullable=False)
+    version = Column(String(128), nullable=False, unique=True)
+    artifact_sha256 = Column(String(64), nullable=False)
+    dataset_sha256 = Column(String(64))
+    metrics_oos_json = Column(JSON, nullable=False, default=dict)
+    training_config_json = Column(JSON, nullable=False, default=dict)
+    status = Column(String(32), nullable=False, default="candidate")
+    registered_at = Column(DateTime, nullable=False, default=utc_now, index=True)
+    __table_args__ = (Index("ix_model_registry_name_status", "model_name", "status"),)
+
+
+class ModelMetric(Base):
+    """Métricas versionadas por split/regime para acompanhar avaliação fora da amostra."""
+    __tablename__ = "model_metrics"
+    id = Column(Integer, primary_key=True)
+    model_version = Column(String(128), ForeignKey("model_registry.version", ondelete="RESTRICT"), nullable=False)
+    metric_name = Column(String(64), nullable=False)
+    regime = Column(String(64), nullable=False, default="all")
+    split = Column(String(32), nullable=False, default="oos")
+    metric_value = Column(Float, nullable=False)
+    measured_at = Column(DateTime, nullable=False, default=utc_now)
+    __table_args__ = (Index("ix_model_metrics_version_regime_time", "model_version", "regime", "measured_at"),)
+
+
+class DataGap(Base):
+    """Gap/staleness de feed registrado sem autorizar sinais com dados inválidos."""
+    __tablename__ = "data_gaps"
+    id = Column(Integer, primary_key=True)
+    source = Column(String(64), nullable=False)
+    symbol = Column(String(64), nullable=False)
+    timeframe = Column(String(16), nullable=False)
+    gap_start = Column(DateTime, nullable=False)
+    gap_end = Column(DateTime)
+    detected_at = Column(DateTime, nullable=False, default=utc_now)
+    status = Column(String(32), nullable=False, default="open")
+    details_json = Column(JSON, nullable=False, default=dict)
+    __table_args__ = (Index("ix_data_gaps_symbol_timeframe_detected_at", "symbol", "timeframe", "detected_at"),)
+
+
+class AdminAuditLog(Base):
+    """Registro aditivo de ações administrativas; não guarda segredos ou credenciais."""
+    __tablename__ = "audit_log"
+    id = Column(Integer, primary_key=True)
+    actor = Column(String(128), nullable=False)
+    action = Column(String(128), nullable=False)
+    target_type = Column(String(64), nullable=False)
+    target_id = Column(String(128))
+    correlation_id = Column(String(128))
+    details_json = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime, nullable=False, default=utc_now, index=True)
+    __table_args__ = (Index("ix_audit_log_actor_created_at", "actor", "created_at"),)

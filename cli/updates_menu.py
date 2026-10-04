@@ -126,17 +126,19 @@ def _migrate_db(db: Session, user: AdminUser) -> None:
     pb = progress_bar("Migrando…", 60)
     with pb:
         task = pb.add_task("Migração", total=60)
-        # Re-create all tables (safe: create_all is idempotent)
-        from database import Base
-        from cli.db_models import AdminUser as AU  # noqa: ensure model imported
-        from sqlalchemy.orm import Session as S
+        # Aplica migrações versionadas no PostgreSQL; mantém create_all só no SQLite local.
+        from database_manager import DatabaseManager
         engine = db.bind
         if engine is None:
             engine = db.get_bind()
+        manager = DatabaseManager(str(engine.url))
         for i in range(40):
             time.sleep(0.03)
             pb.advance(task, 1)
-        Base.metadata.create_all(engine)
+        try:
+            manager.create_tables()
+        finally:
+            manager.engine.dispose()
         for i in range(20):
             time.sleep(0.03)
             pb.advance(task, 1)

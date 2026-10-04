@@ -13,20 +13,17 @@ logging.basicConfig(level=logging.ERROR)
 for noisy in ("sqlalchemy", "passlib", "urllib3", "asyncio"):
     logging.getLogger(noisy).setLevel(logging.ERROR)
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import Session
 
 from config.settings import settings
-from database import Base
+from database_manager import DatabaseManager
 from cli.db_models import AdminUser, ExchangeConfig, StrategyConfig, AlgorithmConfig  # noqa: register models
 
 # ── DB setup ──────────────────────────────────────────────────────────────────
-_engine = create_engine(
-    settings.DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in settings.DATABASE_URL else {},
-)
-Base.metadata.create_all(_engine)          # idempotent — creates CLI tables if missing
-_Session = sessionmaker(bind=_engine)
+_db_manager = DatabaseManager(settings.DATABASE_URL)
+_db_manager.create_tables()
+_engine = _db_manager.engine
+_Session = _db_manager.SessionLocal
 
 
 def get_db() -> Session:
