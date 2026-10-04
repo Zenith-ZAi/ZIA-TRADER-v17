@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, DateTime, Enum, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, create_engine
+from sqlalchemy import Boolean, Column, DateTime, Enum, Float, ForeignKey, Index, Integer, JSON, String, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase
 from datetime import datetime, timezone
 import enum
@@ -360,7 +360,6 @@ class MarketCandle(Base):
     """Candle OHLCV imutável; a chave composta impede duplicatas por origem temporal."""
     __tablename__ = "market_candles"
     __table_args__ = (
-        UniqueConstraint("symbol", "timeframe", "timestamp", name="uq_market_candles_symbol_timeframe_timestamp"),
         Index("ix_market_candles_symbol_timeframe_timestamp", "symbol", "timeframe", "timestamp"),
     )
     symbol = Column(String(64), primary_key=True, nullable=False)

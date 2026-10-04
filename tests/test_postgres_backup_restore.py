@@ -8,7 +8,7 @@ from pathlib import Path
 import psycopg2
 import pytest
 from psycopg2 import sql
-from sqlalchemy.engine import make_url
+from sqlalchemy.engine import URL, make_url
 
 
 pytestmark = pytest.mark.skipif(
@@ -17,12 +17,12 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _libpq_url(url: str) -> str:
+def _libpq_url(url: str | URL) -> str:
     parsed = make_url(url)
     return parsed.set(drivername="postgresql").render_as_string(hide_password=False)
 
 
-def _fingerprints(url: str) -> dict[str, tuple[int, str | None]]:
+def _fingerprints(url: str | URL) -> dict[str, tuple[int, str | None]]:
     result: dict[str, tuple[int, str | None]] = {}
     with psycopg2.connect(_libpq_url(url)) as connection:
         with connection.cursor() as cursor:
@@ -72,21 +72,21 @@ def test_pg_dump_restore_matches_table_counts_and_checksums(tmp_path: Path):
         )
         before = _fingerprints(source_url)
 
-        with psycopg2.connect(_libpq_url(str(admin_url))) as connection:
+        with psycopg2.connect(_libpq_url(admin_url)) as connection:
             connection.autocommit = True
             with connection.cursor() as cursor:
                 cursor.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(target_name)))
         created = True
         subprocess.run(
-            ["pg_restore", "--dbname", _libpq_url(str(target_url)), "--exit-on-error", "--no-owner", "--no-privileges", str(dump_path)],
+            ["pg_restore", "--dbname", _libpq_url(target_url), "--exit-on-error", "--no-owner", "--no-privileges", str(dump_path)],
             check=True,
             capture_output=True,
             text=True,
         )
-        assert _fingerprints(str(target_url)) == before
+        assert _fingerprints(target_url) == before
     finally:
         if created:
-            with psycopg2.connect(_libpq_url(str(admin_url))) as connection:
+            with psycopg2.connect(_libpq_url(admin_url)) as connection:
                 connection.autocommit = True
                 with connection.cursor() as cursor:
                     cursor.execute(

@@ -274,8 +274,7 @@ def upgrade() -> None:
         sa.Column('volume', sa.Float(), nullable=False),
         sa.Column('source', sa.String(length=64), nullable=False),
         sa.Column('created_at', sa.DateTime(), nullable=False),
-        sa.PrimaryKeyConstraint('symbol', 'timeframe', 'timestamp'),
-        sa.UniqueConstraint('symbol', 'timeframe', 'timestamp', name='uq_market_candles_symbol_timeframe_timestamp')
+        sa.PrimaryKeyConstraint('symbol', 'timeframe', 'timestamp')
         )
     if not _index_exists('market_candles', 'ix_market_candles_symbol_timeframe_timestamp'):
         op.create_index('ix_market_candles_symbol_timeframe_timestamp', 'market_candles', ['symbol', 'timeframe', 'timestamp'], unique=False)
