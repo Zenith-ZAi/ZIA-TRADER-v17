@@ -114,7 +114,10 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> Dict[str, Any
     users = _auth_users()
     if not users:
         raise credentials_exception
-    username = verify_token(token, credentials_exception)
+    token_payload = verify_token(token, credentials_exception)
+    username = token_payload.get("sub")
+    if not isinstance(username, str) or not username:
+        raise credentials_exception
     user = users.get(username)
     if user is None:
         raise credentials_exception
@@ -463,7 +466,10 @@ async def dashboard_websocket(websocket: WebSocket):
     try:
         if not token:
             raise HTTPException(status_code=401, detail="Token obrigatório")
-        username = verify_token(token, HTTPException(status_code=401, detail="Token inválido"))
+        token_payload = verify_token(token, HTTPException(status_code=401, detail="Token inválido"))
+        username = token_payload.get("sub")
+        if not isinstance(username, str) or not username:
+            raise HTTPException(status_code=401, detail="Token inválido")
         user = _auth_users().get(username)
         if not user or not is_trader(user.get("roles", [])):
             raise HTTPException(status_code=403, detail="Permissão insuficiente")

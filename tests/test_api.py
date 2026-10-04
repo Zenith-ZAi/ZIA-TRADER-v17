@@ -35,6 +35,16 @@ def test_demo_login_and_public_user(monkeypatch, tmp_path):
         }
         assert "password" not in user_response.json()
 
+        dashboard_response = client.get(
+            "/admin/dashboard",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert dashboard_response.status_code == 200
+
+        with client.websocket_connect(f"/ws/dashboard?token={token}") as websocket:
+            runtime_status = websocket.receive_json()
+            assert "runtime" in runtime_status
+
 
 def test_invalid_demo_login_is_rejected(monkeypatch, tmp_path):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'api-invalid.db'}")
