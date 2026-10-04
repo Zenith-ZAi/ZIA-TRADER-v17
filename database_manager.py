@@ -1,3 +1,5 @@
+import os
+
 from sqlalchemy.orm import Session
 import hashlib
 import math
@@ -11,14 +13,32 @@ from database import Base, AccountState, Position, RuntimePositionState, DailyPN
 
 class DatabaseManager:
     def __init__(self, database_url: str):
+        self.database_url = database_url
         engine_options = {"pool_pre_ping": True, "pool_recycle": 1800}
         if "sqlite" in database_url:
             engine_options["connect_args"] = {"check_same_thread": False}
+        elif database_url.startswith("postgresql"):
+            engine_options.update(
+                pool_size=max(1, int(os.getenv("DB_POOL_SIZE", "5"))),
+                max_overflow=max(0, int(os.getenv("DB_MAX_OVERFLOW", "10"))),
+                pool_timeout=max(1, int(os.getenv("DB_POOL_TIMEOUT_SECONDS", "30"))),
+                pool_recycle=max(60, int(os.getenv("DB_POOL_RECYCLE_SECONDS", "1800"))),
+            )
         self.engine = create_engine(database_url, **engine_options)
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
 
     def create_tables(self):
-        Base.metadata.create_all(self.engine)
+        if self.engine.dialect.name == "sqlite":
+            if os.getenv("ENVIRONMENT", "development").strip().lower() in {"prod", "production"}:
+                raise RuntimeError("SQLite/create_all não é permitido em produção; configure PostgreSQL e execute Alembic")
+            # Compatibilidade histórica de desenvolvimento e testes locais.
+            Base.metadata.create_all(self.engine)
+            return
+        if self.engine.dialect.name != "postgresql":
+            raise RuntimeError(f"Dialeto de banco não suportado para migrações: {self.engine.dialect.name}")
+        from infra.db_migrations import upgrade_database
+
+        upgrade_database(self.engine)
 
     def get_db(self):
         db = self.SessionLocal()
