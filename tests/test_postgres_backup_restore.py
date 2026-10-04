@@ -72,10 +72,14 @@ def test_pg_dump_restore_matches_table_counts_and_checksums(tmp_path: Path):
         )
         before = _fingerprints(source_url)
 
-        with psycopg2.connect(_libpq_url(admin_url)) as connection:
-            connection.autocommit = True
+        admin_connection = psycopg2.connect(_libpq_url(admin_url))
+        admin_connection.autocommit = True
+        try:
+            connection = admin_connection
             with connection.cursor() as cursor:
                 cursor.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(target_name)))
+        finally:
+            admin_connection.close()
         created = True
         subprocess.run(
             ["pg_restore", "--dbname", _libpq_url(target_url), "--exit-on-error", "--no-owner", "--no-privileges", str(dump_path)],
@@ -86,11 +90,15 @@ def test_pg_dump_restore_matches_table_counts_and_checksums(tmp_path: Path):
         assert _fingerprints(target_url) == before
     finally:
         if created:
-            with psycopg2.connect(_libpq_url(admin_url)) as connection:
-                connection.autocommit = True
+            admin_connection = psycopg2.connect(_libpq_url(admin_url))
+            admin_connection.autocommit = True
+            try:
+                connection = admin_connection
                 with connection.cursor() as cursor:
                     cursor.execute(
                         "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = %s AND pid <> pg_backend_pid()",
                         (target_name,),
                     )
                     cursor.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(target_name)))
+            finally:
+                admin_connection.close()
