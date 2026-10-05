@@ -417,6 +417,20 @@ class DataGap(Base):
     __table_args__ = (Index("ix_data_gaps_symbol_timeframe_detected_at", "symbol", "timeframe", "detected_at"),)
 
 
+class OrderBookSnapshot(Base):
+    """Snapshot bruto de depth para auditoria; não participa de execução de ordens."""
+    __tablename__ = "order_book_snapshots"
+    id = Column(Integer, primary_key=True)
+    source = Column(String(64), nullable=False)
+    symbol = Column(String(64), nullable=False)
+    observed_at = Column(DateTime, nullable=False, index=True)
+    bids_json = Column(JSON, nullable=False, default=list)
+    asks_json = Column(JSON, nullable=False, default=list)
+    last_update_id = Column(String(128))
+    created_at = Column(DateTime, nullable=False, default=utc_now)
+    __table_args__ = (Index("ix_order_book_snapshots_symbol_observed_at", "symbol", "observed_at"),)
+
+
 class AdminAuditLog(Base):
     """Registro aditivo de ações administrativas; não guarda segredos ou credenciais."""
     __tablename__ = "audit_log"

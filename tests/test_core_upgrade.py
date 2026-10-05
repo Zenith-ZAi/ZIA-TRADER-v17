@@ -11,8 +11,11 @@ from core.learning_layer import SignalLearningLayer
 from database_manager import DatabaseManager
 
 
-def _frame(size=80):
-    index = pd.date_range("2026-08-20", periods=size, freq="h", tz="UTC")
+def _frame(size=80, timeframe="1h"):
+    period = pd.Timedelta(timeframe)
+    now = pd.Timestamp.now(tz="UTC")
+    end = pd.Timestamp((now.value // period.value) * period.value, tz="UTC")
+    index = pd.date_range(end=end, periods=size, freq=period)
     close = pd.Series([100.0 + (index_position * 0.2) for index_position in range(size)], index=index)
     return pd.DataFrame(
         {
@@ -53,7 +56,7 @@ class _News:
 
 class _Market:
     async def get_historical_data(self, symbol, timeframe, limit=250):
-        return _frame(min(limit, 80))
+        return _frame(min(limit, 80), timeframe)
 
     async def get_market_data(self, symbol):
         return {"symbol": symbol, "last": 115.8, "bid": 115.7, "ask": 115.9, "volume": 1000.0}
