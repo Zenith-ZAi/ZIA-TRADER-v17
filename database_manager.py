@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict
 
-from database import Base, AccountState, Position, RuntimePositionState, DailyPNL, WeeklyPNL, MonthlyPNL, Drawdown, OrderHistory, ExecutionHistory, Trade, WhaleActivity, NewsArticle, TrendSnapshot, AIObservation, MarketPattern, SystemLog, OrderIntent, ReconciliationSnapshot, ProtectionOrder, KillSwitchEvent, BacktestRun, DecisionSnapshot, MarketType, OrderStatus, utc_now
+from database import Base, AccountState, Position, RuntimePositionState, DailyPNL, WeeklyPNL, MonthlyPNL, Drawdown, OrderHistory, ExecutionHistory, Trade, WhaleActivity, NewsArticle, TrendSnapshot, AIObservation, MarketPattern, SystemLog, OrderIntent, ReconciliationSnapshot, ProtectionOrder, KillSwitchEvent, BacktestRun, DecisionSnapshot, DataGap, OrderBookSnapshot, MarketType, OrderStatus, utc_now
 
 class DatabaseManager:
     def __init__(self, database_url: str):
@@ -422,6 +422,163 @@ class DatabaseManager:
                     "gate_status": row.gate_status,
                     "before_context": row.before_context_json or {},
                     "after_context": row.after_context_json or {},
+                }
+                for row in rows
+            ]
+        finally:
+            db.close()
+
+    def record_feed_incidents(
+        self,
+        source: str,
+        symbol: str,
+        timeframe: str,
+        incidents: List[Dict[str, object]],
+    ) -> int:
+        """Abre/atualiza incidentes ativos e resolve os que deixaram de ocorrer."""
+        db = self.SessionLocal()
+        try:
+            rows = db.query(DataGap).filter(
+                DataGap.source == str(source),
+                DataGap.symbol == str(symbol),
+                DataGap.timeframe == str(timeframe),
+                DataGap.status == "open",
+            ).all()
+            outage_kinds = {"feed_unavailable", "market_quote_unavailable", "order_book_unavailable"}
+
+            def incident_key(kind: str, gap_start: datetime):
+                return (kind, None if kind in outage_kinds else gap_start)
+
+            existing = {}
+            for row in rows:
+                kind = str((row.details_json or {}).get("kind", "feed_incident"))
+                key = incident_key(kind, row.gap_start)
+                existing.setdefault(key, row)
+
+            active_keys = set()
+            now = utc_now()
+            for incident in incidents:
+                kind = str(incident.get("kind") or "feed_incident")
+                gap_start = self._parse_datetime(incident.get("gap_start"))
+                gap_end = self._parse_datetime(incident.get("gap_end")) if incident.get("gap_end") else now
+                key = incident_key(kind, gap_start)
+                active_keys.add(key)
+                details = self._json_safe({"kind": kind, **dict(incident.get("details") or {})})
+                row = existing.get(key)
+                if row is None:
+                    row = DataGap(
+                        source=str(source),
+                        symbol=str(symbol),
+                        timeframe=str(timeframe),
+                        gap_start=gap_start,
+                        gap_end=gap_end,
+                        detected_at=now,
+                        status="open",
+                        details_json=details,
+                    )
+                    db.add(row)
+                else:
+                    row.gap_end = gap_end
+                    row.details_json = details
+
+            for key, row in existing.items():
+                if key not in active_keys:
+                    row.status = "resolved"
+                    row.gap_end = now
+                    row.details_json = self._json_safe({
+                        **dict(row.details_json or {}),
+                        "resolved_at": now.isoformat(),
+                    })
+            db.commit()
+            return len(incidents)
+        finally:
+            db.close()
+
+    def list_data_gaps(
+        self,
+        symbol: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, object]]:
+        db = self.SessionLocal()
+        try:
+            query = db.query(DataGap)
+            if symbol:
+                query = query.filter(DataGap.symbol == str(symbol))
+            if status:
+                query = query.filter(DataGap.status == str(status))
+            rows = query.order_by(DataGap.detected_at.desc()).limit(max(1, min(int(limit), 5000))).all()
+            return [
+                {
+                    "id": row.id,
+                    "source": row.source,
+                    "symbol": row.symbol,
+                    "timeframe": row.timeframe,
+                    "gap_start": row.gap_start.isoformat() if row.gap_start else None,
+                    "gap_end": row.gap_end.isoformat() if row.gap_end else None,
+                    "detected_at": row.detected_at.isoformat() if row.detected_at else None,
+                    "status": row.status,
+                    "details": row.details_json or {},
+                }
+                for row in rows
+            ]
+        finally:
+            db.close()
+
+    def persist_order_book_snapshot(
+        self,
+        source: str,
+        symbol: str,
+        order_book: Dict[str, object],
+        observed_at: Optional[datetime] = None,
+        retention_days: int = 7,
+        min_interval_seconds: int = 60,
+    ) -> Optional[int]:
+        """Persiste depth real limitado por cadência e remove dados expirados."""
+        observed = self._parse_datetime(observed_at) if observed_at is not None else utc_now()
+        keep_days = max(1, min(int(retention_days), 365))
+        min_interval = max(1, int(min_interval_seconds))
+        db = self.SessionLocal()
+        try:
+            cutoff = observed - timedelta(days=keep_days)
+            db.query(OrderBookSnapshot).filter(OrderBookSnapshot.observed_at < cutoff).delete(synchronize_session=False)
+            previous = db.query(OrderBookSnapshot).filter(
+                OrderBookSnapshot.source == str(source),
+                OrderBookSnapshot.symbol == str(symbol),
+            ).order_by(OrderBookSnapshot.observed_at.desc()).first()
+            if previous is not None and (observed - previous.observed_at).total_seconds() < min_interval:
+                db.commit()
+                return None
+            row = OrderBookSnapshot(
+                source=str(source),
+                symbol=str(symbol),
+                observed_at=observed,
+                bids_json=self._json_safe(list(order_book.get("bids") or [])),
+                asks_json=self._json_safe(list(order_book.get("asks") or [])),
+                last_update_id=(str(order_book["last_update_id"]) if order_book.get("last_update_id") is not None else None),
+            )
+            db.add(row)
+            db.commit()
+            db.refresh(row)
+            return int(row.id)
+        finally:
+            db.close()
+
+    def list_order_book_snapshots(self, symbol: str, limit: int = 100) -> List[Dict[str, object]]:
+        db = self.SessionLocal()
+        try:
+            rows = db.query(OrderBookSnapshot).filter(
+                OrderBookSnapshot.symbol == str(symbol),
+            ).order_by(OrderBookSnapshot.observed_at.desc()).limit(max(1, min(int(limit), 5000))).all()
+            return [
+                {
+                    "id": row.id,
+                    "source": row.source,
+                    "symbol": row.symbol,
+                    "observed_at": row.observed_at.isoformat(),
+                    "bids": row.bids_json or [],
+                    "asks": row.asks_json or [],
+                    "last_update_id": row.last_update_id,
                 }
                 for row in rows
             ]

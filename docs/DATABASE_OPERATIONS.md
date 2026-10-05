@@ -59,3 +59,16 @@ O schema inclui `market_candles` com chave primária composta (`symbol`, `timefr
 `order_intents` no PostgreSQL é a persistência durável da intenção de ordem; Redis é usado pelo código como cache/coordenação/lock, não como substituto da tabela. Em produção, mantenha `REQUIRE_PERSISTENT_REDIS=true`, conforme `.env.vps.example`; o worker já interrompe a inicialização se só houver fallback em memória. O fallback em memória é local ao processo e não compartilha estado entre API e worker.
 
 **Limite não resolvido nesta fase:** kill switch tem flag/configuração em memória e eventos persistidos no banco, mas não foi convertido em um estado único compartilhado com Redis/PostgreSQL. Não alterei o comportamento, os locks, a idempotência ou o fluxo de reconciliação por serem invariantes protegidos pelo prompt. Consulte `docs/FINDINGS.md` antes de considerar esta arquitetura pronta para autonomia.
+
+
+## Qualidade de feeds e histórico do livro
+
+A Fase 2 adiciona `assess_ohlcv_quality` no caminho comum de `MultiTimeframeFeed`. Cada timeframe é verificado quanto a OHLCV vazio/inválido, timestamps futuros, ordenação, duplicatas, cadência/gaps e idade da última barra. `FEED_STALENESS_MULTIPLIER` (padrão `3.0`) define o limite como múltiplo do timeframe. A qualidade por timeframe é exposta em `MarketSnapshot.to_dict()` no campo `data_quality`; incidentes ficam em `data_gaps`, com estados `open`/`resolved` e deduplicação por tipo/início.
+
+Um histórico primário inválido ou stale levanta `FeedUnavailable` antes de cotação e análise; o tratamento já existente do engine pula o ciclo do símbolo. Problemas em timeframes secundários são registrados em `errors` e não substituem o histórico primário. Não foram alterados critérios de sinal, sizing, risco, ordens, kill switch ou reconciliação.
+
+Crypto é tratado como mercado 24/7. Em B3 e Forex, gaps só são inferidos dentro da mesma sessão/dia, para não confundir fechamento e fim de semana com falta de candles. **Não há calendário oficial de feriados nem tratamento completo de DST** nesta versão; a idade do último candle continua sendo o bloqueio conservador para feed parado.
+
+Se um histórico Forex não fornecer a coluna/valores de volume, os valores ausentes são normalizados para zero (não se estima volume), e `data_quality.volume_missing_rows_filled_zero` informa quantas barras foram afetadas. Valores de volume não nulos que não sejam numéricos continuam sendo rejeitados.
+
+`order_book_snapshots` guarda depth somente quando o feed usa CCXT ou Binance em `testnet`/`demo`, e apenas quando bids e asks têm conteúdo. Books sintéticos, paper e read-only sem profundidade não são persistidos. `ORDER_BOOK_HISTORY_INTERVAL_SECONDS` (60 s) limita a frequência e `ORDER_BOOK_HISTORY_RETENTION_DAYS` (7 dias; o código aceita 1–365) remove registros expirados durante cada gravação. A revisão `b7d2d043ee8a` é aditiva e o backup PostgreSQL inclui a tabela automaticamente.

@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
     REQUIRE_PERSISTENT_DATABASE: bool = os.getenv("REQUIRE_PERSISTENT_DATABASE", "false").lower() == "true"
     REQUIRE_PERSISTENT_REDIS: bool = os.getenv("REQUIRE_PERSISTENT_REDIS", "false").lower() == "true"
+    FEED_STALENESS_MULTIPLIER: float = float(os.getenv("FEED_STALENESS_MULTIPLIER", "3.0"))
+    ORDER_BOOK_HISTORY_ENABLED: bool = os.getenv("ORDER_BOOK_HISTORY_ENABLED", "true").lower() == "true"
+    ORDER_BOOK_HISTORY_RETENTION_DAYS: int = int(os.getenv("ORDER_BOOK_HISTORY_RETENTION_DAYS", "7"))
+    ORDER_BOOK_HISTORY_INTERVAL_SECONDS: int = int(os.getenv("ORDER_BOOK_HISTORY_INTERVAL_SECONDS", "60"))
     
     # Kafka
     KAFKA_BOOTSTRAP_SERVERS: str = os.getenv("KAFKA_SERVERS", "localhost:9092")

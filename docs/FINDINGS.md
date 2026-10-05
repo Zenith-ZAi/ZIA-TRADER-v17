@@ -1,6 +1,6 @@
 # Findings — ZIA-TRADER v17
 
-Atualizado em 2026-10-04. Este registro contém gaps verificados que não foram alterados para preservar as restrições do prompt (sinais, risco, gates, kill switch, idempotência, reconciliação e execução). Não é uma declaração de ausência de outros defeitos.
+Atualizado em 2026-10-05. Este registro contém gaps verificados que não foram alterados para preservar as restrições do prompt, além do escopo concluído nas fases abaixo. Não é uma declaração de ausência de outros defeitos.
 
 | Arquivo/linha | Evidência observada | Correção sugerida (aguarda revisão/aprovação) |
 | --- | --- | --- |
@@ -11,3 +11,12 @@ Atualizado em 2026-10-04. Este registro contém gaps verificados que não foram 
 | PostgreSQL/ambiente externo | A sandbox local não tem serviço PostgreSQL nem VPS/exchange; validação PostgreSQL é definida no CI, ainda depende da execução remota dos novos checks. | Aguardar CI verde e, antes de deploy, ensaiar backup/restore e migrações em ambiente isolado semelhante à VPS. |
 
 Nenhuma lógica de sinais, cálculo de risco, envio de ordem, idempotência ou reconciliação foi alterada neste refinamento. Não foi feita conexão a broker/exchange, teste de mainnet ou execução de ordem real.
+
+
+## Fase 2 — ingestão e integridade de feeds (2026-10-05)
+
+- **Corrigido:** `MultiTimeframeFeed` agora valida OHLCV, ordenação, duplicatas, timestamps futuros, gaps em sessão e staleness antes de devolver o histórico. Histórico primário inválido segue o `FeedUnavailable` existente e não chega ao restante do ciclo de análise.
+- **Corrigido:** eventos ativos/resolvidos são registrados em `data_gaps`; snapshots de order book com depth real são persistidos com intervalo mínimo e retenção configuráveis.
+- **Observabilidade:** snapshots expõem idade, cobertura, cadência e contagem de gaps em `data_quality`; erros de timeframe secundário continuam explícitos.
+- **Limitação mantida:** não foi conectado calendário oficial de feriados/DST para B3/Forex. Gaps históricos entre sessões não são inferidos; staleness do último candle é o controle fail-closed para parada atual do feed.
+- **Limite de escopo:** adapters de ordens, engine de decisão/sinais, cálculo de risco, sizing, kill switch, idempotência e reconciliação não foram editados.
