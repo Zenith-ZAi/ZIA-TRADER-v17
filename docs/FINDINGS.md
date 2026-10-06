@@ -1,6 +1,6 @@
 # Findings — ZIA-TRADER v17
 
-Atualizado em 2026-10-05. Este registro contém gaps verificados que não foram alterados para preservar as restrições do prompt, além do escopo concluído nas fases abaixo. Não é uma declaração de ausência de outros defeitos.
+Atualizado em 2026-10-06. Este registro contém gaps verificados que não foram alterados para preservar as restrições do prompt, além do escopo concluído nas fases abaixo. Não é uma declaração de ausência de outros defeitos.
 
 | Arquivo/linha | Evidência observada | Correção sugerida (aguarda revisão/aprovação) |
 | --- | --- | --- |
@@ -20,3 +20,13 @@ Nenhuma lógica de sinais, cálculo de risco, envio de ordem, idempotência ou r
 - **Observabilidade:** snapshots expõem idade, cobertura, cadência e contagem de gaps em `data_quality`; erros de timeframe secundário continuam explícitos.
 - **Limitação mantida:** não foi conectado calendário oficial de feriados/DST para B3/Forex. Gaps históricos entre sessões não são inferidos; staleness do último candle é o controle fail-closed para parada atual do feed.
 - **Limite de escopo:** adapters de ordens, engine de decisão/sinais, cálculo de risco, sizing, kill switch, idempotência e reconciliação não foram editados.
+
+## Fase 3 — MLOps e validação temporal (2026-10-06)
+
+- **Implementado:** treino controlado com seed/hash, walk-forward past-only, purge/embargo, blocos OOS não sobrepostos, métricas por regime, baselines líquidos de custos/slippage, Brier/ECE e reliability curve.
+- **Implementado:** registry existente integrado à promoção/rollback; métricas são persistidas em `model_metrics`; a entrada legada `ai/train_ensemble.py` delega ao fluxo controlado.
+- **Implementado:** monitor invocável de PSI e degradação de performance; ao cruzar limites, emite alerta, grava `drift_status.json`, tenta restaurar backup e mantém predição em `hold` até revisão manual.
+- **Implementado:** Transformer usa `batch_first=True` internamente com shape público preservado e equivalência numérica coberta por teste.
+- **Limitação de dados:** não havia dataset OHLCV de procedência verificada no checkout. Nenhum treino real, métrica de mercado ou promoção foi executado; os resultados e pressupostos estão em `docs/reports/phase3_status.md`.
+- **Limitação operacional:** monitoramento de drift é invocável, não está agendado, e depende de dados recentes rotulados. Custos padrão são pressupostos ajustáveis; short não inclui borrow/funding. O Sharpe proxy legado ainda usa `sqrt(252)` sem conhecer o timeframe.
+- **Limite de escopo:** `core/engine.py`, features de produção, sinais, sizing, risco, execução, kill switch, idempotência e reconciliação não foram editados.

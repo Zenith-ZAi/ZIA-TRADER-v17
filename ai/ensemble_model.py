@@ -4,7 +4,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Dict, Iterable, Tuple
+from typing import Dict, Tuple
 
 import joblib
 import numpy as np
@@ -22,8 +22,9 @@ class EnsembleModel:
 
     ACTION_MAP = {0: "sell", 1: "hold", 2: "buy"}
 
-    def __init__(self, model_dir: str = "models"):
+    def __init__(self, model_dir: str = "models", random_state: int = 42):
         self.model_dir = Path(model_dir)
+        self.random_state = int(random_state)
         self.rf_model = None
         self.xgb_model = None
         self.is_trained = False
@@ -40,15 +41,21 @@ class EnsembleModel:
         return self.model_dir / "ensemble_metadata.json"
 
     def _initialize_untrained_models(self) -> None:
-        self.rf_model = RandomForestClassifier(n_estimators=200, random_state=42, class_weight="balanced_subsample")
+        self.rf_model = RandomForestClassifier(
+            n_estimators=200,
+            random_state=self.random_state,
+            class_weight="balanced_subsample",
+            n_jobs=1,
+        )
         self.xgb_model = xgb.XGBClassifier(
             n_estimators=200,
             max_depth=4,
             learning_rate=0.05,
             subsample=0.9,
             colsample_bytree=0.9,
-            random_state=42,
+            random_state=self.random_state,
             eval_metric="mlogloss",
+            n_jobs=1,
         )
         self.is_trained = False
         self.feature_columns = []
@@ -122,16 +129,53 @@ class EnsembleModel:
                 aligned[label] = float(probability)
         return aligned
 
+    @staticmethod
+    def _aligned_proba_matrix(model, features: pd.DataFrame) -> np.ndarray:
+        raw = np.asarray(model.predict_proba(features), dtype=float)
+        aligned = np.zeros((len(features), 3), dtype=float)
+        for column, class_label in enumerate(model.classes_):
+            label = int(class_label)
+            if 0 <= label <= 2:
+                aligned[:, label] = raw[:, column]
+        return aligned
+
+    def _drift_hold_active(self) -> bool:
+        """Estado ausente preserva compatibilidade; estado corrompido falha fechado."""
+        status_path = self.model_dir / "drift_status.json"
+        if not status_path.exists():
+            return False
+        try:
+            with status_path.open("r", encoding="utf-8") as handle:
+                status = json.load(handle)
+            return bool(status.get("hold", True))
+        except (OSError, json.JSONDecodeError, AttributeError) as exc:
+            logger.error("Estado de drift ilegível; saída HOLD por segurança: %s", exc)
+            return True
+
+    def predict_proba(self, features: pd.DataFrame) -> np.ndarray:
+        """Probabilidades médias RF/XGBoost alinhadas a sell/hold/buy; sem alterar o modelo."""
+        if not self.is_trained or not self.feature_columns:
+            return np.tile(np.asarray([0.25, 0.50, 0.25], dtype=float), (len(features), 1))
+        if not isinstance(features, pd.DataFrame) or features.empty:
+            raise ValueError("features vazias ou inválidas")
+        if list(features.columns) != self.feature_columns:
+            raise ValueError("schema de inferência incompatível")
+        rf_probs = self._aligned_proba_matrix(self.rf_model, features)
+        xgb_probs = self._aligned_proba_matrix(self.xgb_model, features)
+        average = (rf_probs + xgb_probs) / 2.0
+        if not np.isfinite(average).all() or not np.allclose(average.sum(axis=1), 1.0, atol=1e-6):
+            raise ValueError("probabilidades inválidas ou não normalizadas")
+        return average
+
     def predict(self, features: pd.DataFrame) -> Tuple[str, float]:
         """Retorna ação e probabilidade média; qualquer incompatibilidade vira HOLD."""
+        if self._drift_hold_active():
+            logger.error("Modelo em drift hold persistente; ação bloqueada até revisão manual.")
+            return "hold", 0.5
         if not self.is_trained or not self.feature_columns:
             return "hold", 0.5
         try:
-            if list(features.columns) != self.feature_columns:
-                raise ValueError("schema de inferência incompatível")
-            rf_probs = self._aligned_proba(self.rf_model, features)
-            xgb_probs = self._aligned_proba(self.xgb_model, features)
-            avg_probs = (rf_probs + xgb_probs) / 2.0
+            avg_probs = self.predict_proba(features)[0]
             predicted_class_idx = int(np.argmax(avg_probs))
             return self.ACTION_MAP[predicted_class_idx], float(avg_probs[predicted_class_idx])
         except Exception as exc:
