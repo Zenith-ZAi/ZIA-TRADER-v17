@@ -1,11 +1,9 @@
-"""Treinamento reproduzível do Ensemble a partir de OHLCV real."""
-
+"""Entrada de treino OHLCV delegada ao pipeline controlado de MLOps."""
 from __future__ import annotations
 
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
@@ -14,10 +12,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import pandas as pd
-from sklearn.metrics import accuracy_score, balanced_accuracy_score, f1_score, precision_score, recall_score
-
-from ai.ensemble_model import EnsembleModel
-from core.feature_pipeline import FeaturePipeline
 
 
 def load_ohlcv(path: str | Path) -> pd.DataFrame:
@@ -45,48 +39,26 @@ def train_from_ohlcv(
     horizon: int = 3,
     buy_threshold: float = 0.001,
     sell_threshold: float = -0.001,
+    *,
+    seed: int = 42,
+    transaction_cost_bps: float = 10.0,
+    slippage_bps: float = 5.0,
+    report_path: str | Path = "docs/reports/model-validation-latest.md",
 ) -> Dict[str, Any]:
-    ohlcv = load_ohlcv(source)
-    pipeline = FeaturePipeline()
-    X, y = pipeline.build_supervised(ohlcv, horizon, buy_threshold, sell_threshold)
-    if len(X) < 120:
-        raise ValueError("dataset supervisionado insuficiente; são necessárias pelo menos 120 amostras")
-    split = int(len(X) * 0.80)
-    train_end = split - horizon
-    if train_end < 60 or len(X) - split < 20:
-        raise ValueError("divisão cronológica insuficiente para treino/validação")
-    X_train, y_train = X.iloc[:train_end], y.iloc[:train_end]
-    X_valid, y_valid = X.iloc[split:], y.iloc[split:]
-    model = EnsembleModel(str(model_dir))
-    metadata = model.train(
-        X_train,
-        y_train,
-        metadata={
-            "trained_at": datetime.now(timezone.utc).isoformat(),
-            "source": str(source),
-            "horizon": horizon,
-            "buy_threshold": buy_threshold,
-            "sell_threshold": sell_threshold,
-            "train_start": str(X_train.index.min()),
-            "train_end": str(X_train.index.max()),
-            "validation_start": str(X_valid.index.min()),
-            "validation_end": str(X_valid.index.max()),
-        },
+    """Compatibilidade de API/CLI; não treina nem grava artefatos diretamente."""
+    from learning.training_pipeline import train_oos
+
+    return train_oos(
+        source,
+        model_dir=model_dir,
+        horizon=horizon,
+        buy_threshold=buy_threshold,
+        sell_threshold=sell_threshold,
+        seed=seed,
+        transaction_cost_bps=transaction_cost_bps,
+        slippage_bps=slippage_bps,
+        report_path=report_path,
     )
-    predictions = [model.predict(row.to_frame().T)[0] for _, row in X_valid.iterrows()]
-    y_pred = [{"sell": 0, "hold": 1, "buy": 2}[action] for action in predictions]
-    metrics = {
-        "accuracy": float(accuracy_score(y_valid, y_pred)),
-        "balanced_accuracy": float(balanced_accuracy_score(y_valid, y_pred)),
-        "precision_macro": float(precision_score(y_valid, y_pred, average="macro", zero_division=0)),
-        "recall_macro": float(recall_score(y_valid, y_pred, average="macro", zero_division=0)),
-        "f1_macro": float(f1_score(y_valid, y_pred, average="macro", zero_division=0)),
-        "validation_rows": int(len(y_valid)),
-    }
-    metadata["validation_metrics"] = metrics
-    with Path(model_dir, "ensemble_metadata.json").open("w", encoding="utf-8") as handle:
-        json.dump(metadata, handle, ensure_ascii=False, indent=2, default=str)
-    return metadata
 
 
 def main() -> None:
@@ -96,8 +68,23 @@ def main() -> None:
     parser.add_argument("--horizon", type=int, default=3)
     parser.add_argument("--buy-threshold", type=float, default=0.001)
     parser.add_argument("--sell-threshold", type=float, default=-0.001)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--transaction-cost-bps", type=float, default=10.0)
+    parser.add_argument("--slippage-bps", type=float, default=5.0)
+    parser.add_argument("--report-path", default="docs/reports/model-validation-latest.md")
     args = parser.parse_args()
-    print(json.dumps(train_from_ohlcv(args.dataset, args.model_dir, args.horizon, args.buy_threshold, args.sell_threshold), ensure_ascii=False, indent=2, default=str))
+    result = train_from_ohlcv(
+        args.dataset,
+        model_dir=args.model_dir,
+        horizon=args.horizon,
+        buy_threshold=args.buy_threshold,
+        sell_threshold=args.sell_threshold,
+        seed=args.seed,
+        transaction_cost_bps=args.transaction_cost_bps,
+        slippage_bps=args.slippage_bps,
+        report_path=args.report_path,
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
 
 
 if __name__ == "__main__":
