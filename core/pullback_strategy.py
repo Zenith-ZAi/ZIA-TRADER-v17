@@ -192,7 +192,7 @@ class PullbackSignalCache:
     """Pré-calcula indicadores e pivôs uma vez, mantendo confirmação causal por posição."""
 
     def __init__(self, data: pd.DataFrame, **kwargs: Any):
-        self.data = data
+        self.data = data.copy(deep=True)
         self.kwargs = {
             "ema_period": int(kwargs.get("ema_period", 200)),
             "rsi_period": int(kwargs.get("rsi_period", 14)),
@@ -221,9 +221,136 @@ class PullbackSignalCache:
         high_pivots = _last_confirmed_pivots(self.frame["high"], "high")
         low_pairs = self._confirmed_pairs(low_pivots, len(self.frame))
         high_pairs = self._confirmed_pairs(high_pivots, len(self.frame))
+        self._close_series = close
+        self._ema_series = ema
+        self._rsi_series = rsi
+        self._atr_series = atr
+        self._average_volume_series = average_volume
+        self._open_values = self.frame["open"].tolist()
+        self._high_values = self.frame["high"].tolist()
+        self._low_values = self.frame["low"].tolist()
+        self._close_values = close.tolist()
+        self._volume_values = self.frame["volume"].tolist()
+        self._ema_fast_state = float(close.ewm(span=self.kwargs["ema_period"], adjust=False).mean().iloc[-1])
+        self._bar_count = len(self.frame)
+        previous_close = close.shift(1)
+        true_range = pd.concat(
+            [self.frame["high"] - self.frame["low"], (self.frame["high"] - previous_close).abs(), (self.frame["low"] - previous_close).abs()],
+            axis=1,
+        ).max(axis=1)
+        self._true_ranges = true_range.tolist()
+        self._low_pivots = list(low_pivots)
+        self._high_pivots = list(high_pivots)
+        self._low_pairs = list(low_pairs)
+        self._high_pairs = list(high_pairs)
         self._signals = []
         for index in range(len(self.frame)):
             self._signals.append(self._signal_at(index, close, ema, rsi, atr, average_volume, low_pairs, high_pairs))
+
+    def extend(self, data: pd.DataFrame) -> bool:
+        """Acrescenta somente novas barras quando o cache atual é prefixo idêntico."""
+        required = ["open", "high", "low", "close", "volume"]
+        if not self.valid or not isinstance(data, pd.DataFrame) or not set(required).issubset(data.columns):
+            return False
+        if len(data) <= len(self.frame):
+            return False
+        try:
+            normalized = data[required].apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+        except (TypeError, ValueError):
+            return False
+        if len(normalized) != len(data) or len(normalized) <= len(self.frame):
+            return False
+        old_size = len(self.frame)
+        prefix = normalized.iloc[:old_size]
+        if not prefix.index.equals(self.frame.index) or not np.array_equal(
+            prefix.to_numpy(dtype="float64"), self.frame.to_numpy(dtype="float64")
+        ):
+            return False
+        additions = normalized.iloc[old_size:]
+        if not np.isfinite(additions.to_numpy(dtype="float64")).all():
+            return False
+
+        p = self.kwargs
+        ema_alpha = 2.0 / (float(p["ema_period"]) + 1.0)
+        new_ema: list[float] = []
+        new_rsi: list[float] = []
+        new_atr: list[float] = []
+        new_average_volume: list[float] = []
+
+        for timestamp, row in additions.iterrows():
+            open_price, high, low, close, volume = (float(row[column]) for column in required)
+            previous_close = self._close_values[-1] if self._close_values else None
+            self._ema_fast_state = close if self._ema_fast_state is None else ema_alpha * close + (1.0 - ema_alpha) * self._ema_fast_state
+            self._bar_count += 1
+            ema_value = self._ema_fast_state if self._bar_count >= p["ema_period"] else np.nan
+
+            self._open_values.append(open_price)
+            self._high_values.append(high)
+            self._low_values.append(low)
+            self._close_values.append(close)
+            self._volume_values.append(volume)
+            true_range = max(
+                high - low,
+                abs(high - previous_close) if previous_close is not None else np.nan,
+                abs(low - previous_close) if previous_close is not None else np.nan,
+            )
+            self._true_ranges.append(float(true_range))
+
+            deltas = np.diff(self._close_values[-(p["rsi_period"] + 1):])
+            if len(deltas) >= p["rsi_period"]:
+                average_gain = float(np.maximum(deltas[-p["rsi_period"]:], 0.0).mean())
+                average_loss = float(np.maximum(-deltas[-p["rsi_period"]:], 0.0).mean())
+                relative_strength = average_gain / average_loss if average_loss else np.nan
+                rsi_value = 100.0 - (100.0 / (1.0 + relative_strength)) if np.isfinite(relative_strength) else 50.0
+            else:
+                rsi_value = 50.0
+            atr_values = self._true_ranges[-p["atr_period"]:]
+            atr_value = float(np.mean(atr_values)) if len(atr_values) >= p["atr_period"] else np.nan
+            volume_values = self._volume_values[-p["volume_period"]:]
+            average_value = float(np.mean(volume_values)) if len(volume_values) >= p["volume_period"] else np.nan
+
+            index = len(self._close_values) - 1
+            center = index - 2
+            if center >= 2:
+                pivot_window_low = self._low_values[center - 2:index + 1]
+                pivot_window_high = self._high_values[center - 2:index + 1]
+                pivot_low = self._low_values[center]
+                pivot_high = self._high_values[center]
+                if pivot_low <= min(pivot_window_low):
+                    self._low_pivots.append((center, pivot_low))
+                if pivot_high >= max(pivot_window_high):
+                    self._high_pivots.append((center, pivot_high))
+            low_pair = tuple(self._low_pivots[-2:]) if len(self._low_pivots) >= 2 else None
+            high_pair = tuple(self._high_pivots[-2:]) if len(self._high_pivots) >= 2 else None
+            self._low_pairs.append(low_pair)
+            self._high_pairs.append(high_pair)
+            new_ema.append(float(ema_value) if np.isfinite(ema_value) else np.nan)
+            new_rsi.append(float(rsi_value))
+            new_atr.append(float(atr_value) if np.isfinite(atr_value) else np.nan)
+            new_average_volume.append(float(average_value) if np.isfinite(average_value) else np.nan)
+
+        self.frame = pd.concat([self.frame, additions], axis=0)
+        self.data = data.copy(deep=True)
+        self._close_series = pd.concat([self._close_series, additions["close"]])
+        self._ema_series = pd.concat([self._ema_series, pd.Series(new_ema, index=additions.index)])
+        self._rsi_series = pd.concat([self._rsi_series, pd.Series(new_rsi, index=additions.index)])
+        self._atr_series = pd.concat([self._atr_series, pd.Series(new_atr, index=additions.index)])
+        self._average_volume_series = pd.concat([
+            self._average_volume_series,
+            pd.Series(new_average_volume, index=additions.index),
+        ])
+        for index in range(old_size, len(self.frame)):
+            self._signals.append(self._signal_at(
+                index,
+                self._close_series,
+                self._ema_series,
+                self._rsi_series,
+                self._atr_series,
+                self._average_volume_series,
+                self._low_pairs,
+                self._high_pairs,
+            ))
+        return True
 
     @staticmethod
     def _confirmed_pairs(pivots: list[tuple[int, float]], size: int) -> list[tuple[tuple[int, float], tuple[int, float]] | None]:
