@@ -46,8 +46,9 @@ As referências detalhadas e correções sugeridas também estão em [`FINDINGS.
 | `git diff --check` | executado sem saída de erro | executado sem saída de erro | passou |
 | `python3 -m pytest -q` | 120 passed, 3 skipped (25,13 s) | 132 passed, 3 skipped (22,86 s) | passou; +12 testes, sem redução |
 | Testes focalizados | — | 25 passed (5,98 s) | passou |
+| CI GitHub Actions | — | PostgreSQL 16: 135 passed, 2 warnings; build do container aprovado | passou |
 
-Os skips seguem condicionais a serviços/configurações externas e não são apresentados como validação executada. CI remoto, PostgreSQL/VPS e broker não foram verificados neste relatório.
+Os 3 skips ocorreram somente na execução local; o job remoto testou com PostgreSQL 16. Os warnings reportados pelo pytest não impediram os checks. VPS e broker não foram verificados.
 
 ## Arquivos alterados
 
