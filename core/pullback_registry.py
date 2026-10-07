@@ -47,6 +47,9 @@ class PullbackCacheRegistry:
         entry = self._entries.get(key)
         if entry and entry.signature == signature and entry.kwargs_signature == kwargs_signature:
             return entry.cache
+        if entry and entry.kwargs_signature == kwargs_signature and entry.cache.extend(data):
+            self._entries[key] = _Entry(entry.cache, signature, kwargs_signature)
+            return entry.cache
         cache = PullbackSignalCache(data, **kwargs)
         self._entries[key] = _Entry(cache, signature, kwargs_signature)
         return cache

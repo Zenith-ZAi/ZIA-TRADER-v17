@@ -37,6 +37,10 @@ class NewsProcessor:
             provider_concurrency=int(getattr(settings, "HTTP_PROVIDER_CONCURRENCY", 10)),
             failure_threshold=int(getattr(settings, "PROVIDER_FAILURE_THRESHOLD", 3)),
             cooldown_seconds=float(getattr(settings, "PROVIDER_CIRCUIT_COOLDOWN_SECONDS", 60.0)),
+            max_retries=int(getattr(settings, "HTTP_MAX_RETRIES", 2)),
+            backoff_base_seconds=float(getattr(settings, "HTTP_RETRY_BACKOFF_BASE_SECONDS", 0.25)),
+            backoff_max_seconds=float(getattr(settings, "HTTP_RETRY_BACKOFF_MAX_SECONDS", 2.0)),
+            jitter_ratio=float(getattr(settings, "HTTP_RETRY_JITTER_RATIO", 0.25)),
         )
         logger.info("NewsProcessor inicializado com provedores gratuitos e pagos opcionais.")
 

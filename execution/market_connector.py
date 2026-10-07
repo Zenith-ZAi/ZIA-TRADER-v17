@@ -41,6 +41,22 @@ def normalize_symbol(symbol: str, market: str = "crypto") -> str:
     return value
 
 
+def _new_provider_http(settings: Settings, timeout: float) -> AsyncProviderHTTP:
+    return AsyncProviderHTTP(
+        connect_timeout=float(getattr(settings, "HTTP_CONNECT_TIMEOUT_SECONDS", 5.0)),
+        read_timeout=timeout,
+        max_connections=int(getattr(settings, "HTTP_MAX_CONNECTIONS", 50)),
+        max_keepalive_connections=int(getattr(settings, "HTTP_MAX_KEEPALIVE_CONNECTIONS", 20)),
+        provider_concurrency=int(getattr(settings, "HTTP_PROVIDER_CONCURRENCY", 10)),
+        failure_threshold=int(getattr(settings, "PROVIDER_FAILURE_THRESHOLD", 3)),
+        cooldown_seconds=float(getattr(settings, "PROVIDER_CIRCUIT_COOLDOWN_SECONDS", 60.0)),
+        max_retries=int(getattr(settings, "HTTP_MAX_RETRIES", 2)),
+        backoff_base_seconds=float(getattr(settings, "HTTP_RETRY_BACKOFF_BASE_SECONDS", 0.25)),
+        backoff_max_seconds=float(getattr(settings, "HTTP_RETRY_BACKOFF_MAX_SECONDS", 2.0)),
+        jitter_ratio=float(getattr(settings, "HTTP_RETRY_JITTER_RATIO", 0.25)),
+    )
+
+
 class YahooB3Adapter:
     """Dados públicos Yahoo para B3, sem caminho de escrita."""
 
@@ -49,21 +65,18 @@ class YahooB3Adapter:
         self.is_connected = False
         self.base_url = str(getattr(settings, "YAHOO_FINANCE_BASE_URL", "https://query1.finance.yahoo.com/v8/finance/chart"))
         self.timeout = float(getattr(settings, "HTTP_READ_TIMEOUT_SECONDS", getattr(settings, "NEWS_HTTP_TIMEOUT_SECONDS", 8.0)))
-        self.http_client = http_client or AsyncProviderHTTP(
-            connect_timeout=float(getattr(settings, "HTTP_CONNECT_TIMEOUT_SECONDS", 5.0)),
-            read_timeout=self.timeout,
-            max_connections=int(getattr(settings, "HTTP_MAX_CONNECTIONS", 50)),
-            max_keepalive_connections=int(getattr(settings, "HTTP_MAX_KEEPALIVE_CONNECTIONS", 20)),
-            provider_concurrency=int(getattr(settings, "HTTP_PROVIDER_CONCURRENCY", 10)),
-            failure_threshold=int(getattr(settings, "PROVIDER_FAILURE_THRESHOLD", 3)),
-            cooldown_seconds=float(getattr(settings, "PROVIDER_CIRCUIT_COOLDOWN_SECONDS", 60.0)),
-        )
+        self._owns_http_client = http_client is None
+        self.http_client = http_client or _new_provider_http(settings, self.timeout)
 
     async def connect(self) -> None:
+        if self._owns_http_client and self.http_client.client.is_closed:
+            self.http_client = _new_provider_http(self.settings, self.timeout)
         self.is_connected = True
 
     async def close(self) -> None:
         self.is_connected = False
+        if self._owns_http_client:
+            await self.http_client.aclose()
 
     async def _chart(self, symbol: str, interval: str = "1h", limit: int = 100) -> pd.DataFrame:
         normalized = normalize_symbol(symbol, "b3")
@@ -133,22 +146,19 @@ class ForexPublicReadOnlyAdapter:
         self.is_connected = False
         self.base_url = str(getattr(settings, "YAHOO_FINANCE_BASE_URL", "https://query1.finance.yahoo.com/v8/finance/chart"))
         self.timeout = float(getattr(settings, "HTTP_READ_TIMEOUT_SECONDS", getattr(settings, "NEWS_HTTP_TIMEOUT_SECONDS", 8.0)))
-        self.http_client = http_client or AsyncProviderHTTP(
-            connect_timeout=float(getattr(settings, "HTTP_CONNECT_TIMEOUT_SECONDS", 5.0)),
-            read_timeout=self.timeout,
-            max_connections=int(getattr(settings, "HTTP_MAX_CONNECTIONS", 50)),
-            max_keepalive_connections=int(getattr(settings, "HTTP_MAX_KEEPALIVE_CONNECTIONS", 20)),
-            provider_concurrency=int(getattr(settings, "HTTP_PROVIDER_CONCURRENCY", 10)),
-            failure_threshold=int(getattr(settings, "PROVIDER_FAILURE_THRESHOLD", 3)),
-            cooldown_seconds=float(getattr(settings, "PROVIDER_CIRCUIT_COOLDOWN_SECONDS", 60.0)),
-        )
+        self._owns_http_client = http_client is None
+        self.http_client = http_client or _new_provider_http(settings, self.timeout)
 
 
     async def connect(self) -> None:
+        if self._owns_http_client and self.http_client.client.is_closed:
+            self.http_client = _new_provider_http(self.settings, self.timeout)
         self.is_connected = True
 
     async def close(self) -> None:
         self.is_connected = False
+        if self._owns_http_client:
+            await self.http_client.aclose()
 
     @staticmethod
     def _parts(symbol: str) -> tuple[str, str]:
@@ -184,8 +194,15 @@ class ForexPublicReadOnlyAdapter:
         price = None
         source = "forex-python"
         try:
-            from forex_python.converter import CurrencyRates
-            price = float(CurrencyRates().get_rate(base, quote))
+            def fetch_rate() -> float:
+                from forex_python.converter import CurrencyRates
+                return float(CurrencyRates().get_rate(base, quote))
+
+            price = await self.http_client.run_sync(
+                "forex_python",
+                fetch_rate,
+                timeout_seconds=self.timeout,
+            )
         except Exception as exc:
             logger.warning("forex-python indisponível para %s; usando Yahoo: %s", symbol, exc)
             source = "yahoo-finance"
