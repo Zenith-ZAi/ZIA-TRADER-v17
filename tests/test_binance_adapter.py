@@ -22,6 +22,19 @@ class FakeSession:
 
     def request(self, method, url, params=None, data=None, headers=None, timeout=None):
         self.calls.append({"method": method, "url": url, "params": params, "data": data, "headers": headers, "timeout": timeout})
+        if url.endswith("/v3/order"):
+            return FakeResponse({
+                "symbol": "BTCUSDT",
+                "orderId": 42,
+                "clientOrderId": "zia-restart-1",
+                "price": "100.0",
+                "origQty": "0.1",
+                "executedQty": "0.04",
+                "cummulativeQuoteQty": "4.0",
+                "status": "PARTIALLY_FILLED",
+                "type": "LIMIT",
+                "side": "BUY",
+            })
         if url.endswith("/v3/time"):
             return FakeResponse({"serverTime": 1700000000000})
         if url.endswith("/v3/exchangeInfo"):
@@ -98,3 +111,18 @@ def test_adapter_aggregates_supported_10m_from_5m():
     assert len(history) == 1
     kline_call = next(call for call in session.calls if call["url"].endswith("/v3/klines"))
     assert "interval=5m" in str(kline_call["params"])
+
+
+def test_adapter_queries_order_by_client_order_id():
+    session = FakeSession()
+    adapter = BinanceSpotAdapter(sandbox_settings(), session=session)
+
+    result = asyncio.run(adapter.get_order_by_client_order_id("zia-restart-1", "BTC/USDT"))
+
+    assert result["status"] == "partially_filled"
+    assert result["filled_quantity"] == 0.04
+    assert result["order_id"] == "42"
+    request = next(call for call in session.calls if call["url"].endswith("/v3/order"))
+    assert request["method"] == "GET"
+    assert "symbol=BTCUSDT" in request["params"]
+    assert "origClientOrderId=zia-restart-1" in request["params"]

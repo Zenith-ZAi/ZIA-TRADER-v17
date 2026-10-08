@@ -356,6 +356,43 @@ class BinanceSpotAdapter:
         payload = await self._request("GET", "/v3/order", {"symbol": code, "orderId": order_id}, signed=True)
         return {"status": payload.get("status", "UNKNOWN"), "order_id": str(payload.get("orderId", order_id)), "raw": payload}
 
+    async def get_order_by_client_order_id(self, client_order_id: str, symbol: str) -> Dict[str, Any]:
+        """Consulta uma ordem individual após timeout/restart usando o ID idempotente."""
+        code = self.symbol_code(symbol)
+        payload = await self._request(
+            "GET",
+            "/v3/order",
+            {"symbol": code, "origClientOrderId": client_order_id},
+            signed=True,
+        )
+        order_id = str(payload.get("orderId") or "")
+        if order_id:
+            self._order_symbols[order_id] = code
+        exchange_status = str(payload.get("status", "UNKNOWN")).upper()
+        status_map = {
+            "NEW": "open",
+            "PENDING_NEW": "pending",
+            "PARTIALLY_FILLED": "partially_filled",
+            "FILLED": "filled",
+            "CANCELED": "canceled",
+            "REJECTED": "rejected",
+            "EXPIRED": "expired",
+        }
+        filled_quantity = float(payload.get("executedQty", 0.0) or 0.0)
+        quote_quantity = float(payload.get("cummulativeQuoteQty", 0.0) or 0.0)
+        return {
+            "status": status_map.get(exchange_status, exchange_status.lower()),
+            "exchange_status": exchange_status,
+            "order_id": order_id or None,
+            "client_order_id": str(payload.get("clientOrderId") or client_order_id),
+            "symbol": symbol,
+            "action": str(payload.get("side", "")).lower(),
+            "order_type": str(payload.get("type", "")).lower(),
+            "filled_quantity": filled_quantity,
+            "filled_price": quote_quantity / filled_quantity if filled_quantity else float(payload.get("price", 0.0) or 0.0),
+            "raw": payload,
+        }
+
     async def get_open_orders(self) -> list[Dict[str, Any]]:
         payload = await self._request("GET", "/v3/openOrders", signed=True)
         return [

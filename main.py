@@ -55,9 +55,14 @@ async def lifespan(_: FastAPI):
     db_manager.create_tables()
     await trading_manager.exchange_connector.connect()
     if settings.AUTO_START_ENGINES:
-        await _start_engine("trading", trading_manager.start_trading)
-        await _start_engine("sniper", trading_manager.start_sniper)
-        logger.info("Motores de trading e Sniper iniciados automaticamente.")
+        try:
+            await _ensure_reconciliation_ok("auto-start")
+        except HTTPException as exc:
+            logger.error("Motores não iniciados após restart: %s", exc.detail)
+        else:
+            await _start_engine("trading", trading_manager.start_trading, preflight=False)
+            await _start_engine("sniper", trading_manager.start_sniper, preflight=False)
+            logger.info("Motores de trading e Sniper iniciados automaticamente.")
     else:
         logger.info("Motores não iniciados automaticamente; use os endpoints de controle.")
     try:
@@ -152,13 +157,33 @@ async def get_trader_user(
     return current_user
 
 
-async def _start_engine(name: str, factory) -> bool:
+async def _ensure_reconciliation_ok(name: str) -> None:
+    """Bloqueia o start de engines quando a recuperação de ordens não é conclusiva."""
+    try:
+        reconciliation = await trading_manager.reconcile()
+    except Exception as exc:
+        logger.exception("Reconciliação pré-start falhou; motor %s permanecerá parado.", name)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Reconciliação de ordens indisponível; início do motor bloqueado.",
+        ) from exc
+    if reconciliation.get("status") != "ok":
+        logger.error("Reconciliação pré-start requer atenção; motor %s permanecerá parado.", name)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"message": "Reconciliação de ordens requer intervenção; início do motor bloqueado.", "reconciliation": reconciliation},
+        )
+
+
+async def _start_engine(name: str, factory, *, preflight: bool = True) -> bool:
     """Inicia um motor uma única vez e registra sua task para shutdown limpo."""
     current_task = engine_tasks.get(name)
     if current_task and not current_task.done():
         return False
     if not trading_manager.exchange_connector.is_connected:
         await trading_manager.exchange_connector.connect()
+    if preflight:
+        await _ensure_reconciliation_ok(name)
     task = asyncio.create_task(factory(), name=f"zia-{name}")
     engine_tasks[name] = task
     return True

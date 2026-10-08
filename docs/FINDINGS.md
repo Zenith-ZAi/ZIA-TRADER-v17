@@ -1,16 +1,16 @@
 # Findings — ZIA-TRADER v17
 
-Atualizado em 2026-10-06. Este registro contém gaps verificados que não foram alterados para preservar as restrições do prompt, além do escopo concluído nas fases abaixo. Não é uma declaração de ausência de outros defeitos.
+Atualizado em 2026-10-08. Este registro contém gaps verificados que não foram alterados para preservar as restrições do prompt, além do escopo concluído nas fases abaixo. Não é uma declaração de ausência de outros defeitos.
 
 | Arquivo/linha | Evidência observada | Correção sugerida (aguarda revisão/aprovação) |
 | --- | --- | --- |
 | `infra/redis_cache.py:94-105` | Se Redis não conecta na criação do objeto, `RedisCache` usa `_InMemoryFallback`, que é apenas local ao processo. Isso não é estado compartilhado entre API e worker. | Em modo de produção/autonomia, bloquear a inicialização em qualquer processo sem Redis persistente e uniformizar health checks/fail-closed em todos os serviços. Não trocar o backend de locks sem ensaios de concorrência. |
-| `core/reconciliation.py:58-73, 93-97` | Cache de intenção é consultado como apoio; a tabela de intents é consultada primeiro e o fluxo depende do Redis apenas para dados transitórios/locks. | Formalizar por RFC quais campos são authoritative no PostgreSQL e quais são cache; executar testes de falha Redis/DB antes de alterar recuperação ou retry. |
+| `core/reconciliation.py::_cached_intent/_cache_intent` | Cache de intenção é consultado como apoio; a tabela de intents é consultada primeiro e o fluxo depende do Redis apenas para dados transitórios/locks. | Formalizar por RFC quais campos são authoritative no PostgreSQL e quais são cache; executar testes de falha Redis/DB antes de alterar recuperação ou retry. |
 | `core/manager.py:107-115`; `config/settings.py:30` | A ativação do kill switch atualiza a configuração do objeto em memória e registra evento persistente; não há evidência nesta fase de leitura de um estado único compartilhado após restart/entre processos. | Definir e revisar armazenamento atômico durável do estado do kill switch, carregamento no startup e consistência com cada adapter; manter fail-closed e cobrir restart/falhas antes de mudar código. |
 | `docs/DATABASE_OPERATIONS.md` (TimescaleDB) | Hypertable opcional está implementada apenas para `market_candles`, desativada por padrão; a extensão não está disponível no serviço PostgreSQL padrão do Compose. | Validar em instância TimescaleDB de teste, medindo migração, constraint de candle e downgrade/restore antes de ativar a flag. |
-| PostgreSQL/ambiente externo | A sandbox local não tem serviço PostgreSQL nem VPS/exchange; validação PostgreSQL é definida no CI, ainda depende da execução remota dos novos checks. | Aguardar CI verde e, antes de deploy, ensaiar backup/restore e migrações em ambiente isolado semelhante à VPS. |
+| PostgreSQL/ambiente externo | A sandbox local não tem serviço PostgreSQL, VPS ou exchange; o backend é validado com SQLite local e PostgreSQL via CI, sem ensaio de deployment real. | Antes de deploy, ensaiar backup/restore, migrações e reconciliação em ambiente isolado semelhante à VPS e validar broker Demo/Testnet. |
 
-Nenhuma lógica de sinais, cálculo de risco, envio de ordem, idempotência ou reconciliação foi alterada neste refinamento. Não foi feita conexão a broker/exchange, teste de mainnet ou execução de ordem real.
+Nas Fases 1–4, nenhuma lógica de sinais, cálculo de risco, sizing ou execução foi alterada. A Fase 5 adiciona resiliência de reconciliação e consulta read-only de ordens, sem mudar sinais, indicadores, sizing ou limites de risco. Nenhuma conexão real a broker/exchange, teste de mainnet ou execução de ordem foi feita; as flags live permanecem desligadas.
 
 
 ## Fase 2 — ingestão e integridade de feeds (2026-10-05)
@@ -39,3 +39,14 @@ Nenhuma lógica de sinais, cálculo de risco, envio de ordem, idempotência ou r
 - **Corrigido com aprovação explícita do usuário (2026-10-08):** o guard de warm-up do cache em `core/pullback_strategy.py` foi alinhado ao primeiro prefixo aceito pelo cálculo canônico, sem alterar `calculate_pullback_signal` ou seus critérios. A regressão `tests/test_phase4_parity.py::test_pullback_cache_matches_canonical_at_warmup_boundary` verifica que, com `ema_period=50` e 52 barras, ambos retornam `candidate_action="buy"` e `action="hold"`; a comparação inclui a primeira posição válida. Nenhum método de ordem/execução foi alterado.
 - **Paridade limitada:** `tests/test_phase4_parity.py` usa candles determinísticos sintéticos. O teste compara somente o cálculo de sinal candle-only e estados/indicadores de cache; não prova paridade de ordem-flow, notícias, IA, risk gates, execução, broker ou dados de mercado reais. Confirmar com dataset verificado e Demo/shadow.
 - **Nenhum método de ordem, cálculo de risco, sizing, kill switch, idempotência, reconciliação ou fórmula canônica de sinal foi alterado.** O escopo e os resultados medidos constam em `docs/reports/phase4_status.md`.
+
+
+## Fase 5 — robustez do broker (2026-10-08)
+
+- **Corrigido:** ao encontrar intent persistida como `submitted`, `pending`, `open` ou `partially_filled`, o reconciliador consulta a exchange por `clientOrderId` antes de reutilizar a intent; o estado remoto e o exchange order ID são persistidos, inclusive para fills parciais/terminais.
+- **Corrigido:** `reconcile()` varre as intents abertas após restart; respostas confirmadas atualizam o estado local. Estado remoto ausente, divergente ou desconhecido é reportado como recuperação pendente/atenção. O auto-start não cria tasks e registra erro se a reconciliação não está `ok`; starts manuais retornam HTTP 503 antes de criar a task.
+- **Fail-closed:** exceção de transporte sem confirmação remota deixa a intent em `submitted`, registra o erro e retorna `recovery_pending`, sem retry automático. Respostas explícitas de erro do adapter mantêm o retry limitado existente com o mesmo client ID.
+- **Consulta Binance:** foi adicionada consulta assinada somente de leitura por `origClientOrderId` em `/v3/order`, propagada por `ExchangeConnector` e `MarketConnector`. O caminho foi validado por `FakeSession`; nenhuma requisição real à Binance foi feita.
+- **Suíte de falhas:** cobre timeout com aceitação remota, timeout ambíguo, restart com `submitted`, sweep na reconciliação, fill parcial, reuso sem duplicidade, bloqueio pré-start, consulta do adapter e reconexão do WebSocket existente. A reconexão exercitada é somente a do dashboard FastAPI (`/ws/dashboard`).
+- **Limitação confirmada:** não há implementação de WebSocket da exchange no código atual; portanto a reconexão de stream do broker não foi implementada nem validada. Também foi observado que `BinanceMainnetAdapter.place_order` não recebe/propaga `client_order_id`; fora do escopo Demo/Testnet, isso permanece sem correção. Manter `LIVE_TRADING_ENABLED=false` e `LIVE_MODE=false` até revisão e teste específicos.
+- **Intervenção operacional:** quando a consulta por ID e a lista de ordens abertas não confirmam o estado, a intent continua pendente e o motor não inicia; é necessária reconciliação/manual review, não um reenvio automático.
