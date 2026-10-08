@@ -367,7 +367,7 @@ class PullbackSignalCache:
 
     def _signal_at(self, index: int, close: pd.Series, ema: pd.Series, rsi: pd.Series, atr: pd.Series, average_volume: pd.Series, low_pairs: list[tuple[tuple[int, float], tuple[int, float]] | None], high_pairs: list[tuple[tuple[int, float], tuple[int, float]] | None]) -> PullbackSignal:
         p = self.kwargs
-        if index < max(p["ema_period"], 40) + 2:
+        if index < max(p["ema_period"], 40) + 1:
             return _hold("histórico insuficiente para EMA e confirmação do pullback")
         current_price = float(close.iloc[index])
         atr_value = float(atr.iloc[index]) if np.isfinite(atr.iloc[index]) else 0.0

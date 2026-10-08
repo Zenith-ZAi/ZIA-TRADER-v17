@@ -84,24 +84,24 @@ def test_pullback_cache_matches_canonical_calculation_at_each_prefix():
     data = ohlcv(140)
     cache = PullbackSignalCache(data, ema_period=50)
 
-    # Position 51 is the documented one-bar cache warm-up divergence below.
-    for position in range(52, len(data)):
+    # Include the first prefix accepted by the canonical length guard.
+    for position in range(51, len(data)):
         expected = calculate_pullback_signal(data.iloc[:position + 1], ema_period=50)
         actual = cache.at(position)
         _assert_pullback_decision_equal(actual, expected)
 
 
-def test_pullback_cache_warmup_divergence_is_explicitly_preserved():
+def test_pullback_cache_matches_canonical_at_warmup_boundary():
     data = ohlcv(140)
     cache = PullbackSignalCache(data, ema_period=50)
     live = calculate_pullback_signal(data.iloc[:52], ema_period=50)
     cached = cache.at(51)
 
-    # Both paths reject entry (hold); the candidate/diagnostic payload differs by
-    # one bar. Do not silently adjust this signal gate without human review.
+    # Candidate fields now match the canonical calculation at the first valid
+    # prefix; the final action remains hold because no trigger is confirmed.
+    _assert_pullback_decision_equal(cached, live)
     assert live.action == cached.action == "hold"
-    assert live.candidate_action == "buy"
-    assert cached.candidate_action == "hold"
+    assert live.candidate_action == cached.candidate_action == "buy"
 
 
 def test_pullback_registry_incremental_append_matches_full_rebuild():
