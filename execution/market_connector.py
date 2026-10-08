@@ -430,6 +430,12 @@ class MarketConnector:
             return await self._adapter.get_order_status(order_id)
         return await self._adapter.get_order_status(order_id, self.normalize_symbol(symbol))
 
+    async def get_order_by_client_order_id(self, client_order_id: str, symbol: str) -> Optional[Dict[str, Any]]:
+        method = getattr(self._adapter, "get_order_by_client_order_id", None)
+        if method is None:
+            return None
+        return await method(client_order_id, self.normalize_symbol(symbol))
+
     async def get_account_balance(self) -> Dict[str, float]:
         return await self._adapter.get_account_balance()
 

@@ -23,7 +23,7 @@ class FakeExchange:
         self.calls.append(dict(order))
         if self.fail_once:
             self.fail_once = False
-            raise TimeoutError("transporte indisponível")
+            return {"status": "error", "reason": "mock adapter rejection"}
         return {
             "status": "success",
             "order_id": "ex-1",

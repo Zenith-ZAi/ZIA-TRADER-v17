@@ -207,6 +207,12 @@ class ExchangeConnector:
     async def get_order_status(self, order_id: str) -> Dict[str, Any]:
         return await self._adapter.get_order_status(order_id)
 
+    async def get_order_by_client_order_id(self, client_order_id: str, symbol: str) -> Optional[Dict[str, Any]]:
+        method = getattr(self._adapter, "get_order_by_client_order_id", None)
+        if method is None:
+            return None
+        return await method(client_order_id, symbol)
+
     async def get_account_balance(self) -> Dict[str, float]:
         return await self._adapter.get_account_balance()
 

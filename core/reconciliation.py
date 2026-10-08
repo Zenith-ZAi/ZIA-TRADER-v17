@@ -72,16 +72,69 @@ class OrderReconciler:
         except Exception:
             logger.warning("Não foi possível cachear a intenção %s", intent.get("client_order_id"))
 
-    async def _remote_intent(self, client_order_id: str) -> Optional[Dict[str, Any]]:
-        try:
-            remote_orders = await self._call_optional("get_open_orders", [])
-        except Exception as exc:
-            logger.warning("Não foi possível consultar ordem remota %s após falha: %s", client_order_id, exc)
-            return None
-        for item in remote_orders or []:
+    async def _remote_intent(
+        self,
+        client_order_id: str,
+        symbol: str | None = None,
+        remote_orders: list[Dict[str, Any]] | None = None,
+    ) -> Optional[Dict[str, Any]]:
+        lookup = getattr(self.exchange_connector, "get_order_by_client_order_id", None)
+        if lookup is not None and symbol:
+            try:
+                item = await lookup(client_order_id, symbol)
+                if isinstance(item, dict) and item:
+                    remote_client_id = item.get("client_order_id")
+                    if remote_client_id is None or str(remote_client_id) == client_order_id:
+                        return {**item, "client_order_id": client_order_id}
+                    logger.warning("A consulta por clientOrderId %s devolveu uma ordem divergente (%s)", client_order_id, remote_client_id)
+            except Exception as exc:
+                logger.warning("Não foi possível consultar a ordem remota %s por clientOrderId: %s", client_order_id, exc)
+        open_orders = remote_orders
+        if open_orders is None:
+            try:
+                open_orders = await self._call_optional("get_open_orders", [])
+            except Exception as exc:
+                logger.warning("Não foi possível consultar ordem remota %s após falha: %s", client_order_id, exc)
+                return None
+        for item in open_orders or []:
             if isinstance(item, dict) and str(item.get("client_order_id") or "") == client_order_id:
                 return dict(item)
         return None
+
+    @staticmethod
+    def _remote_status(remote: Dict[str, Any]) -> str:
+        status = str(remote.get("status") or remote.get("exchange_status") or "").strip().lower()
+        aliases = {
+            "new": "open",
+            "pending_new": "pending",
+            "partially filled": "partially_filled",
+            "partially-filled": "partially_filled",
+            "partiallyfilled": "partially_filled",
+            "cancelled": "canceled",
+        }
+        if status == "success":
+            filled = float(remote.get("filled_quantity") or remote.get("executed_qty") or 0.0)
+            return "filled" if filled > 0 else "open"
+        normalized = aliases.get(status, status)
+        known_statuses = {"submitted", "pending", "open", "partially_filled", "filled", *OrderReconciler.TERMINAL_STATUSES}
+        return normalized if normalized in known_statuses else "unknown"
+
+    async def _persist_remote_intent(self, client_order_id: str, remote: Dict[str, Any], attempts: int) -> Optional[Dict[str, Any]]:
+        status = self._remote_status(remote)
+        if status == "unknown":
+            logger.warning("Estado remoto desconhecido para intent %s; mantendo recuperação pendente", client_order_id)
+            return None
+        exchange_id = remote.get("order_id") or remote.get("exchange_order_id")
+        intent = self.db_manager.update_order_intent(
+            client_order_id,
+            status=status,
+            exchange_order_id=str(exchange_id) if exchange_id is not None else None,
+            attempts=attempts,
+            last_error=None,
+            payload_json=remote,
+        )
+        await self._cache_intent(intent or {"client_order_id": client_order_id, "status": status, **remote})
+        return intent
 
     async def submit_with_retry(
         self,
@@ -93,7 +146,26 @@ class OrderReconciler:
         prepared = self.reserve(order_data, client_order_id)
         client_id = prepared["client_order_id"]
         existing = self.db_manager.get_order_intent(client_id) or await self._cached_intent(client_id)
-        if existing and existing.get("status") in {"submitted", "partially_filled", "filled"}:
+        existing_status = str(existing.get("status") or "").lower() if existing else ""
+        if existing_status in {"submitted", "partially_filled", "pending", "open"}:
+            remote = await self._remote_intent(client_id, str(existing.get("symbol") or order_data["symbol"]))
+            if remote is None:
+                return {
+                    "status": "recovery_pending",
+                    "client_order_id": client_id,
+                    "reason": "intent já submetida; a exchange não confirmou o estado, nenhum reenvio foi feito",
+                    "intent": existing,
+                }
+            intent = await self._persist_remote_intent(client_id, remote, int(existing.get("attempts") or 0))
+            if intent is None:
+                return {
+                    "status": "recovery_pending",
+                    "client_order_id": client_id,
+                    "reason": "resposta remota sem status conhecido; nenhum reenvio foi feito",
+                    "intent": existing,
+                }
+            return {**remote, "status": "idempotent_recovered", "client_order_id": client_id, "intent": intent}
+        if existing_status in {"filled", *self.TERMINAL_STATUSES}:
             return {"status": "idempotent_reuse", "client_order_id": client_id, "intent": existing}
 
         last_error = "falha desconhecida"
@@ -118,18 +190,25 @@ class OrderReconciler:
             except Exception as exc:
                 last_error = str(exc)
                 logger.warning("Falha no envio idempotente %s tentativa %d/%d: %s", client_id, attempt, self.max_attempts, exc)
-                remote = await self._remote_intent(client_id)
+                remote = await self._remote_intent(client_id, str(prepared.get("symbol") or ""))
                 if remote is not None:
-                    remote_status = str(remote.get("status", "open")).lower()
-                    intent = self.db_manager.update_order_intent(
-                        client_id,
-                        status=remote_status,
-                        exchange_order_id=str(remote.get("order_id") or remote.get("exchange_order_id") or "") or None,
-                        attempts=attempt,
-                        payload_json=remote,
-                    )
-                    await self._cache_intent(intent or {"client_order_id": client_id, **remote})
-                    return {**remote, "status": "idempotent_recovered", "client_order_id": client_id, "intent": intent}
+                    intent = await self._persist_remote_intent(client_id, remote, attempt)
+                    if intent is not None:
+                        return {**remote, "status": "idempotent_recovered", "client_order_id": client_id, "intent": intent}
+                intent = self.db_manager.update_order_intent(
+                    client_id,
+                    status="submitted",
+                    attempts=attempt,
+                    last_error=last_error,
+                )
+                await self._cache_intent(intent or {"client_order_id": client_id, "status": "submitted", "last_error": last_error})
+                return {
+                    "status": "recovery_pending",
+                    "client_order_id": client_id,
+                    "reason": "estado remoto inconclusivo após falha de transporte; retry automático suspenso para evitar duplicidade",
+                    "attempts": attempt,
+                    "intent": intent,
+                }
             self.db_manager.update_order_intent(client_id, status="retrying" if attempt < self.max_attempts else "failed", attempts=attempt, last_error=last_error)
             if attempt < self.max_attempts:
                 await asyncio.sleep(min(self.max_delay_seconds, self.base_delay_seconds * (2 ** (attempt - 1))))
@@ -152,6 +231,36 @@ class OrderReconciler:
             if not isinstance(remote_positions, list):
                 remote_positions = list(remote_positions or [])
             local_intents = self.db_manager.list_open_order_intents(self.account_id)
+            recovered_intents = []
+            recovery_pending = []
+            for intent in local_intents:
+                client_order_id = str(intent.get("client_order_id") or "")
+                if not client_order_id:
+                    continue
+                remote = await self._remote_intent(
+                    client_order_id,
+                    str(intent.get("symbol") or ""),
+                    remote_orders=remote_orders,
+                )
+                if remote is None:
+                    recovery_pending.append(client_order_id)
+                    continue
+                updated = await self._persist_remote_intent(
+                    client_order_id,
+                    remote,
+                    int(intent.get("attempts") or 0),
+                )
+                if updated is None:
+                    recovery_pending.append(client_order_id)
+                    continue
+                intent.update(updated)
+                recovered_intents.append({
+                    "client_order_id": client_order_id,
+                    "status": updated.get("status"),
+                    "exchange_order_id": updated.get("exchange_order_id"),
+                })
+            open_statuses = {"reserved", "submitted", "pending", "open", "partially_filled"}
+            local_intents = [item for item in local_intents if str(item.get("status") or "").lower() in open_statuses]
             local_positions = self.db_manager.get_open_runtime_positions(self.account_id)
             remote_ids = {str(item.get("client_order_id")) for item in remote_orders if item.get("client_order_id")}
             local_ids = {str(item.get("client_order_id")) for item in local_intents if item.get("client_order_id")}
@@ -162,9 +271,15 @@ class OrderReconciler:
                 "remote_positions": remote_positions,
                 "untracked_remote_client_order_ids": sorted(remote_ids - local_ids),
                 "local_intents_without_remote_order": sorted(local_ids - remote_ids),
+                "recovered_order_intents": recovered_intents,
+                "order_intents_recovery_pending": sorted(recovery_pending),
                 "local_positions": [self._position_dict(row) for row in local_positions],
             }
-            status = "ok" if not payload["untracked_remote_client_order_ids"] else "attention"
+            status = "ok" if not (
+                payload["untracked_remote_client_order_ids"]
+                or payload["local_intents_without_remote_order"]
+                or payload["order_intents_recovery_pending"]
+            ) else "attention"
             if status != "ok":
                 RECONCILIATION_DIVERGENCE.inc()
             snapshot = self.db_manager.create_reconciliation_snapshot(self.account_id, status, payload)
