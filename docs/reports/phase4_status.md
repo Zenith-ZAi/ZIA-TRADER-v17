@@ -4,7 +4,7 @@
 
 **Branch de trabalho:** `refine/phase4-parity-performance`
 
-**Estado:** Fase 4 integrada na PR #13; follow-up de warm-up aprovado e validado localmente, com integração via PR complementar em andamento. Limitações de paridade end-to-end permanecem explícitas.
+**Estado:** Fase 4 integrada na PR #13; follow-up de warm-up aprovado, validado localmente e com CI verde na PR #14, aguardando merge. Limitações de paridade end-to-end permanecem explícitas.
 
 ## Escopo implementado
 
@@ -47,8 +47,9 @@ As referências detalhadas e correções sugeridas também estão em [`FINDINGS.
 | `python3 -m pytest -q` | 120 passed, 3 skipped (25,13 s) antes da Fase 4 | 132 passed, 3 skipped (29,51 s) após o follow-up | passou; contagem mantida |
 | Testes focalizados atuais (`test_phase4_parity.py`) | — | 8 passed (4,29 s) | passou |
 | CI GitHub Actions da PR #13 | — | PostgreSQL 16: 135 passed, 2 warnings; build do container aprovado | passou |
+| CI GitHub Actions da PR #14 (run `37778660559`, SHA `8e65daa`) | — | PostgreSQL 16: 135 passed, 2 warnings; build do container aprovado | passou |
 
-Os 3 skips ocorreram somente na execução local; a CI da PR #13 testou com PostgreSQL 16. A CI específica do follow-up está pendente na PR complementar. Os warnings reportados pelo pytest não impediram os checks. VPS e broker não foram verificados.
+Os 3 skips ocorreram somente na execução local; a CI da PR #14 testou com PostgreSQL 16. Os warnings reportados pelo pytest não impediram os checks. VPS e broker não foram verificados.
 
 ## Arquivos alterados
 
