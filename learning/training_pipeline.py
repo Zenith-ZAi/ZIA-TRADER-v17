@@ -12,13 +12,14 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import f1_score, precision_score, recall_score
 
-from ai.ensemble_model import EnsembleModel
+from ai.ensemble_model import INFERENCE_CONTRACT_VERSION, EnsembleModel
 from ai.train_ensemble import load_ohlcv
 from core.dataset_integrity import sha256_file, sha256_frame, validate_ohlcv
+from ai.feature_pipeline import FEATURE_SCHEMA_VERSION
 from core.feature_pipeline import FeaturePipeline
 from learning.model_drift import build_drift_reference
 from learning.model_registry import ModelRegistryStore, artifact_sha256
-from learning.model_validation import evaluate_walk_forward, probability_metrics, write_validation_report
+from learning.model_validation import _net_returns, _return_summary, evaluate_walk_forward, probability_metrics, write_validation_report
 
 
 LABEL_TO_ACTION = {0: "sell", 1: "hold", 2: "buy"}
@@ -26,7 +27,14 @@ ACTION_TO_LABEL = {value: key for key, value in LABEL_TO_ACTION.items()}
 _ARTIFACT_FILES = ("rf_model.joblib", "xgb_model.joblib", "ensemble_metadata.json")
 
 
-def _metrics(y_true: pd.Series, predicted: list[tuple[str, float]], forward_returns: pd.Series) -> Dict[str, Any]:
+def _metrics(
+    y_true: pd.Series,
+    predicted: list[tuple[str, float]],
+    forward_returns: pd.Series,
+    *,
+    transaction_cost_bps: float = 0.0,
+    slippage_bps: float = 0.0,
+) -> Dict[str, Any]:
     labels = [ACTION_TO_LABEL[action] for action, _ in predicted]
     truth = y_true.astype(int).tolist()
     truth_array = np.asarray(truth, dtype=int)
@@ -39,6 +47,13 @@ def _metrics(y_true: pd.Series, predicted: list[tuple[str, float]], forward_retu
     if directional_array.size > 1 and float(directional_array.std(ddof=1)) > 0:
         sharpe = float(directional_array.mean() / directional_array.std(ddof=1) * np.sqrt(252.0))
     signal_count = sum(action in {"buy", "sell"} for action, _ in predicted)
+    positions = np.asarray([1.0 if action == "buy" else -1.0 if action == "sell" else 0.0 for action, _ in predicted], dtype=float)
+    net_returns, trade_counts = _net_returns(
+        positions,
+        np.asarray(forward_returns, dtype=float),
+        float(transaction_cost_bps) + float(slippage_bps),
+    )
+    net_summary = _return_summary(net_returns.tolist(), int(trade_counts.sum()))
     return {
         "rows": len(truth),
         "signal_count": signal_count,
@@ -53,6 +68,8 @@ def _metrics(y_true: pd.Series, predicted: list[tuple[str, float]], forward_retu
         ])) if truth else 0.0,
         "sharpe_proxy": sharpe,
         "mean_signal_return": float(directional_array.mean()) if directional_array.size else 0.0,
+        "net_return_metrics": net_summary,
+        "cost_assumption_bps": float(transaction_cost_bps) + float(slippage_bps),
     }
 
 
@@ -200,6 +217,24 @@ def train_oos(
                     "pipeline": "learning.training_pipeline",
                     "trained_at": datetime.now(timezone.utc).isoformat(),
                     "source": str(source),
+                    "dataset_period": {
+                        "start": str(ohlcv.index.min()),
+                        "end": str(ohlcv.index.max()),
+                        "timezone": str(getattr(ohlcv.index, "tz", None) or "naive"),
+                    },
+                    "feature_schema_version": FEATURE_SCHEMA_VERSION,
+                    "inference_contract_version": INFERENCE_CONTRACT_VERSION,
+                    "runtime_compatibility": {
+                        "feature_schema_version": FEATURE_SCHEMA_VERSION,
+                        "inference_contract_version": INFERENCE_CONTRACT_VERSION,
+                    },
+                    "labeling_rules": {
+                        "horizon_candles": horizon,
+                        "sell_threshold": float(sell_threshold),
+                        "buy_threshold": float(buy_threshold),
+                        "classes": {"sell": 0, "hold": 1, "buy": 2},
+                        "future_data_used_only_for_training_labels": True,
+                    },
                     "horizon": horizon,
                     "buy_threshold": buy_threshold,
                     "sell_threshold": sell_threshold,
@@ -207,6 +242,12 @@ def train_oos(
                     "embargo": horizon if embargo is None else int(embargo),
                     "seed": int(seed),
                     "dataset_sha256": dataset_sha256,
+                    "dependency_versions": {
+                        "numpy": np.__version__,
+                        "pandas": pd.__version__,
+                        "scikit_learn": __import__("sklearn").__version__,
+                        "xgboost": __import__("xgboost").__version__,
+                    },
                     "train_rows": len(X_train),
                     "validation_rows": len(X_valid),
                     "test_rows": len(X_test),
@@ -218,12 +259,22 @@ def train_oos(
             test_probabilities = candidate.predict_proba(X_test)
             valid_predictions = _predict(candidate, X_valid)
             test_predictions = _predict(candidate, X_test)
-            valid_metrics = _metrics(y_valid, valid_predictions, forward_valid)
-            test_metrics = _metrics(y_test, test_predictions, forward_test)
+            valid_metrics = _metrics(
+                y_valid, valid_predictions, forward_valid,
+                transaction_cost_bps=transaction_cost_bps, slippage_bps=slippage_bps,
+            )
+            test_metrics = _metrics(
+                y_test, test_predictions, forward_test,
+                transaction_cost_bps=transaction_cost_bps, slippage_bps=slippage_bps,
+            )
             valid_calibration = probability_metrics(y_valid.to_numpy(dtype=int), valid_probabilities)
             test_calibration = probability_metrics(y_test.to_numpy(dtype=int), test_probabilities)
             candidate_metadata["validation_metrics"] = valid_metrics
             candidate_metadata["test_metrics"] = test_metrics
+            candidate_metadata["training_class_distribution"] = {
+                str(int(label)): float(count)
+                for label, count in y_train.value_counts(normalize=True).to_dict().items()
+            }
             candidate_metadata["validation_calibration"] = valid_calibration
             candidate_metadata["calibration"] = test_calibration
             candidate_metadata["calibration_brier"] = test_calibration["brier_score"]

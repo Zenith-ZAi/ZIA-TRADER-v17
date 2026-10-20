@@ -23,6 +23,10 @@ from monitoring.metrics import KILL_SWITCH_ACTIVE
 
 logger = logging.getLogger(__name__)
 
+
+class SniperDisabledError(RuntimeError):
+    """Raised when any caller tries to start a disabled Sniper engine."""
+
 class TradingManager:
     """Gerenciador principal que orquestra os diferentes motores de trading e backtesting."""
 
@@ -134,6 +138,8 @@ class TradingManager:
 
     async def start_sniper(self):
         """Inicia o motor Sniper."""
+        if not bool(getattr(self.settings, "SNIPER_ENABLED", False)):
+            raise SniperDisabledError("SNIPER_ENABLED=false; início do Sniper bloqueado")
         logger.info("Iniciando o motor Sniper...")
         await self.sniper_engine.start()
 

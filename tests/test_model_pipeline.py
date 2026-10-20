@@ -2,9 +2,11 @@ import json
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from ai.ensemble_model import EnsembleModel
 from ai.feature_pipeline import MODEL_FEATURE_COLUMNS, build_feature_frame, build_supervised_dataset
+from learning.model_registry import artifact_sha256
 
 
 def make_fixture(length: int = 240) -> pd.DataFrame:
@@ -97,3 +99,59 @@ def test_ensemble_training_is_reproducible_for_fixed_seed(tmp_path):
     first.train(X, y)
     second.train(X, y)
     np.testing.assert_allclose(first.predict_proba(X.tail(12)), second.predict_proba(X.tail(12)), rtol=0.0, atol=0.0)
+
+
+def test_untrained_ensemble_does_not_emit_synthetic_probabilities(tmp_path):
+    model = EnsembleModel(str(tmp_path / "missing"))
+    assert model.predict(pd.DataFrame()) == ("hold", 0.5)
+    with pytest.raises(RuntimeError, match="Ensemble indisponível"):
+        model.predict_proba(pd.DataFrame([{}]))
+
+
+@pytest.mark.parametrize(
+    "probabilities",
+    [
+        np.asarray([[0.2, 0.2, np.nan]]),
+        np.asarray([[0.2, 0.2, 0.2]]),
+        np.asarray([[1.2, -0.1, -0.1]]),
+    ],
+)
+def test_ensemble_rejects_invalid_raw_class_probabilities(probabilities):
+    class BrokenModel:
+        classes_ = np.asarray([0, 1, 2])
+
+        def predict_proba(self, features):
+            return probabilities
+
+    with pytest.raises(ValueError):
+        EnsembleModel._aligned_proba_matrix(BrokenModel(), pd.DataFrame([{}]))
+
+
+def test_runtime_ensemble_requires_active_registry_version_and_matching_hash(tmp_path):
+    X, y = build_supervised_dataset(make_fixture(), horizon=3)
+    model_dir = tmp_path / "models"
+    trained = EnsembleModel(str(model_dir))
+    metadata = trained.train(X, y)
+    metadata.update({
+        "model_version": "ensemble-test-v1",
+        "dataset_sha256": "a" * 64,
+        "decision": "accepted",
+        "registry_status": "active",
+    })
+    (model_dir / "ensemble_metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+    expected_hash = artifact_sha256(model_dir)
+
+    class Registry:
+        def __init__(self, approved_hash):
+            self.approved_hash = approved_hash
+
+        def verify_active_artifact(self, model_name, version, artifact_hash):
+            return (model_name, version, artifact_hash) == ("ensemble", "ensemble-test-v1", self.approved_hash)
+
+    loaded = EnsembleModel(str(model_dir), registry_store=Registry(expected_hash), require_active_registry=True)
+    assert loaded.is_trained
+    assert loaded.load_status == "loaded_active"
+
+    rejected = EnsembleModel(str(model_dir), registry_store=Registry("0" * 64), require_active_registry=True)
+    assert not rejected.is_trained
+    assert rejected.load_status == "rejected_incompatible_or_unapproved"

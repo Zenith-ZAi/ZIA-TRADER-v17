@@ -30,10 +30,60 @@ def test_market_connector_normalizes_symbols_and_keeps_b3_read_only():
         asyncio.run(b3.place_order("PETR4", "buy", "market", 1))
 
 
-def test_order_manager_requires_visual_confirmation():
-    settings = Settings(MARKET_ADAPTER="forex", FOREX_MODE="paper", ORDER_MANAGER_MODE="manual", ORDER_CONFIRMATION_REQUIRED=True)
-    connector = MarketConnector(settings)
-    manager = OrderManager(settings, connector, FakeExecution())
+def test_order_manager_requires_visual_confirmation(monkeypatch):
+    settings = Settings(
+        MARKET_ADAPTER="forex", FOREX_MODE="paper", ORDER_MANAGER_MODE="manual",
+        ORDER_CONFIRMATION_REQUIRED=True, MANUAL_TRADING_ENABLED=True,
+    )
+
+    class FakeDB:
+        def get_account_state(self, account_id):
+            return type("Account", (), {"balance": 10000.0, "initial_capital": 10000.0})()
+
+        def get_daily_pnl(self, account_id, date):
+            return type("Daily", (), {"pnl": 0.0})()
+
+        def get_open_positions(self, account_id):
+            return []
+
+    class FakeReconciler:
+        async def reconcile(self):
+            return {"status": "ok"}
+
+    class ReadyExecution(FakeExecution):
+        def __init__(self):
+            self.db_manager = FakeDB()
+            self.account_id = "default_account"
+            self.reconciler = FakeReconciler()
+
+    class FakeRisk:
+        def __init__(self, settings, db_manager):
+            pass
+
+        @staticmethod
+        def quote_equivalent_balance(balances, symbol, price):
+            return 10000.0
+
+        @staticmethod
+        def validate_order(order, balance, context):
+            return {"valid": True, "quantity": float(order["quantity"]), "price": float(order["price"])}
+
+    class ReadyConnector:
+        is_connected = True
+
+        @staticmethod
+        def canonical_symbol(symbol):
+            return "EUR/USD"
+
+        async def get_account_balance(self):
+            return {"USD": 10000.0, "EUR": 1000.0}
+
+        async def place_order(self, *args, **kwargs):
+            return {"status": "success"}
+
+    monkeypatch.setattr("execution.order_manager.RiskAI", FakeRisk)
+    connector = ReadyConnector()
+    manager = OrderManager(settings, connector, ReadyExecution())
     pending = asyncio.run(manager.submit({"symbol": "EURUSD", "action": "buy", "quantity": 1000, "price": 1.08}))
     assert pending["status"] == "pending_confirmation"
     assert pending["order"]["symbol"] == "EUR/USD"
@@ -54,7 +104,7 @@ def test_live_order_is_blocked_without_explicit_enablement():
     manager = OrderManager(settings, FakeConnector(), FakeExecution())
     result = asyncio.run(manager.submit({"symbol": "BTC/USDT", "action": "buy", "quantity": 0.01, "price": 100.0}, confirmed=True))
     assert result["status"] == "rejected"
-    assert "bloqueado" in result["reason"]
+    assert result["reason"] == "negociação manual desabilitada"
 
 
 def test_adaptive_kelly_reduces_risk_when_volatility_is_high():

@@ -55,6 +55,9 @@ def test_registry_records_candidate_metrics_and_only_activates_candidate(tmp_pat
         store.activate("missing-version")
     store.activate("candidate-one")
     assert store.active_version("ensemble") == "candidate-one"
+    assert store.verify_active_artifact("ensemble", "candidate-one", _hash("a"))
+    assert not store.verify_active_artifact("ensemble", "candidate-one", _hash("c"))
+    assert not store.verify_active_artifact("ensemble", "missing-version", _hash("a"))
 
     store.register(
         model_name="ensemble",
@@ -69,6 +72,8 @@ def test_registry_records_candidate_metrics_and_only_activates_candidate(tmp_pat
     assert store.active_version("ensemble") == "candidate-two"
     store.mark_rollback("candidate-two", "candidate-one")
     assert store.active_version("ensemble") == "candidate-one"
+    assert not store.verify_active_artifact("ensemble", "candidate-two", _hash("c"))
+    assert store.verify_active_artifact("ensemble", "candidate-one", _hash("a"))
 
     session = manager.SessionLocal()
     try:

@@ -20,6 +20,7 @@ MODEL_FEATURE_COLUMNS = [
     "macd_norm",
     "atr_pct",
 ]
+FEATURE_SCHEMA_VERSION = "ohlcv_features_v1"
 
 
 def _numeric(frame: pd.DataFrame, column: str) -> pd.Series:

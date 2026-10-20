@@ -61,8 +61,11 @@ async def lifespan(_: FastAPI):
             logger.error("Motores não iniciados após restart: %s", exc.detail)
         else:
             await _start_engine("trading", trading_manager.start_trading, preflight=False)
-            await _start_engine("sniper", trading_manager.start_sniper, preflight=False)
-            logger.info("Motores de trading e Sniper iniciados automaticamente.")
+            if settings.SNIPER_ENABLED:
+                await _start_engine("sniper", trading_manager.start_sniper, preflight=False)
+            else:
+                logger.info("SNIPER_ENABLED=false; somente o motor principal foi considerado no auto-start.")
+            logger.info("Auto-start de motores concluído segundo as flags de execução.")
     else:
         logger.info("Motores não iniciados automaticamente; use os endpoints de controle.")
     try:
@@ -177,6 +180,8 @@ async def _ensure_reconciliation_ok(name: str) -> None:
 
 async def _start_engine(name: str, factory, *, preflight: bool = True) -> bool:
     """Inicia um motor uma única vez e registra sua task para shutdown limpo."""
+    if name == "sniper" and not bool(getattr(settings, "SNIPER_ENABLED", False)):
+        raise HTTPException(status_code=409, detail="sniper_disabled: SNIPER_ENABLED=false")
     current_task = engine_tasks.get(name)
     if current_task and not current_task.done():
         return False
@@ -354,10 +359,13 @@ async def create_order(
     order: Dict[str, Any] = Body(...),
     current_user: Dict[str, Any] = Depends(get_trader_user),
 ) -> Dict[str, Any]:
-    source = str(order.pop("source", "manual")).lower()
-    confirmed = bool(order.pop("confirmed", False))
+    requested_source = str(order.pop("source", "manual")).lower()
+    # A origem de IA é interna e a confirmação só pode ocorrer pelo token separado.
+    if requested_source != "manual":
+        raise HTTPException(status_code=400, detail="source só pode ser manual nesta rota")
+    order.pop("confirmed", None)
     try:
-        return await trading_manager.order_manager.submit(order, source=source, confirmed=confirmed)
+        return await trading_manager.order_manager.submit(order, source="manual", confirmed=False)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

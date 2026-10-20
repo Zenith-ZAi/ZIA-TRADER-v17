@@ -75,6 +75,18 @@ def test_backtest_is_deterministic_and_reports_risk_metrics():
     assert first["total_pnl"] == second["total_pnl"]
 
 
+def test_backtest_fails_closed_when_requested_ensemble_is_not_active(tmp_path):
+    settings = make_settings(
+        BACKTEST_USE_ENSEMBLE=True,
+        ENSEMBLE_MODEL_DIR=str(tmp_path / "missing-model"),
+    )
+    result = asyncio.run(BacktestEngine(settings, None).run("BTC/USDT", make_ohlcv()))
+
+    assert result["status"] == "model_unavailable"
+    assert result["trades_executed"] == 0
+    assert "Ensemble ativo" in result["reason"]
+
+
 def test_risk_ai_limits_daily_loss_and_exposure(tmp_path):
     settings = make_settings(DATABASE_URL=f"sqlite:///{tmp_path / 'risk.db'}")
     db = DatabaseManager(settings.DATABASE_URL)

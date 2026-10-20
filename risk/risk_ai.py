@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import math
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 
 from config.settings import Settings
@@ -69,6 +70,158 @@ class RiskAI:
         except (AttributeError, TypeError, ValueError):
             return 0.0
 
+    @staticmethod
+    def _parse_utc(value: Any) -> datetime | None:
+        try:
+            parsed = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                return None
+            return parsed.astimezone(timezone.utc)
+        except (TypeError, ValueError):
+            return None
+
+    def _period_loss_status(self, execution_source: str, now: datetime | None = None) -> Dict[str, Any]:
+        """Valida limites diário/semanal/mensal sem confiar em tabelas de P&L incompletas."""
+        if execution_source not in {"ai", "manual"}:
+            return {"required": False, "allowed": True, "status": "not_execution_path"}
+        now_utc = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        try:
+            daily_limit = float(self.settings.DAILY_LOSS_LIMIT_PERCENT)
+            weekly_limit = float(self.settings.WEEKLY_LOSS_LIMIT_PERCENT)
+            monthly_limit = float(self.settings.MONTHLY_LOSS_LIMIT_PERCENT)
+        except (TypeError, ValueError, AttributeError):
+            return {"required": True, "allowed": False, "status": "invalid_limits"}
+        if any(not math.isfinite(value) or value <= 0.0 or value > 1.0 for value in (daily_limit, weekly_limit, monthly_limit)):
+            return {"required": True, "allowed": False, "status": "invalid_limits"}
+        try:
+            snapshot = self.db_manager.get_verified_risk_periods(self.account_id, now_utc)
+        except Exception:
+            snapshot = None
+        if not isinstance(snapshot, dict):
+            return {
+                "required": True,
+                "allowed": False,
+                "status": "period_ledger_unavailable",
+                "reason": "Ledger verificável de P&L diário/semanal/mensal indisponível; novas entradas bloqueadas.",
+            }
+
+        updated_at = self._parse_utc(snapshot.get("updated_at"))
+        max_age = max(1.0, float(getattr(self.settings, "RISK_PERIOD_SNAPSHOT_MAX_AGE_SECONDS", 300)))
+        if (
+            snapshot.get("account_id") != self.account_id
+            or snapshot.get("source") != "equity_ledger_v1"
+            or snapshot.get("complete") is not True
+            or snapshot.get("fees_included") is not True
+            or snapshot.get("funding_included") is not True
+            or snapshot.get("external_flows_adjusted") is not True
+            or snapshot.get("ledger_consistent") is not True
+            or updated_at is None
+            or (now_utc - updated_at).total_seconds() < -1.0
+            or (now_utc - updated_at).total_seconds() > max_age
+        ):
+            return {
+                "required": True,
+                "allowed": False,
+                "status": "period_ledger_unverified",
+                "reason": "Snapshot diário/semanal/mensal incompleto, obsoleto ou sem proveniência exigida; novas entradas bloqueadas.",
+            }
+
+        day_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+        week_start = (now_utc - timedelta(days=now_utc.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        month_start = now_utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        checks = []
+        for name, limit, expected_start in (
+            ("daily", daily_limit, day_start),
+            ("weekly", weekly_limit, week_start),
+            ("monthly", monthly_limit, month_start),
+        ):
+            period = snapshot.get(name)
+            if not isinstance(period, dict) or self._parse_utc(period.get("period_start")) != expected_start:
+                return {
+                    "required": True,
+                    "allowed": False,
+                    "status": f"{name}_period_mismatch",
+                    "reason": f"Período {name} não corresponde ao calendário UTC atual; novas entradas bloqueadas.",
+                }
+            try:
+                starting_equity = float(period.get("starting_equity"))
+                realized_pnl = float(period.get("realized_pnl"))
+                unrealized_pnl = float(period.get("unrealized_pnl"))
+            except (TypeError, ValueError):
+                starting_equity = realized_pnl = unrealized_pnl = float("nan")
+            if (
+                not all(math.isfinite(value) for value in (starting_equity, realized_pnl, unrealized_pnl))
+                or starting_equity <= 0.0
+            ):
+                return {
+                    "required": True,
+                    "allowed": False,
+                    "status": f"{name}_metrics_invalid",
+                    "reason": f"Métricas de risco {name} inválidas; novas entradas bloqueadas.",
+                }
+            pnl = realized_pnl + unrealized_pnl
+            loss_fraction = max(0.0, -pnl / starting_equity)
+            checks.append({"period": name, "loss_fraction": loss_fraction, "limit": limit, "pnl": pnl})
+            if loss_fraction >= limit:
+                return {
+                    "required": True,
+                    "allowed": False,
+                    "status": f"{name}_loss_limit_reached",
+                    "checks": checks,
+                    "reason": f"Limite de perda {name} atingido; novas entradas bloqueadas.",
+                }
+        return {"required": True, "allowed": True, "status": "within_limits", "checks": checks}
+
+    def _verified_trade_returns(self, market_context: Dict[str, Any] | None = None) -> tuple[list[float], str]:
+        """Aceita amostras somente do contrato persistente, nunca do chamador."""
+        del market_context  # contexto de runtime não é evidência de persistência
+        try:
+            snapshot = self.db_manager.get_verified_trade_returns(self.account_id, limit=100)
+        except Exception:
+            snapshot = None
+        if (
+            not isinstance(snapshot, dict)
+            or snapshot.get("account_id") != self.account_id
+            or snapshot.get("source") != "closed_execution_ledger_v1"
+            or snapshot.get("complete") is not True
+            or snapshot.get("fees_included") is not True
+            or snapshot.get("funding_included") is not True
+            or snapshot.get("external_flows_adjusted") is not True
+        ):
+            return [], "unverified_or_missing_source"
+        samples = snapshot.get("returns")
+        if not isinstance(samples, (list, tuple)):
+            return [], "unverified_or_missing_source"
+        now = datetime.now(timezone.utc)
+        max_age_days = max(1.0, float(getattr(self.settings, "KELLY_TRADE_SAMPLE_MAX_AGE_DAYS", 365)))
+        parsed: list[tuple[datetime, str, float]] = []
+        seen_ids: set[str] = set()
+        for sample in samples:
+            if not isinstance(sample, dict):
+                return [], "invalid_sample"
+            closed_at = RiskAI._parse_utc(sample.get("closed_at"))
+            execution_id = str(sample.get("execution_id") or "")
+            try:
+                realized_return = float(sample.get("return_pct"))
+            except (TypeError, ValueError):
+                return [], "invalid_sample"
+            if (
+                closed_at is None
+                or closed_at > now + timedelta(seconds=1)
+                or (now - closed_at).total_seconds() > max_age_days * 86400
+                or not execution_id
+                or execution_id in seen_ids
+                or not math.isfinite(realized_return)
+            ):
+                return [], "invalid_sample"
+            seen_ids.add(execution_id)
+            parsed.append((closed_at, execution_id, realized_return))
+        if any(parsed[index][0] > parsed[index + 1][0] for index in range(len(parsed) - 1)):
+            return [], "non_chronological_samples"
+        if len(parsed) < 20:
+            return [], "insufficient_history"
+        return [sample[2] for sample in parsed], "verified"
+
     def validate_exit(
         self,
         position: Dict[str, Any],
@@ -123,10 +276,15 @@ class RiskAI:
             return {"valid": False, "reason": "Símbolo ou ação inválidos."}
         if account_balance <= 0:
             return {"valid": False, "reason": "Saldo da conta inválido."}
-        if confidence < float(self.settings.MIN_CONFIDENCE_THRESHOLD):
+        execution_source = str((market_context or {}).get("execution_source", "shadow")).lower()
+        if execution_source != "manual" and confidence < float(self.settings.MIN_CONFIDENCE_THRESHOLD):
             return {"valid": False, "reason": f"Confiança insuficiente: {confidence:.2f}"}
         if entry_price <= 0:
             return {"valid": False, "reason": "Preço de entrada inválido."}
+
+        period_risk = self._period_loss_status(execution_source)
+        if not period_risk["allowed"]:
+            return {"valid": False, "reason": period_risk.get("reason", "Verificação diário/semanal/mensal falhou."), "period_risk": period_risk}
 
         microstructure = (market_context or {}).get("microstructure") or {}
         if bool(getattr(self.settings, "MICROSTRUCTURE_GATE_ENABLED", True)) and microstructure and not microstructure.get("allowed", False):
@@ -147,14 +305,17 @@ class RiskAI:
         stop_loss_pct = float(self.settings.STOP_LOSS_PCT)
         take_profit_pct = float(self.settings.TAKE_PROFIT_PCT)
         adaptive_kelly = None
+        trade_returns_status = "disabled_by_config"
         risk_fraction = self.max_risk_per_trade
-        trade_returns = (market_context or {}).get("trade_returns", [])
-        if bool(getattr(self.settings, "ADAPTIVE_KELLY_ENABLED", True)) and isinstance(trade_returns, (list, tuple)) and len(trade_returns) >= 20:
+        trade_returns: list[float] = []
+        if bool(getattr(self.settings, "ADAPTIVE_KELLY_ENABLED", True)):
+            trade_returns, trade_returns_status = self._verified_trade_returns(market_context)
+        if bool(getattr(self.settings, "ADAPTIVE_KELLY_ENABLED", True)) and len(trade_returns) >= 20:
             reward_risk = take_profit_pct / max(stop_loss_pct, 1e-9)
             adaptive_kelly = self.adaptive_kelly.estimate(trade_returns, reward_risk=reward_risk)
             risk_fraction = min(risk_fraction, float(adaptive_kelly.get("risk_fraction", 0.0)))
             if risk_fraction <= 0.0:
-                return {"valid": False, "reason": "Kelly adaptativo não identificou vantagem estatística suficiente.", "adaptive_kelly": adaptive_kelly}
+                return {"valid": False, "reason": "Kelly adaptativo não identificou vantagem estatística suficiente.", "adaptive_kelly": adaptive_kelly, "adaptive_kelly_status": trade_returns_status}
         risk_amount = account_balance * risk_fraction
         unit_risk = entry_price * stop_loss_pct
         if risk_amount <= 0 or unit_risk <= 0:
@@ -204,4 +365,6 @@ class RiskAI:
             "projected_notional": proposed_notional,
             "microstructure": microstructure,
             "adaptive_kelly": adaptive_kelly,
+            "adaptive_kelly_status": trade_returns_status,
+            "period_risk": period_risk,
         }

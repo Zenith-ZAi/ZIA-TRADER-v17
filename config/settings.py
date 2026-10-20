@@ -98,9 +98,11 @@ class Settings(BaseSettings):
     DAILY_LOSS_LIMIT_PERCENT: float = float(os.getenv("DAILY_LOSS_LIMIT_PERCENT", "0.05"))
     WEEKLY_LOSS_LIMIT_PERCENT: float = float(os.getenv("WEEKLY_LOSS_LIMIT_PERCENT", "0.10"))
     MONTHLY_LOSS_LIMIT_PERCENT: float = float(os.getenv("MONTHLY_LOSS_LIMIT_PERCENT", "0.15"))
+    RISK_PERIOD_SNAPSHOT_MAX_AGE_SECONDS: int = int(os.getenv("RISK_PERIOD_SNAPSHOT_MAX_AGE_SECONDS", "300"))
     KELLY_FRACTION: float = float(os.getenv("KELLY_FRACTION", "0.5")) # Fractional Kelly legado
     ADAPTIVE_KELLY_ENABLED: bool = os.getenv("ADAPTIVE_KELLY_ENABLED", "true").lower() == "true"
     ADAPTIVE_KELLY_FRACTION: float = float(os.getenv("ADAPTIVE_KELLY_FRACTION", "0.25"))
+    KELLY_TRADE_SAMPLE_MAX_AGE_DAYS: int = int(os.getenv("KELLY_TRADE_SAMPLE_MAX_AGE_DAYS", "365"))
     KELLY_TARGET_VOLATILITY: float = float(os.getenv("KELLY_TARGET_VOLATILITY", "0.02"))
     KELLY_MAX_RISK_FRACTION: float = float(os.getenv("KELLY_MAX_RISK_FRACTION", "0.02"))
     ATR_PERIOD: int = int(os.getenv("ATR_PERIOD", "14"))
@@ -194,10 +196,9 @@ class Settings(BaseSettings):
     ENSEMBLE_MODEL_DIR: str = os.getenv("ENSEMBLE_MODEL_DIR", "models")
     BACKTEST_USE_ENSEMBLE: bool = os.getenv("BACKTEST_USE_ENSEMBLE", "false").lower() == "true"
     ENSEMBLE_WEIGHTS: Dict[str, float] = {
-        "transformer": 0.4,
+        "transformer": 0.3,
         "lstm": 0.3,
-        "xgboost": 0.2,
-        "random_forest": 0.1
+        "ensemble": 0.4,
     }
 
     # Smart Money Engine Settings

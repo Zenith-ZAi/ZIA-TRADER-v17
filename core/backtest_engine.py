@@ -18,8 +18,10 @@ from core.pattern_memory import PatternMemory, build_pattern_signature
 from core.event_guard import EconomicEventGuard
 from execution.friction import ExecutionFriction
 from core.position_policy import evaluate_position_exit
+from core.model_voting import aggregate_model_votes
 from risk.sharpe_analyzer import SharpeAnalyzer
 from risk.sharpe_feedback import SharpeFeedback
+from learning.model_registry import ModelRegistryStore
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +141,7 @@ class BacktestEngine:
         blocked_event_bars = 0
         blocked_event_candidates = 0
         ensemble_rejections = 0
+        model_vote_status_counts: Dict[str, int] = {}
         pattern_rejections = 0
         pattern_memory = PatternMemory(self.db_manager, self.settings) if self.db_manager is not None else None
         signal_cache = MarketSignalCache(data)
@@ -155,7 +158,22 @@ class BacktestEngine:
             target_atr_multiple=float(self.settings.PULLBACK_TARGET_ATR_MULTIPLE),
             breakeven_atr_trigger=float(self.settings.PULLBACK_BREAKEVEN_ATR_TRIGGER),
         ) if self.settings.PULLBACK_STRATEGY_ENABLED else None
-        ensemble_model = EnsembleModel(self.settings.ENSEMBLE_MODEL_DIR) if self.settings.BACKTEST_USE_ENSEMBLE else None
+        registry_store = ModelRegistryStore(self.db_manager) if self.db_manager is not None else None
+        ensemble_model = EnsembleModel(
+            self.settings.ENSEMBLE_MODEL_DIR,
+            registry_store=registry_store,
+            require_active_registry=True,
+        ) if self.settings.BACKTEST_USE_ENSEMBLE else None
+        if ensemble_model is not None and not ensemble_model.is_trained:
+            return {
+                "symbol": symbol,
+                "strategy": strategy_name,
+                "status": "model_unavailable",
+                "reason": "BACKTEST_USE_ENSEMBLE=true exige Ensemble ativo, compatível e aprovado no registry",
+                "model_status": ensemble_model.load_status,
+                "dataset_sha256": dataset_hash,
+                "trades_executed": 0,
+            }
         model_features = self.feature_pipeline.build_features(data).dropna() if ensemble_model and ensemble_model.is_trained else None
 
         start_index = max(35, int(self.settings.BACKTEST_WARMUP_BARS))
@@ -212,9 +230,28 @@ class BacktestEngine:
             if event_status.get("blocked"):
                 if raw_signal_action not in {"buy", "sell"} and signal.action in {"buy", "sell"}:
                     blocked_event_candidates += 1
-            if ensemble_model and ensemble_model.is_trained and model_features is not None and data.index[index] in model_features.index and signal.action in {"buy", "sell"}:
-                model_action, model_confidence = ensemble_model.predict(model_features.loc[[data.index[index]]])
-                if model_action != signal.action or model_confidence < float(self.settings.MIN_CONFIDENCE_THRESHOLD):
+            if ensemble_model and ensemble_model.is_trained and signal.action in {"buy", "sell"}:
+                if model_features is None or data.index[index] not in model_features.index:
+                    model_predictions = [{"model": "ensemble", "status": "missing_features"}]
+                else:
+                    try:
+                        model_action, model_confidence = ensemble_model.predict(model_features.loc[[data.index[index]]])
+                        model_predictions = [{
+                            "model": "ensemble",
+                            "action": model_action,
+                            "confidence": model_confidence,
+                            "version": str(ensemble_model.metadata.get("model_version") or ""),
+                        }]
+                    except Exception as exc:
+                        logger.warning("Voto Ensemble inválido no backtest; entrada bloqueada: %s", exc)
+                        model_predictions = [{"model": "ensemble", "status": "invalid_output"}]
+                model_vote = aggregate_model_votes(
+                    model_predictions,
+                    self.settings.ENSEMBLE_WEIGHTS,
+                    minimum_action_confidence=float(self.settings.MIN_CONFIDENCE_THRESHOLD),
+                )
+                model_vote_status_counts[model_vote["status"]] = model_vote_status_counts.get(model_vote["status"], 0) + 1
+                if model_vote["action"] != signal.action or model_vote["confidence"] < float(self.settings.MIN_CONFIDENCE_THRESHOLD):
                     ensemble_rejections += 1
                     signal = MarketSignal(
                         action="hold",
@@ -225,7 +262,7 @@ class BacktestEngine:
                         regime=signal.regime,
                         volatility=signal.volatility,
                         indicators=signal.indicators,
-                        reasons=signal.reasons + ["Ensemble não confirmou a direção no shadow gate"],
+                        reasons=signal.reasons + [f"Voto Ensemble não confirmou a direção no shadow gate ({model_vote['status']})"],
                         pullback=signal.pullback,
                     )
             if pattern_memory is not None and pattern_memory.enabled and signal.action in {"buy", "sell"}:
@@ -419,6 +456,9 @@ class BacktestEngine:
             "blocked_event_bars": blocked_event_bars,
             "blocked_event_candidates": blocked_event_candidates,
             "ensemble_enabled": bool(ensemble_model and ensemble_model.is_trained),
+            "model_vote_policy": "shared_runtime_backtest_v1",
+            "model_versions": ({"ensemble": str(ensemble_model.metadata.get("model_version") or "")} if ensemble_model else {}),
+            "model_vote_status_counts": model_vote_status_counts,
             "ensemble_rejections": ensemble_rejections,
             "pattern_memory_enabled": bool(pattern_memory and pattern_memory.enabled),
             "pattern_rejections": pattern_rejections,

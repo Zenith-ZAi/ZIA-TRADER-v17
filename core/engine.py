@@ -1,4 +1,5 @@
 import asyncio
+import json
 import pandas as pd
 import numpy as np
 import logging
@@ -14,6 +15,7 @@ from infra.redis_cache import RedisCache
 from ai.price_transformer_model import PriceTransformerModel
 from ai.price_lstm_model import PriceLSTMModel
 from ai.ensemble_model import EnsembleModel
+from ai.feature_pipeline import FEATURE_SCHEMA_VERSION
 from core.feature_pipeline import FeaturePipeline
 import torch
 from risk.risk_ai import RiskAI
@@ -35,6 +37,9 @@ from execution.cost_aware_executor import CostAwareExecutor
 from core.pre_market_gate import PreMarketGate
 from core.data_feeds import FeedUnavailable, MultiTimeframeFeed
 from core.regime_detector import MarketRegimeDetector
+from core.model_voting import aggregate_model_votes
+from learning.model_registry import ModelRegistryStore
+from core.dataset_integrity import sha256_file
 
 
 logger = logging.getLogger(__name__)
@@ -95,8 +100,13 @@ class RoboTraderUnified:
             lstm_num_layers = self.settings.LSTM_NUM_LAYERS
             lstm_output_size = self.settings.LSTM_OUTPUT_DIM
             self.lstm_model = PriceLSTMModel(input_dim, lstm_hidden_size, lstm_num_layers, lstm_output_size)
+            self.neural_model_versions: Dict[str, str] = {}
             self.neural_models_ready = self._load_neural_weights()
-            self.ensemble_model = EnsembleModel(self.settings.ENSEMBLE_MODEL_DIR)
+            self.ensemble_model = EnsembleModel(
+                self.settings.ENSEMBLE_MODEL_DIR,
+                registry_store=ModelRegistryStore(self.db_manager),
+                require_active_registry=True,
+            )
             self.execution_engine = ExecutionEngine(
                 self.settings,
                 self.exchange_connector,
@@ -109,7 +119,9 @@ class RoboTraderUnified:
             raise
 
     def _load_neural_weights(self) -> bool:
+        self.neural_model_versions = {}
         if not self.settings.NEURAL_MODELS_ENABLED:
+            logger.info("Redes neurais desativadas por NEURAL_MODELS_ENABLED=false.")
             return False
         transformer_path = Path(self.settings.TRANSFORMER_WEIGHTS_PATH)
         lstm_path = Path(self.settings.LSTM_WEIGHTS_PATH)
@@ -117,11 +129,45 @@ class RoboTraderUnified:
             logger.warning("Pesos Transformer/LSTM ausentes; redes neurais permanecerão desativadas.")
             return False
         try:
-            self.transformer_model.load_state_dict(torch.load(transformer_path, map_location="cpu"))
-            self.lstm_model.load_state_dict(torch.load(lstm_path, map_location="cpu"))
-            logger.info("Pesos Transformer/LSTM carregados com sucesso.")
+            registry = ModelRegistryStore(self.db_manager)
+            verified = {}
+            for name, path, expected_seq_len in (
+                ("transformer", transformer_path, int(self.settings.TRANSFORMER_SEQ_LEN)),
+                ("lstm", lstm_path, int(self.settings.LSTM_SEQ_LEN)),
+            ):
+                manifest_path = Path(f"{path}.metadata.json")
+                if not manifest_path.is_file():
+                    raise ValueError(f"manifesto ausente: {manifest_path}")
+                metadata = json.loads(manifest_path.read_text(encoding="utf-8"))
+                artifact_hash = sha256_file(path)
+                trained_at = metadata.get("trained_at")
+                if not self.risk_ai._parse_utc(trained_at):
+                    raise ValueError(f"trained_at ausente/inválido em {manifest_path}")
+                required = (
+                    metadata.get("model_name") == name
+                    and bool(metadata.get("model_version"))
+                    and len(str(metadata.get("dataset_sha256") or "")) == 64
+                    and metadata.get("artifact_sha256") == artifact_hash
+                    and metadata.get("feature_schema_version") == FEATURE_SCHEMA_VERSION
+                    and int(metadata.get("input_dim", -1)) == int(self.settings.TRANSFORMER_INPUT_DIM)
+                    and int(metadata.get("sequence_length", -1)) == expected_seq_len
+                    and metadata.get("output_contract") == "future_return_v1"
+                    and metadata.get("oos_validation_passed") is True
+                    and isinstance(metadata.get("validation_metrics"), dict)
+                )
+                if not required:
+                    raise ValueError(f"manifesto incompatível/incompleto: {manifest_path}")
+                if not registry.verify_active_artifact(name, str(metadata["model_version"]), artifact_hash):
+                    raise ValueError(f"artefato {name} não está ativo com o hash atual no registry")
+                verified[name] = metadata
+
+            self.transformer_model.load_state_dict(torch.load(transformer_path, map_location="cpu", weights_only=True))
+            self.lstm_model.load_state_dict(torch.load(lstm_path, map_location="cpu", weights_only=True))
+            self.neural_model_versions = {name: str(meta["model_version"]) for name, meta in verified.items()}
+            logger.info("Redes neurais carregadas com manifestos ativos verificados: %s", self.neural_model_versions)
             return True
         except Exception as exc:
+            self.neural_model_versions = {}
             logger.error("Pesos neurais rejeitados: %s", exc)
             return False
 
@@ -226,48 +272,79 @@ class RoboTraderUnified:
                     confidence = 0.0
                     prediction_action_lstm = "hold"
                     confidence_lstm = 0.0
+                    predictions = []
+                    model_states = {
+                        "transformer": "disabled" if not self.neural_models_ready else "insufficient_features",
+                        "lstm": "disabled" if not self.neural_models_ready else "insufficient_features",
+                        "ensemble": self.ensemble_model.load_status,
+                    }
                     if self.neural_models_ready and len(model_features) >= self.settings.TRANSFORMER_SEQ_LEN:
                         sequence = model_features.tail(self.settings.TRANSFORMER_SEQ_LEN).to_numpy(dtype=np.float32)
                         if sequence.shape[1] != input_dim:
                             logger.error("[%s] Schema neural incompatível: %s != %s", symbol, sequence.shape[1], input_dim)
+                            for name in ("transformer", "lstm"):
+                                model_states[name] = "invalid_schema"
+                                predictions.append({"model": name, "status": "invalid_schema"})
                         else:
-                            input_tensor = torch.tensor(sequence, dtype=torch.float32).unsqueeze(1)
-                            input_tensor_lstm = input_tensor.transpose(0, 1)
-                            self.transformer_model.eval()
-                            self.lstm_model.eval()
-                            with torch.no_grad():
-                                prediction_output = self.transformer_model(input_tensor)
-                                prediction_output_lstm = self.lstm_model(input_tensor_lstm)
-                            predicted_price_change = float(prediction_output[-1, 0, 0].item())
-                            predicted_price_change_lstm = float(prediction_output_lstm[0, 0].item())
-                            prediction_action, confidence = self._price_change_to_signal(predicted_price_change)
-                            prediction_action_lstm, confidence_lstm = self._price_change_to_signal(predicted_price_change_lstm)
+                            try:
+                                input_tensor = torch.tensor(sequence, dtype=torch.float32).unsqueeze(1)
+                                input_tensor_lstm = input_tensor.transpose(0, 1)
+                                self.transformer_model.eval()
+                                self.lstm_model.eval()
+                                with torch.no_grad():
+                                    prediction_output = self.transformer_model(input_tensor)
+                                    prediction_output_lstm = self.lstm_model(input_tensor_lstm)
+                                predicted_price_change = float(prediction_output[-1, 0, 0].item())
+                                predicted_price_change_lstm = float(prediction_output_lstm[0, 0].item())
+                                if not np.isfinite([predicted_price_change, predicted_price_change_lstm]).all():
+                                    raise ValueError("predição neural não finita")
+                                prediction_action, confidence = self._price_change_to_signal(predicted_price_change)
+                                prediction_action_lstm, confidence_lstm = self._price_change_to_signal(predicted_price_change_lstm)
+                                predictions.extend([
+                                    {"model": "transformer", "action": prediction_action, "confidence": confidence, "version": self.neural_model_versions["transformer"]},
+                                    {"model": "lstm", "action": prediction_action_lstm, "confidence": confidence_lstm, "version": self.neural_model_versions["lstm"]},
+                                ])
+                                model_states["transformer"] = "ready"
+                                model_states["lstm"] = "ready"
+                            except Exception as exc:
+                                logger.error("[%s] Inferência neural falhou; voto bloqueado: %s", symbol, exc)
+                                for name in ("transformer", "lstm"):
+                                    model_states[name] = "invalid_output"
+                                    predictions.append({"model": name, "status": "invalid_output"})
 
                     ensemble_action, ensemble_confidence = "hold", 0.0
                     if self.ensemble_model.is_trained and not model_features.empty:
                         try:
                             ensemble_action, ensemble_confidence = self.ensemble_model.predict(model_features.tail(1))
+                            predictions.append({
+                                "model": "ensemble",
+                                "action": ensemble_action,
+                                "confidence": ensemble_confidence,
+                                "version": str(self.ensemble_model.metadata.get("model_version") or ""),
+                            })
+                            model_states["ensemble"] = "ready"
                         except Exception as exc:
                             logger.warning("Erro ao prever com Ensemble: %s", exc)
+                            predictions.append({"model": "ensemble", "status": "invalid_output"})
+                            model_states["ensemble"] = "invalid_output"
 
-                    predictions = []
-                    if self.neural_models_ready:
-                        predictions.extend([
-                            {"action": prediction_action, "confidence": confidence, "weight": 0.3},
-                            {"action": prediction_action_lstm, "confidence": confidence_lstm, "weight": 0.3},
-                        ])
-                    if self.ensemble_model.is_trained:
-                        predictions.append({"action": ensemble_action, "confidence": ensemble_confidence, "weight": 0.4})
-
-                    if not predictions:
-                        final_action, final_confidence = "hold", 0.0
-                    else:
-                        scores = {"buy": 0.0, "sell": 0.0, "hold": 0.0}
-                        total_weight = sum(p["weight"] for p in predictions)
-                        for prediction in predictions:
-                            scores[prediction["action"]] += prediction["confidence"] * prediction["weight"]
-                        final_action = max(scores, key=scores.get)
-                        final_confidence = scores[final_action] / total_weight
+                    model_vote_report = aggregate_model_votes(
+                        predictions,
+                        self.settings.ENSEMBLE_WEIGHTS,
+                        minimum_action_confidence=float(self.settings.MIN_CONFIDENCE_THRESHOLD),
+                    )
+                    model_vote_report["model_states"] = model_states
+                    if self.ensemble_model.is_trained and self.ensemble_model._drift_hold_active():
+                        model_vote_report.update({
+                            "action": "hold",
+                            "confidence": 0.0,
+                            "status": "model_drift_hold",
+                            "reason": "HOLD persistente de drift requer revisão manual",
+                        })
+                    final_action = model_vote_report["action"]
+                    final_confidence = model_vote_report["confidence"]
+                    if final_action == "hold" and model_vote_report.get("status") != "ready":
+                        logger.warning("[%s] Voto ML em HOLD: %s", symbol, model_vote_report)
                     model_compute_latency_ms = (time.perf_counter() - model_compute_started) * 1000.0
 
                     # 3. Contexto de Mercado e gate de confluência
@@ -388,7 +465,7 @@ class RoboTraderUnified:
                         market_signal.regime,
                         "; ".join(market_signal.reasons),
                     )
-                    analysis = final_prediction
+                    analysis = {**final_prediction, "model_vote": model_vote_report}
 
                     volume_analysis = self.risk_ai.analyze_volume_flow(historical_data)
                     try:
@@ -523,6 +600,7 @@ class RoboTraderUnified:
                                 "pre_market_gate": pre_market,
                                 "order_flow": snapshot.order_flow,
                                 "features": feature_snapshot,
+                                "model_vote": model_vote_report,
                                 "risk_reason": shadow_risk.get("reason", ""),
                             },
                         })
@@ -533,6 +611,7 @@ class RoboTraderUnified:
                             "news_count": len(processed_news),
                             "news_provider_health": self.news_processor.health(),
                             "market_signal": market_signal.to_dict(),
+                            "model_vote": model_vote_report,
                             "reversal_signal": reversal_signal,
                             "pullback_signal": market_signal.pullback,
                             "event_guard": event_status,
@@ -564,10 +643,16 @@ class RoboTraderUnified:
                         exit_position = {**live_position, "symbol": symbol, "exit_reason": exit_decision.get("reason")}
                         exit_validation = self.risk_ai.validate_exit(exit_position, exit_decision["price"], {"exchange_balances": exchange_balances})
                         if exit_validation.get("valid"):
-                            exit_result = await self.execution_engine.execute_order(exit_validation)
+                            if self.order_manager is None:
+                                exit_result = {"status": "rejected", "reason": "OrderManager indisponível; saída automática bloqueada"}
+                            else:
+                                managed_exit = await self.order_manager.submit_exit(
+                                    {**exit_validation, "symbol": symbol, "exit_reason": exit_decision.get("reason")},
+                                    source="ai",
+                                    market_context={"exchange_balances": exchange_balances},
+                                )
+                                exit_result = managed_exit.get("execution", managed_exit)
                             if exit_result.get("status") == "success":
-                                await self.redis_cache.delete_state(f"position_{symbol}")
-                                self.db_manager.close_position(self.account_id, symbol)
                                 exit_executed = True
                                 logger.info("[%s] Posição fechada por %s", symbol, exit_decision.get("reason"))
                         else:
@@ -588,6 +673,7 @@ class RoboTraderUnified:
                             "action": analysis["prediction"],
                             "confidence": analysis["confidence"],
                             "price": current_price,
+                            "signal_validated": True,
                             "market_type": MarketType.FOREX if str(self.settings.MARKET_ADAPTER).lower() == "forex" else MarketType.CRYPTO,
                         }
                         
@@ -608,13 +694,18 @@ class RoboTraderUnified:
                         if risk_validation["valid"]:
                             try:
                                 execution_order = {**order_data, **risk_validation}
-                                if self.order_manager is not None:
-                                    managed_result = await self.order_manager.submit(execution_order, source="ai", confirmed=False)
+                                if self.order_manager is None:
+                                    execution_result = {"status": "rejected", "reason": "OrderManager indisponível; entrada automática bloqueada"}
+                                else:
+                                    managed_result = await self.order_manager.submit(
+                                        execution_order,
+                                        source="ai",
+                                        confirmed=False,
+                                        market_context=market_context,
+                                    )
                                     execution_result = managed_result.get("execution", managed_result)
                                     if managed_result.get("status") == "pending_confirmation":
                                         self.db_manager.create_system_log("WARNING", "Decisão IA aguardando confirmação visual antes da execução.", "OrderManager", self.account_id)
-                                else:
-                                    execution_result = await self.execution_engine.execute_order(execution_order)
                                 if execution_result["status"] == "success":
                                     # Atualizar saldo e registrar execução
                                     current_balance = self.db_manager.get_account_state(self.account_id).balance
