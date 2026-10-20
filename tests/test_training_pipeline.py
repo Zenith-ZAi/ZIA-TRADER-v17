@@ -130,6 +130,9 @@ def test_candidate_is_not_promoted_when_walk_forward_fails_baseline_gate(monkeyp
     assert result["validation_metrics"]["f1_macro"] >= 0.30
     assert result["test_metrics"]["sharpe_proxy"] > 0.5
     assert result["calibration_brier"] < 0.2
+    assert sum(result["training_class_distribution"].values()) == pytest.approx(1.0)
+    assert "mean_net_block_return" in result["test_metrics"]["net_return_metrics"]
+    assert result["test_metrics"]["cost_assumption_bps"] == pytest.approx(15.0)
     assert not (model_dir / "rf_model.joblib").exists()
     assert registry.active_version("ensemble") is None
     assert len(score_indices) == 2

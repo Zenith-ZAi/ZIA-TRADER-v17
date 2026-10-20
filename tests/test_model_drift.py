@@ -41,6 +41,23 @@ def test_data_or_performance_drift_requires_persistent_hold():
     assert report["status"] == "drift_detected"
 
 
+def test_class_distribution_shift_and_after_cost_deterioration_trigger_hold():
+    reference_frame = pd.DataFrame({"feature_a": np.linspace(-1.0, 1.0, 100)})
+    reference = build_drift_reference(reference_frame)
+    report = assess_drift(
+        reference,
+        reference_frame,
+        baseline_metrics={"net_return_metrics": {"mean_net_block_return": 0.002}},
+        recent_metrics={"net_return_metrics": {"mean_net_block_return": -0.001}},
+        baseline_class_distribution={"0": 0.8, "1": 0.1, "2": 0.1},
+        recent_class_distribution={"0": 0.1, "1": 0.8, "2": 0.1},
+    )
+    assert report["hold"] is True
+    assert report["class_drift"] is True
+    assert report["net_performance_drift"] is True
+    assert report["class_distribution_delta"] == pytest.approx(0.7)
+
+
 def test_backup_restore_returns_prior_model_version(tmp_path):
     model_dir = tmp_path / "models"
     backup = model_dir / "rollback_previous"

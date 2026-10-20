@@ -148,6 +148,19 @@ class ModelRegistryStore:
         finally:
             db.close()
 
+    def verify_active_artifact(self, model_name: str, version: str, artifact_hash: str) -> bool:
+        """Confirma que a versão exata e o hash informado continuam ativos."""
+        db = self.db_manager.SessionLocal()
+        try:
+            row = db.query(ModelRegistry).filter(
+                ModelRegistry.model_name == str(model_name),
+                ModelRegistry.version == str(version),
+                ModelRegistry.status == "active",
+            ).first()
+            return bool(row and row.artifact_sha256 == str(artifact_hash))
+        finally:
+            db.close()
+
     def activate(self, version: str) -> None:
         """Ativa somente registro já criado como candidate após todos os gates."""
         db = self.db_manager.SessionLocal()

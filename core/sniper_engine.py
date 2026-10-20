@@ -60,6 +60,8 @@ class SniperEngine:
 
     async def start(self):
         """Inicia o motor Sniper."""
+        if not bool(getattr(self.settings, "SNIPER_ENABLED", False)):
+            raise RuntimeError("SNIPER_ENABLED=false; início do Sniper bloqueado")
         self.is_running = True
         logger.info("Motor Sniper ZIA iniciado.")
         
@@ -107,7 +109,15 @@ class SniperEngine:
                             exit_payload = {**live_position, "symbol": symbol, "exit_reason": exit_decision.get("reason")}
                             exit_validation = self.risk_ai.validate_exit(exit_payload, exit_decision["price"], {"exchange_balances": exchange_balances})
                             if exit_validation.get("valid"):
-                                exit_result = await self.execution_engine.execute_order(exit_validation)
+                                if self.order_manager is None:
+                                    exit_result = {"status": "rejected", "reason": "OrderManager indisponível; saída automática bloqueada"}
+                                else:
+                                    managed_exit = await self.order_manager.submit_exit(
+                                        {**exit_validation, "symbol": symbol, "price": exit_decision["price"], "exit_reason": exit_decision.get("reason")},
+                                        source="ai",
+                                        market_context={"exchange_balances": exchange_balances},
+                                    )
+                                    exit_result = managed_exit.get("execution", managed_exit)
                                 if exit_result.get("status") == "success":
                                     logger.info("Sniper: posição fechada por %s", exit_decision.get("reason"))
 
@@ -313,6 +323,7 @@ class SniperEngine:
                                     "quantity": self.settings.SNIPER_TRADE_QUANTITY,
                                     "price": current_price,
                                     "confidence": min(float(market_signal.confidence), float(whale_activity.get("confidence", 0.0))),
+                                    "signal_validated": True,
                                     "market_type": MarketType.FOREX if str(self.settings.MARKET_ADAPTER).lower() == "forex" else MarketType.CRYPTO,
                                 }
                                 account_state = self.db_manager.get_account_state(self.account_id)
@@ -351,7 +362,16 @@ class SniperEngine:
                                     logger.warning("Sniper: ordem rejeitada por risco para %s: %s", symbol, risk_validation["reason"])
                                 else:
                                     execution_order = {**order_data, **risk_validation}
-                                    execution_result = await self.execution_engine.execute_order(execution_order)
+                                    if self.order_manager is None:
+                                        execution_result = {"status": "rejected", "reason": "OrderManager indisponível; entrada do Sniper bloqueada"}
+                                    else:
+                                        managed_result = await self.order_manager.submit(
+                                            execution_order,
+                                            source="ai",
+                                            confirmed=False,
+                                            market_context=risk_context,
+                                        )
+                                        execution_result = managed_result.get("execution", managed_result)
                                     if execution_result["status"] == "success":
                                         logger.info("Sniper: Ordem executada com sucesso: %s", execution_result["order_id"])
                                         self.db_manager.create_execution_history(

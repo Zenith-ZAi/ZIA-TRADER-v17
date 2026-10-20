@@ -220,6 +220,25 @@ class DatabaseManager:
         db.close()
         return daily_pnl
 
+    def get_verified_risk_periods(self, account_id: str, as_of: datetime) -> Optional[Dict[str, object]]:
+        """Retorna None até existir um ledger de equity por período auditável.
+
+        As tabelas daily_pnl/weekly_pnl/monthly_pnl atuais não identificam
+        completude, fees/funding, fluxos externos, equity inicial nem proveniência
+        suficiente; tratá-las como orçamento de risco seria uma falsa garantia.
+        """
+        return None
+
+    def get_verified_trade_returns(self, account_id: str, limit: int = 100) -> Optional[Dict[str, object]]:
+        """Retorna None até existir ledger persistente de execuções fechadas auditável.
+
+        As tabelas atuais não comprovam simultaneamente fills completos, custos,
+        funding, retorno realizado, identidade única da execução e timestamp de
+        fechamento. Sizing adaptativo não deve consumir arrays fornecidos por
+        chamadores como se fossem histórico verificado.
+        """
+        return None
+
     # News and trend persistence
     def create_news_article(self, article: Dict[str, object], symbol: Optional[str] = None) -> NewsArticle:
         db = self.SessionLocal()

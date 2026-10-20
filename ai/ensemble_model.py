@@ -12,9 +12,10 @@ import pandas as pd
 import xgboost as xgb
 from sklearn.ensemble import RandomForestClassifier
 
-from ai.feature_pipeline import MODEL_FEATURE_COLUMNS
+from ai.feature_pipeline import FEATURE_SCHEMA_VERSION, MODEL_FEATURE_COLUMNS
 
 logger = logging.getLogger(__name__)
+INFERENCE_CONTRACT_VERSION = "sell_hold_buy_v1"
 
 
 class EnsembleModel:
@@ -22,14 +23,27 @@ class EnsembleModel:
 
     ACTION_MAP = {0: "sell", 1: "hold", 2: "buy"}
 
-    def __init__(self, model_dir: str = "models", random_state: int = 42):
+    INFERENCE_CONTRACT_VERSION = INFERENCE_CONTRACT_VERSION
+
+    def __init__(
+        self,
+        model_dir: str = "models",
+        random_state: int = 42,
+        *,
+        registry_store=None,
+        require_active_registry: bool = False,
+    ):
         self.model_dir = Path(model_dir)
         self.random_state = int(random_state)
+        self.registry_store = registry_store
+        self.require_active_registry = bool(require_active_registry)
         self.rf_model = None
         self.xgb_model = None
         self.is_trained = False
         self.feature_columns: list[str] = []
         self.metadata: Dict[str, object] = {}
+        self.load_status = "not_loaded"
+        self.load_error: str | None = None
         self._ensure_model_dir()
         self._load_models()
 
@@ -65,7 +79,9 @@ class EnsembleModel:
         xgb_path = self.model_dir / "xgb_model.joblib"
         try:
             if not (rf_path.exists() and xgb_path.exists() and self._metadata_path.exists()):
-                logger.warning("Artefatos Ensemble ausentes ou sem metadados; modo neutro ativado.")
+                self.load_status = "artifact_missing"
+                self.load_error = "artefatos ou metadata ausentes"
+                logger.warning("Artefatos Ensemble ausentes ou sem metadados; inferência indisponível.")
                 self._initialize_untrained_models()
                 return
             with self._metadata_path.open("r", encoding="utf-8") as handle:
@@ -73,18 +89,45 @@ class EnsembleModel:
             columns = metadata.get("feature_columns")
             if not isinstance(columns, list) or columns != MODEL_FEATURE_COLUMNS:
                 raise ValueError("schema de features do Ensemble incompatível")
+            classes = metadata.get("classes")
+            if classes != {"sell": 0, "hold": 1, "buy": 2}:
+                raise ValueError("contrato de classes ausente ou incompatível")
+            if metadata.get("feature_schema_version") != FEATURE_SCHEMA_VERSION:
+                raise ValueError("versão do schema de features ausente ou incompatível")
+            if metadata.get("inference_contract_version") != self.INFERENCE_CONTRACT_VERSION:
+                raise ValueError("versão do contrato de inferência ausente ou incompatível")
+            if self.require_active_registry:
+                model_version = str(metadata.get("model_version") or "")
+                dataset_hash = str(metadata.get("dataset_sha256") or "")
+                if (
+                    not model_version
+                    or len(dataset_hash) != 64
+                    or any(character not in "0123456789abcdef" for character in dataset_hash.lower())
+                    or metadata.get("decision") != "accepted"
+                    or metadata.get("registry_status") != "active"
+                    or self.registry_store is None
+                ):
+                    raise ValueError("artefato sem versão aprovada, hash de dataset ou registry obrigatório")
+                from learning.model_registry import artifact_sha256
+
+                current_hash = artifact_sha256(self.model_dir)
+                if not self.registry_store.verify_active_artifact("ensemble", model_version, current_hash):
+                    raise ValueError("versão/hash do artefato não correspondem a um modelo ativo no registry")
             self.rf_model = joblib.load(rf_path)
             self.xgb_model = joblib.load(xgb_path)
-            if not set(getattr(self.rf_model, "classes_", [])) >= {0, 1, 2}:
+            if set(getattr(self.rf_model, "classes_", [])) != {0, 1, 2}:
                 raise ValueError("Random Forest não contém as três classes esperadas")
-            if not set(getattr(self.xgb_model, "classes_", [])) >= {0, 1, 2}:
+            if set(getattr(self.xgb_model, "classes_", [])) != {0, 1, 2}:
                 raise ValueError("XGBoost não contém as três classes esperadas")
             self.feature_columns = columns
             self.metadata = metadata
             self.is_trained = True
+            self.load_status = "loaded_active" if self.require_active_registry else "loaded_unverified_registry"
             logger.info("Ensemble treinado carregado: %s", self.metadata.get("trained_at", "sem data"))
         except Exception as exc:
             logger.error("Artefatos Ensemble rejeitados: %s", exc)
+            self.load_status = "rejected_incompatible_or_unapproved"
+            self.load_error = str(exc)
             self._initialize_untrained_models()
 
     def train(self, X: pd.DataFrame, y: pd.Series, metadata: Dict[str, object] | None = None) -> Dict[str, object]:
@@ -110,9 +153,13 @@ class EnsembleModel:
         self.metadata = {
             "feature_columns": columns,
             "classes": {"sell": 0, "hold": 1, "buy": 2},
+            "feature_schema_version": FEATURE_SCHEMA_VERSION,
+            "inference_contract_version": self.INFERENCE_CONTRACT_VERSION,
+            "algorithm": {"random_forest": "sklearn.ensemble.RandomForestClassifier", "xgboost": "xgboost.XGBClassifier"},
             "rows": int(len(X)),
             **(metadata or {}),
         }
+        self.load_status = "trained_unregistered"
         joblib.dump(self.rf_model, self.model_dir / "rf_model.joblib")
         joblib.dump(self.xgb_model, self.model_dir / "xgb_model.joblib")
         with self._metadata_path.open("w", encoding="utf-8") as handle:
@@ -132,8 +179,13 @@ class EnsembleModel:
     @staticmethod
     def _aligned_proba_matrix(model, features: pd.DataFrame) -> np.ndarray:
         raw = np.asarray(model.predict_proba(features), dtype=float)
+        classes = list(model.classes_)
+        if raw.shape != (len(features), len(classes)) or not np.isfinite(raw).all():
+            raise ValueError("shape ou valores inválidos em predict_proba")
+        if np.any(raw < 0.0) or np.any(raw > 1.0) or not np.allclose(raw.sum(axis=1), 1.0, atol=1e-6):
+            raise ValueError("probabilidades brutas inválidas ou não normalizadas")
         aligned = np.zeros((len(features), 3), dtype=float)
-        for column, class_label in enumerate(model.classes_):
+        for column, class_label in enumerate(classes):
             label = int(class_label)
             if 0 <= label <= 2:
                 aligned[:, label] = raw[:, column]
@@ -155,7 +207,7 @@ class EnsembleModel:
     def predict_proba(self, features: pd.DataFrame) -> np.ndarray:
         """Probabilidades médias RF/XGBoost alinhadas a sell/hold/buy; sem alterar o modelo."""
         if not self.is_trained or not self.feature_columns:
-            return np.tile(np.asarray([0.25, 0.50, 0.25], dtype=float), (len(features), 1))
+            raise RuntimeError(f"Ensemble indisponível para inferência: {self.load_status}")
         if not isinstance(features, pd.DataFrame) or features.empty:
             raise ValueError("features vazias ou inválidas")
         if list(features.columns) != self.feature_columns:
@@ -163,7 +215,12 @@ class EnsembleModel:
         rf_probs = self._aligned_proba_matrix(self.rf_model, features)
         xgb_probs = self._aligned_proba_matrix(self.xgb_model, features)
         average = (rf_probs + xgb_probs) / 2.0
-        if not np.isfinite(average).all() or not np.allclose(average.sum(axis=1), 1.0, atol=1e-6):
+        if (
+            not np.isfinite(average).all()
+            or np.any(average < 0.0)
+            or np.any(average > 1.0)
+            or not np.allclose(average.sum(axis=1), 1.0, atol=1e-6)
+        ):
             raise ValueError("probabilidades inválidas ou não normalizadas")
         return average
 
