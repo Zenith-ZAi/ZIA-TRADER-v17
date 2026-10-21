@@ -1,37 +1,37 @@
 # Avaliação de prontidão para VPS — ZIA-TRADER v17
 
-**Data:** 2026-10-21. **Resultado:** **NÃO APROVADO como deployment verificado; preparação estrutural parcial.** Esta avaliação não habilita trading, não valida rentabilidade e não substitui homologação independente.
+**Atualizado:** 2026-10-21. **Resultado:** **NÃO APROVADO para deployment verificado nem negociação autônoma.** Preparação estrutural parcial; esta branch trata a portabilidade de dependências, mas não habilita ordens, não valida rentabilidade e não substitui homologação independente.
 
-## O que foi verificado nesta rodada
+## Evidência implementada/verificada
 
-- Python 3.12.3 na virtualenv `/home/ubuntu/.venvs/zia-v17`.
-- `pytest -q`: **189 passed, 3 skipped, 1 warning**. O aviso é `PendingDeprecationWarning` de Starlette recomendando `python_multipart`.
-- `python -m compileall -q .`: exit 0; `git diff --check`: exit 0.
-- Os arquivos `docker-compose.yml` e `docker-compose.vps.yml` foram carregados com PyYAML 6.0.3. A checagem estática encontrou os serviços esperados, `db-init` usando `alembic upgrade head`, flags live/autostart false, API vinculada a `127.0.0.1` e hardening `read_only`/`cap_drop` na API e worker.
-- Testes unitários das migrations e do preflight aprovam a revisão Alembic presente e bloqueiam schema sem `alembic_version` quando `REQUIRE_ALEMBIC_HEAD=true`.
-- Não houve conexão a broker/exchange, envio de ordem, uso de capital, deploy, nem acesso a VPS.
+- Python 3.12.3 na Sandbox ARM64; suíte integral Phase 8A no venv limpo: **192 passed, 3 skipped, 1 warning** (Starlette/PendingDeprecation; 20,47 s). O baseline Phase 7 continha 189 testes.
+- Um ambiente descartável Python 3.12 ARM64 foi sincronizado pelo novo `requirements.lock` via UV com backend CPU: 117 pacotes, `uv pip check` exit 0, Torch `2.13.0+cpu`, sem `cuda` e sem `nvidia-cusparselt-cu13`; os mesmos 189 testes passaram (32,84 s).
+- Resolução cruzada `x86_64-unknown-linux-gnu` também seleciona Torch CPU e não gera dependências CUDA/NVIDIA/Triton.
+- Novo teste do lock: 3 passed. O ambiente/venv anterior permanece intocado e ainda registra o wheel incompatível; reinstalação controlada pelo lock é o caminho corrigido.
+- Nesta branch, Dockerfile e CI são alterados para sincronizar o lock e executar `uv pip check`; os jobs GitHub desta branch ainda são necessários para aprovar o build real.
+- Os Compose da Fase 7 foram validados estaticamente anteriormente: `db-init` aplica Alembic, preflight exige revisão, flags trading/autostart permanecem OFF, API fica em loopback e API/worker usam hardening. Isso não é execução de container.
+- Não houve broker/exchange, envio de ordem, uso de capital, deploy, nem acesso a VPS.
 
-## O que não foi verificado
+## Não verificado
 
-- O Sandbox não tem Docker CLI/Compose, Podman ou daemon acessível. Logo, **não** foram executados `docker compose config`, build da imagem, `up`, health check de container, network/volume test, shutdown/restart ou smoke do Compose.
-- Não há PostgreSQL/Redis de VPS nesta sessão. As migrations foram exercitadas em SQLite local; o serviço CI do projeto configura PostgreSQL 16, mas os resultados da branch-base não substituem CI do código atual.
-- Não foram instalados/validados certificados TLS, domínio, Nginx em execução, firewall/UFW, SSH, sincronização de relógio, alertas 24/7, limites CPU/RAM/IO, backup periódico nem restauração em banco limpo.
-- Não foi validado o `pip install` do Dockerfile em ambiente limpo. `uv pip check --python /home/ubuntu/.venvs/zia-v17/bin/python` retornou exit 1 por `nvidia-cusparselt-cu13` compilado para plataforma diferente. O Dockerfile instala `requirements.txt`, enquanto o lock não é aplicado pelo build; as dependências precisam de resolução/build reprodutível antes do aceite.
-- O status de saúde e persistência com serviços externos, certificados reais e segredos definidos pelo operador não foi testado.
+- O Sandbox não tem Docker CLI/Compose, Podman ou daemon acessível. Não foram executados `docker compose config`, build/up, health check em container, teste de rede/volume, shutdown/restart nem smoke do Compose. O build CI do PR ainda está pendente.
+- Não há PostgreSQL/Redis de VPS nesta sessão. Migrations foram exercitadas em SQLite local; a integração com PostgreSQL desta branch deve ser verificada pelo CI e depois em staging.
+- Não foram instalados/validados certificados TLS, domínio, Nginx em execução, firewall/UFW, SSH, NTP, alertas 24/7, limites CPU/RAM/IO, backup periódico ou restauração em banco limpo.
+- Lock CPU prova compatibilidade na Sandbox ARM64 e resolução x86_64, mas não mede latência nem capacidade do Torch no hardware da VPS. A base Docker, Postgres e Redis continuam sem digest imutável; scanner CVE/SBOM/licenças não executado.
+- Saúde, persistência, segredos do operador e falhas/restart com serviços externos ainda não foram testados.
 
 ## Gates bloqueantes antes de qualquer ativação
 
-1. **Não ativar flags reais:** manter `LIVE_TRADING_ENABLED=false`, `LIVE_MODE=false`, `LIVE_KILL_SWITCH=true`, `AUTO_START_ENGINES=false`, `AUTONOMOUS_TRADING_ENABLED=false`, `MANUAL_TRADING_ENABLED=false`, `NEURAL_MODELS_ENABLED=false` e `BACKTEST_USE_ENSEMBLE=false`. O `BINANCE_MODE` inicial é `simulated`.
-2. **Resolver ledger de risco:** implementar e auditar `equity_ledger_v1` para períodos UTC completos diário/semanal/mensal e `closed_execution_ledger_v1` para Kelly; testar fees, funding, fluxos externos, fills duplicados/atrasados, reconciliação e limites. Até lá, novas entradas continuam bloqueadas corretamente.
-3. **Obter dataset confiável:** registrar origem, instrumento, timeframe, timezone, política de ajustes/gaps e SHA-256; validar labels maduros e custos. Só então executar walk-forward/OOS e revisão humana; não criar ou ativar artefato fictício.
-4. **Corrigir e reproduzir dependências:** limpar incompatibilidade de pacote, definir política de pin/lock que o Docker build realmente consuma e construir a imagem em CI/runner compatível com produção.
-5. **Validar Compose de ponta a ponta em staging isolado:** `docker compose config`; build; subir apenas DB/Redis; executar `db-init`/`alembic upgrade head`; confirmar preflight com revisão exata; subir API/worker; checar saúde, persistência, reinício e logs. Confirmar que API está só em loopback e DB/Redis sem portas publicadas.
-6. **Hardening operacional:** gerar segredos novos fora do Git e restringir arquivo/secret store; instalar certificados válidos com chave protegida; configurar firewall/SSH/domínio; confirmar NTP; revisar CORS e autenticação; testar alertas e procedimento do kill switch.
-7. **Backup e restore:** fazer backup e restauração em ambiente separado, validar checksums e contagens de tabelas críticas/intents/fills/snapshots antes de tratar backups como confiáveis.
-8. **Homologação Demo/Testnet:** apenas após gates anteriores e mediante validação explícita isolada, cobrir fills parciais, timeout ambíguo, reconciliação, rate-limit, OCO e restart. Nenhuma mainnet está autorizada por este documento.
+1. **Manter flags reais desligadas:** `LIVE_TRADING_ENABLED=false`, `LIVE_MODE=false`, `LIVE_KILL_SWITCH=true`, `AUTO_START_ENGINES=false`, `AUTONOMOUS_TRADING_ENABLED=false`, `MANUAL_TRADING_ENABLED=false`, `NEURAL_MODELS_ENABLED=false` e `BACKTEST_USE_ENSEMBLE=false`. `BINANCE_MODE` inicia em `simulated`.
+2. **Ledger de risco:** implementar e auditar `equity_ledger_v1` para períodos UTC completos diário/semanal/mensal e `closed_execution_ledger_v1` para Kelly; cobrir fees, funding, cashflows, fills duplicados/atrasados, reconciliação, restart e concorrência. Até aprovação, novas entradas permanecem corretamente bloqueadas.
+3. **Dataset/modelo:** registrar origem e licença, instrumentos/timeframes, timezone, política de ajustes/gaps e SHA-256; validar labels maduros/custos; executar walk-forward/OOS e revisão humana. Não criar/ativar artefato fictício.
+4. **Aprovar dependências/build:** receber CI verde de teste e build desta branch; build/scan limpo em runner alvo; definir política de atualização da base, lock, CVEs e artefatos.
+5. **Staging isolado ponta a ponta:** executar `docker compose config`/build; subir DB/Redis; aplicar `db-init`/Alembic; confirmar revision/head e preflight; subir API/worker; validar health, persistência, reinício, logs e portas. Nenhum capital real.
+6. **Hardening operacional:** gerar segredos fora do Git e proteger permissões/secret store; TLS, firewall/SSH/domínio, NTP, CORS/auth; testar alertas e kill switch.
+7. **Backup/restore:** restaurar em ambiente independente, verificar checksums e contagens de dados críticos, intents/fills/snapshots; testar rollback de migration.
+8. **Shadow/Demo/Testnet supervisionado:** só depois dos gates anteriores, com venue não live selecionada e validada. Ensaiar fill parcial, timeout ambíguo, reconciliação, rate-limit, OCO e restart, com supervisão humana. Este documento não autoriza mainnet.
+9. **Soak e aceite independente:** janela contínua acordada, revisão de drift/alertas/atrasos/disco, backups e rollback; revisão de segurança/privacidade e aprovação humana explícita separada.
 
 ## Decisão operacional
 
-O repositório está **preparado para continuar validação controlada em ambiente isolado**, não para ser chamado “VPS-ready” em sentido de implantação comprovada. É possível planejar uma execução de staging com todas as flags de trading desligadas depois de um build limpo e do teste real do Compose. Os bloqueios de ledger e dataset impedem declarar entradas de trading autorizadas ou modelo validado; TLS, firewall, backup/restore e serviços persistentes impedem declarar homologação de VPS concluída.
-
-Consulte também `docs/VPS_DEPLOYMENT_RUNBOOK.md`, `docs/DEPENDENCY_AUDIT.md`, `docs/INFRASTRUCTURE_AUDIT.md` e `docs/PHASE_COMPLETION_MATRIX.md`.
+O repositório está **preparado para seguir a validação controlada**, não para ser chamado “VPS-ready” em sentido operacional. A resolução de dependências CPU avança a preparação do build, mas não substitui CI nem container real. Ledger e dataset/modelo ainda bloqueiam entradas; staging, TLS, firewall, backup/restore, monitoramento e soak bloqueiam o aceite operacional. A pontuação e as etapas estão em `docs/FINALIZATION_ROADMAP.md`; confira também `docs/VPS_DEPLOYMENT_RUNBOOK.md`, `docs/DEPENDENCY_AUDIT.md`, `docs/INFRASTRUCTURE_AUDIT.md` e `docs/PHASE_COMPLETION_MATRIX.md`.

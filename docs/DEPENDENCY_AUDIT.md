@@ -1,35 +1,32 @@
 # Auditoria de dependências e runtime
 
-**Data de verificação:** 2026-10-21. **Ambiente:** Sandbox Linux, Python 3.12.3, virtualenv `/home/ubuntu/.venvs/zia-v17`. Esta é uma auditoria do ambiente ativo e dos manifests; não equivale a um build limpo de container.
+**Atualizado:** 2026-10-21, branch `phase8/cpu-lock-and-final-readiness`. O diagnóstico da virtualenv anterior é preservado; esta atualização registra a solução proposta e os testes isolados. Não equivale a build/deploy em VPS.
 
 ## Evidências executadas
 
 | Verificação | Resultado | Escopo/limite |
 |---|---|---|
-| `/home/ubuntu/.venvs/zia-v17/bin/python --version` | Python 3.12.3 | Runtime local do Sandbox. |
-| `python -m compileall -q .` | Exit 0 | Sintaxe/compilação; não valida runtime de cada integração. |
-| `python -m pytest -q` | 189 passed, 3 skipped, 1 warning | Suíte local; sem broker real, VPS ou serviços externos de produção. |
-| `uv pip check --python /home/ubuntu/.venvs/zia-v17/bin/python` | **Exit 1**; 194 pacotes verificados, uma incompatibilidade: `nvidia-cusparselt-cu13` foi construído para plataforma diferente | Falha do ambiente ativo; não foi atribuída sem prova ao Docker. Deve ser resolvida/explicada antes de aprovar build reprodutível. |
-| Build limpo de dependências/Docker | Não executado | O Sandbox não possui Docker CLI/Compose. |
-| Scanner de vulnerabilidades (por exemplo, pip-audit) | Não executado | Não instalado/validado nesta tarefa; nenhuma alegação de ausência de CVEs. |
+| Ambiente da virtualenv anterior | Python 3.12.3, Linux `aarch64` | A virtualenv compartilhada original não foi alterada. |
+| `uv pip check --python /home/ubuntu/.venvs/zia-v17/bin/python` | **Exit 1** na virtualenv antiga: um pacote (`nvidia-cusparselt-cu13==0.8.1`) tem wheel `manylinux2014_sbsa` que o ambiente ativo não aceita | Diagnóstico real de compatibilidade de ambiente; não foi atribuído ao build de produção sem evidência. |
+| Lock novo CPU | 117 requisitos resolvidos, pins + hashes SHA-256; `torch==2.13.0+cpu` para plataformas não macOS; sem pacotes `nvidia-*`, `cuda-*` ou `triton` | Universal lock para runtime CPU; versões preservadas por `requirements.constraints.txt`, arquivo de constraints que não deve ser instalado. |
+| Sync limpo do lock | `uv pip sync --python /tmp/zia-v17-phase8-lock-test/bin/python --torch-backend cpu --no-progress requirements.lock` | Ambiente descartável Python 3.12.3, Sandbox ARM64; 117 pacotes instalados, download Torch CPU de 147,8 MiB. |
+| `uv pip sync ... --check requirements.lock` | Sem alterações necessárias; 117 pacotes verificados | O ambiente temporário instalado corresponde ao lock versionado. |
+| `uv pip check --python /tmp/zia-v17-phase8-lock-test/bin/python` | Exit 0; todos compatíveis | No mesmo ARM64 limpo; não corrige a virtualenv antiga, prova que uma reinstalação via lock é compatível. |
+| Torch no ambiente limpo | `2.13.0+cpu`, `torch.version.cuda=None`, CUDA indisponível, pacote `nvidia-cusparselt-cu13` ausente | Perfil deliberado para VPS CPU; desempenho/capacidade de inferência ainda precisam ser medidos no hardware-alvo. |
+| `pytest -q` no ambiente limpo, branch Phase 8A | 192 passed, 3 skipped, 1 warning; 20,47 s | Sem serviços externos; skip de banco depende de `TEST_DATABASE_URL`; warning Starlette/PendingDeprecation. |
+| Resolução cruzada `x86_64-unknown-linux-gnu` | Torch CPU selecionado; sem dependências CUDA/NVIDIA | Verifica resolução para o alvo padrão do GitHub/Docker, não executa imagem x86 no Sandbox ARM. |
+| Testes novos `tests/test_dependency_lock.py` | 3 passed | Verificam perfil CPU, hashes, ausência dos wheels incompatíveis e que constraints não são manifest de instalação. |
+| Build de imagem via Dockerfile desta branch | Pendente | Sem Docker CLI/daemon neste Sandbox; depende dos jobs `test` e `container` do PR. |
+| Scanner CVE/licenças/SBOM | Não executado | Não alegar ausência de vulnerabilidades. |
 
-## Manifestos e consistência
+## Alterações nesta branch
 
-- `requirements.txt` fixa várias dependências principais (FastAPI, SQLAlchemy, Alembic, Pandas, NumPy, Redis, XGBoost e driver PostgreSQL), mas deixa outras sem versão exata ou em faixa aberta, incluindo `torch`, pacotes OpenTelemetry, `requests` e alguns conectores opcionais.
-- `requirements.lock` registra versões transitivas e contém `nvidia-cusparselt-cu13==0.8.1`; o `uv pip check` reporta que a build instalada não corresponde à plataforma corrente.
-- `Dockerfile` usa `FROM python:3.12-slim` e instala **somente** `requirements.txt`; não consome `requirements.lock`. A tag base não fixa digest nem patch de Python. Portanto o lock não garante o conteúdo reproduzível da imagem atual.
-- CI configura Python 3.12 e serviço PostgreSQL 16, instala `requirements.txt`, compila, executa testes e possui job de build de imagem. A última execução remota observada antes desta branch foi sucesso no `master` após PR #17 (run `39361245138`, 2026-10-20); não é resultado de CI desta branch.
-- A suíte de migration em CI prevê `TEST_DATABASE_URL` e PostgreSQL, mas o ambiente local desta rodada não tinha PostgreSQL; o teste local correspondente foi ignorado quando a variável não estava configurada.
+- `requirements.lock` passou a ser gerado por UV com resolução universal, backend `cpu`, pins e hashes; o perfil de produção não solicita aceleração CUDA.
+- `requirements.constraints.txt` preserva pins de referência não acelerados do snapshot anterior e é usado **somente como `-c` na regeneração**; não instalar esse arquivo diretamente.
+- Dockerfile e CI passam a sincronizar o mesmo lock com UV `0.12.19` e `--torch-backend cpu`, seguidos por `uv pip check`.
+- Regeneração controlada: `uv pip compile requirements.txt -c requirements.constraints.txt --python-version 3.12 --torch-backend cpu --universal --emit-index-url --generate-hashes -o requirements.lock`.
+- Instalação/sincronização: `uv pip sync --system --torch-backend cpu requirements.lock`; verificação: `uv pip check --system`.
 
-## Classificação dos achados
+## O que ainda não prova
 
-| Severidade | Achado | Ação/recomendação |
-|---|---|---|
-| Alta para release | `uv pip check` falha por wheel CUDA/NVIDIA incompatível com a plataforma do Sandbox. | Identificar proveniência e necessidade do pacote; resolver em ambiente limpo/CPU compatível sem ignorar o erro; repetir verificação e build. Não remover dependência do lock às cegas. |
-| Alta para reprodutibilidade | Dockerfile não instala lock e inclui dependências sem pin estrito. | Escolher mecanismo oficial do projeto para gerar/consumir um lock compatível com Python 3.12/Linux de produção; construir/testar imagem antes de fixar a configuração. |
-| Média | Imagem base, Postgres/Redis usam tags, sem digest imutável. | Definir política de atualização e pin de digest após confirmar arquitetura e scanner; programar rebuilds de segurança. |
-| Não medido | CVEs/licenças/SBOM e comportamento de conectores opcionais. | Executar scanner em CI e revisar os resultados antes da implantação externa. |
-
-## Conclusão
-
-O conjunto local é suficiente para executar a suíte atual, mas a checagem de compatibilidade retorna erro e a instalação de container não foi reproduzida. **Dependências não estão aprovadas para deployment até que o erro de plataforma seja resolvido e o Docker build consuma dependências controladas.** Nenhum pacote foi atualizado ou removido nesta rodada para evitar mascarar a origem do conflito.
+A resolução x86_64 e a instalação ARM64 em venv descartável não executam Compose, Dockerfile, PostgreSQL/Redis, proxy TLS ou aplicação com feeds/broker reais. CI e build do container desta branch ainda devem ficar verdes. A tag `python:3.12-slim`, Postgres e Redis ainda não estão fixados por digest; scanner, SBOM, licenças, atualização de CVEs e medição de latência CPU permanecem gates do release.

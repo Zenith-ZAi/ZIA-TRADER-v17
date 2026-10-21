@@ -34,9 +34,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: pip
-      - name: Install dependencies
-        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.19'
+          enable-cache: true
+          cache-dependency-glob: requirements.lock
+      - name: Install locked CPU dependencies
+        run: uv pip sync --system --torch-backend cpu requirements.lock
+      - name: Check dependency compatibility
+        run: uv pip check --system
       - name: Install PostgreSQL client tools
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - name: Compile
