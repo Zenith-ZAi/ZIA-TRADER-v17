@@ -9,7 +9,7 @@ Os percentuais abaixo são uma avaliação de gates/evidências, não uma contag
 | Dimensão | Estimativa | Evidência e limitador dominante |
 |---|---:|---|
 | Arquitetura backend e controles de segurança | **75–80%** | Alembic/PostgreSQL, gates fail-closed, OrderManager, reconciliação, controles de risco, logs e regressões temporais existem; ledger financeiro verificável e revisão independente continuam ausentes. |
-| Estrutura de engenharia e testes locais | **75%** | 189 testes passaram no baseline Phase 7; agora 192 passaram no venv limpo Phase 8A; CI de #18/#19 passou. `uv pip check` do venv antigo revelou wheel incompatível, tratado por lock CPU em validação nesta branch. |
+| Estrutura de engenharia e testes locais | **75%** | 189 testes passaram no baseline Phase 7; agora 192 passaram no venv limpo Phase 8A; CI de #18/#19 passou e o CI Phase 8A aprovou `test` e `container`. `uv pip check` do venv antigo revelou wheel incompatível, tratado por lock CPU. |
 | IA/dados prontos para validação OOS | **25–30%** | Pipeline walk-forward/registry/drift está presente; falta dataset real licenciado/proveniente e modelo validado/aprovado. |
 | VPS e operação 24/7 comprovadas | **30–35%** | Compose e container build no CI existem; não houve boot, PostgreSQL/Redis persistentes, TLS, backup/restore, alertas ou restart test em VPS alvo. |
 | Autonomia real autorizável hoje | **0% habilitado; cerca de 10% de prontidão de engenharia** | Flags reais continuam OFF; equity/trade ledgers inexistentes e não há soak Demo/Testnet. Não habilitar execução autônoma real nesta situação. |
@@ -23,7 +23,7 @@ O repositório está mais adiantado que a prontidão do sistema para assumir ris
 
 - **Defeito:** o lock anterior foi exportado de um ambiente diferente e continha `nvidia-cusparselt-cu13` (`manylinux2014_sbsa`), enquanto a virtualenv ativa do Sandbox é ARM64. O Dockerfile e CI instalavam `requirements.txt`, ignorando o lock; portanto o lock não era nem usado nem portátil.
 - **Correção em implementação:** resolver Torch em backend CPU explícito, fixar dependências por versão e SHA-256, remover artefatos CUDA/NVIDIA desnecessários para VPS CPU, sincronizar exatamente o lock em CI e Docker e executar `uv pip check`.
-- **Aceite local:** instalação limpa ARM64 a partir do lock, Torch reporta `cuda_build=None`, nenhum wheel NVIDIA incompatível, `uv pip check` passa e 192 testes passam. **Aceite da branch pendente:** CI de `test` e `container` verde. Build real da imagem ARM continuará dependente do alvo CI/registry.
+- **Aceite local:** instalação limpa ARM64 a partir do lock, Torch reporta `cuda_build=None`, nenhum wheel NVIDIA incompatível, `uv pip check` passa e 192 testes passam. **Aceite da branch:** jobs `test` e `container` do PR #20 verdes no run `39651671722`; imagem construída em runner GitHub x86_64. Build ARM e execução do Compose/VPS continuam não testados.
 
 ### Fase 8B — Ledger financeiro e reconciliação
 

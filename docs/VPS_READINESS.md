@@ -8,13 +8,13 @@
 - Um ambiente descartável Python 3.12 ARM64 foi sincronizado pelo novo `requirements.lock` via UV com backend CPU: 117 pacotes, `uv pip check` exit 0, Torch `2.13.0+cpu`, sem `cuda` e sem `nvidia-cusparselt-cu13`; os mesmos 189 testes passaram (32,84 s).
 - Resolução cruzada `x86_64-unknown-linux-gnu` também seleciona Torch CPU e não gera dependências CUDA/NVIDIA/Triton.
 - Novo teste do lock: 3 passed. O ambiente/venv anterior permanece intocado e ainda registra o wheel incompatível; reinstalação controlada pelo lock é o caminho corrigido.
-- Nesta branch, Dockerfile e CI são alterados para sincronizar o lock e executar `uv pip check`; os jobs GitHub desta branch ainda são necessários para aprovar o build real.
+- CI do PR #20 (run `39651671722`, SHA `e375072658cad0e581ac75cbfbd4cf27aa5f78f0`): jobs `test` e `container` passaram; o runner GitHub construiu a imagem. CodeRabbit foi marcado como revisão ignorada; não houve revisão manual registrada.
 - Os Compose da Fase 7 foram validados estaticamente anteriormente: `db-init` aplica Alembic, preflight exige revisão, flags trading/autostart permanecem OFF, API fica em loopback e API/worker usam hardening. Isso não é execução de container.
 - Não houve broker/exchange, envio de ordem, uso de capital, deploy, nem acesso a VPS.
 
 ## Não verificado
 
-- O Sandbox não tem Docker CLI/Compose, Podman ou daemon acessível. Não foram executados `docker compose config`, build/up, health check em container, teste de rede/volume, shutdown/restart nem smoke do Compose. O build CI do PR ainda está pendente.
+- O Sandbox não tem Docker CLI/Compose, Podman ou daemon acessível. Não foram executados `docker compose config`, Compose up, health check em container, teste de rede/volume, shutdown/restart nem smoke do Compose. O build da imagem no CI não substitui esses ensaios.
 - Não há PostgreSQL/Redis de VPS nesta sessão. Migrations foram exercitadas em SQLite local; a integração com PostgreSQL desta branch deve ser verificada pelo CI e depois em staging.
 - Não foram instalados/validados certificados TLS, domínio, Nginx em execução, firewall/UFW, SSH, NTP, alertas 24/7, limites CPU/RAM/IO, backup periódico ou restauração em banco limpo.
 - Lock CPU prova compatibilidade na Sandbox ARM64 e resolução x86_64, mas não mede latência nem capacidade do Torch no hardware da VPS. A base Docker, Postgres e Redis continuam sem digest imutável; scanner CVE/SBOM/licenças não executado.

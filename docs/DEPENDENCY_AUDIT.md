@@ -16,7 +16,7 @@
 | `pytest -q` no ambiente limpo, branch Phase 8A | 192 passed, 3 skipped, 1 warning; 20,47 s | Sem serviços externos; skip de banco depende de `TEST_DATABASE_URL`; warning Starlette/PendingDeprecation. |
 | Resolução cruzada `x86_64-unknown-linux-gnu` | Torch CPU selecionado; sem dependências CUDA/NVIDIA | Verifica resolução para o alvo padrão do GitHub/Docker, não executa imagem x86 no Sandbox ARM. |
 | Testes novos `tests/test_dependency_lock.py` | 3 passed | Verificam perfil CPU, hashes, ausência dos wheels incompatíveis e que constraints não são manifest de instalação. |
-| Build de imagem via Dockerfile desta branch | Pendente | Sem Docker CLI/daemon neste Sandbox; depende dos jobs `test` e `container` do PR. |
+| CI GitHub do PR #20 | `test` e `container` concluídos com sucesso no run `39651671722` (SHA `e375072658cad0e581ac75cbfbd4cf27aa5f78f0`) | O job container construiu a imagem no runner GitHub x86_64. CodeRabbit reportou revisão ignorada; isso não é revisão manual. Build não significa deploy, Compose up ou soak em VPS. |
 | Scanner CVE/licenças/SBOM | Não executado | Não alegar ausência de vulnerabilidades. |
 
 ## Alterações nesta branch
@@ -29,4 +29,4 @@
 
 ## O que ainda não prova
 
-A resolução x86_64 e a instalação ARM64 em venv descartável não executam Compose, Dockerfile, PostgreSQL/Redis, proxy TLS ou aplicação com feeds/broker reais. CI e build do container desta branch ainda devem ficar verdes. A tag `python:3.12-slim`, Postgres e Redis ainda não estão fixados por digest; scanner, SBOM, licenças, atualização de CVEs e medição de latência CPU permanecem gates do release.
+A resolução x86_64 e a instalação ARM64 em venv descartável, somadas ao build do job `container`, não executam Compose up, PostgreSQL/Redis persistentes, proxy TLS ou aplicação com feeds/broker reais. A tag `python:3.12-slim`, Postgres e Redis ainda não estão fixados por digest; scanner, SBOM, licenças, atualização de CVEs e medição de latência CPU permanecem gates do release.
