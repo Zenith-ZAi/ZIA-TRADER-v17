@@ -300,6 +300,7 @@ class Settings(BaseSettings):
     HTTP_RETRY_BACKOFF_MAX_SECONDS: float = float(os.getenv("HTTP_RETRY_BACKOFF_MAX_SECONDS", "2.0"))
     HTTP_RETRY_JITTER_RATIO: float = float(os.getenv("HTTP_RETRY_JITTER_RATIO", "0.25"))
     QUOTE_CACHE_TTL_SECONDS: int = int(os.getenv("QUOTE_CACHE_TTL_SECONDS", "30"))
+    QUOTE_MAX_AGE_SECONDS: int = int(os.getenv("QUOTE_MAX_AGE_SECONDS", "60"))
     NEWS_CACHE_TTL_SECONDS: int = int(os.getenv("NEWS_CACHE_TTL_SECONDS", "300"))
     NEWS_MAX_ARTICLES: int = int(os.getenv("NEWS_MAX_ARTICLES", "20"))
     NEWS_PROVIDER_ARTICLES: int = int(os.getenv("NEWS_PROVIDER_ARTICLES", "10"))

@@ -73,14 +73,24 @@ class MetaTrader5Adapter:
         tick = self._mt5.symbol_info_tick(symbol)
         if tick is None:
             return {"symbol": symbol, "last": 0.0, "error": "SYMBOL_NOT_FOUND"}
-            
+        tick_time = getattr(tick, "time_msc", None)
+        divisor = 1000.0
+        if tick_time is None:
+            tick_time = getattr(tick, "time", None)
+            divisor = 1.0
+        try:
+            quote_timestamp = datetime.fromtimestamp(float(tick_time) / divisor, tz=timezone.utc).isoformat()
+        except (TypeError, ValueError, OverflowError, OSError):
+            quote_timestamp = None
+
         return {
             "symbol": symbol,
             "last": tick.last,
             "bid": tick.bid,
             "ask": tick.ask,
             "volume": tick.volume,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": quote_timestamp,
+            "timestamp_source": "exchange_tick",
         }
 
     async def place_order(self, symbol: str, action: str, order_type: str, quantity: float, price: Optional[float] = None, **kwargs) -> Dict[str, Any]:

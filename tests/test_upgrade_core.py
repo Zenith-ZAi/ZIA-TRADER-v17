@@ -1,3 +1,4 @@
+from datetime import datetime, timezone, timedelta
 from types import SimpleNamespace
 
 from config.settings import Settings
@@ -51,6 +52,57 @@ def test_news_gate_accepts_fresh_healthy_context():
     )
     assert result["entry_allowed"] is True
     assert result["fresh_articles"] == 1
+
+
+def test_news_gate_rejects_articles_without_timestamp_or_from_future():
+    settings = Settings(
+        NEWS_FAIL_CLOSED_FOR_ENTRY=True,
+        NEWS_MIN_HEALTHY_PROVIDERS=1,
+        NEWS_MIN_ARTICLES_FOR_ENTRY=1,
+        NEWS_MAX_ARTICLE_AGE_SECONDS=7200,
+    )
+    now = datetime(2026, 8, 20, 12, 0, tzinfo=timezone.utc)
+    result = evaluate_news_gate(
+        [
+            {"title": "untimestamped", "sentiment_score": 0.9},
+            {"title": "future", "sentiment_score": 0.8, "published_at": (now + timedelta(minutes=1)).isoformat()},
+        ],
+        {"rss": {"ok": True}},
+        settings,
+        now=now,
+    )
+
+    assert result["entry_allowed"] is False
+    assert result["fresh_articles"] == 0
+    assert result["unknown_timestamp_articles"] == 1
+    assert result["future_timestamp_articles"] == 1
+
+
+def test_news_gate_excludes_stale_articles_from_sentiment_and_shock():
+    settings = Settings(
+        NEWS_FAIL_CLOSED_FOR_ENTRY=True,
+        NEWS_MIN_HEALTHY_PROVIDERS=1,
+        NEWS_MIN_ARTICLES_FOR_ENTRY=1,
+        NEWS_MAX_ARTICLE_AGE_SECONDS=7200,
+        NEWS_SHOCK_MIN_ARTICLES=2,
+        NEWS_SHOCK_SENTIMENT_THRESHOLD=-0.65,
+    )
+    now = datetime(2026, 8, 20, 12, 0, tzinfo=timezone.utc)
+    result = evaluate_news_gate(
+        [
+            {"title": "fresh neutral", "sentiment_score": 0.0, "published_at": (now - timedelta(minutes=1)).isoformat()},
+            {"title": "stale negative", "sentiment_score": -1.0, "published_at": (now - timedelta(days=2)).isoformat()},
+        ],
+        {"rss": {"ok": True}},
+        settings,
+        now=now,
+    )
+
+    assert result["entry_allowed"] is True
+    assert result["fresh_articles"] == 1
+    assert result["average_sentiment"] == 0.0
+    assert result["news_shock"] is False
+    assert result["stale_timestamp_articles"] == 1
 
 
 def test_circuit_breaker_blocks_drawdown():

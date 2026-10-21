@@ -17,6 +17,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 from typing import Any
 
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import inspect, text
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -51,6 +53,19 @@ def _safe_endpoint(value: str) -> str:
     return value.split("://", 1)[-1]
 
 
+def _alembic_head_status(engine) -> tuple[bool, str]:
+    config = Config(str(PROJECT_ROOT / "alembic.ini"))
+    expected_heads = set(ScriptDirectory.from_config(config).get_heads())
+    inspector = inspect(engine)
+    if "alembic_version" not in inspector.get_table_names():
+        return False, "tabela alembic_version ausente"
+    with engine.connect() as connection:
+        current_heads = set(connection.execute(text("SELECT version_num FROM alembic_version")).scalars())
+    if not expected_heads or current_heads != expected_heads:
+        return False, f"revisão atual={sorted(current_heads)}; esperada={sorted(expected_heads)}"
+    return True, f"revisão aplicada={sorted(current_heads)}"
+
+
 def run_preflight(strict: bool = False) -> dict[str, Any]:
     database_url = os.getenv("DATABASE_URL", "sqlite:///./data/zia_trader.db")
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -70,7 +85,11 @@ def run_preflight(strict: bool = False) -> dict[str, Any]:
         manager = DatabaseManager(database_url)
         with manager.engine.connect() as connection:
             connection.execute(text("SELECT 1"))
-        manager.create_tables()
+        if _bool_env("REQUIRE_ALEMBIC_HEAD", False):
+            migration_ok, migration_detail = _alembic_head_status(manager.engine)
+            add("alembic_head", migration_ok, migration_detail)
+        else:
+            manager.create_tables()
         tables = set(inspect(manager.engine).get_table_names())
         missing = sorted(REQUIRED_TABLES - tables)
         persistent_db = not database_url.startswith("sqlite:")

@@ -30,7 +30,7 @@ from core.decision_snapshot import build_decision_snapshot
 from core.pattern_memory import PatternMemory, build_pattern_signature
 from core.position_policy import evaluate_position_exit
 from core.multi_timeframe import combine_timeframe_signals, parse_timeframes
-from core.news_gate import evaluate_news_gate
+from core.news_gate import evaluate_news_gate, filter_fresh_news_articles
 from core.risk_guard import evaluate_circuit_breaker, evaluate_emergency_exit
 from core.microstructure import estimate_entry_costs
 from execution.cost_aware_executor import CostAwareExecutor
@@ -350,14 +350,20 @@ class RoboTraderUnified:
                     # 3. Contexto de Mercado e gate de confluência
                     news_started = time.perf_counter()
                     processed_news = snapshot.news
+                    news_observed_at = datetime.now(timezone.utc)
+                    fresh_news = filter_fresh_news_articles(
+                        processed_news, self.settings, now=news_observed_at
+                    )[0]
                     trends = snapshot.trends
                     regime_info = self.regime_detector.detect(historical_data)
                     logger.info("[%s] Regime de Mercado: %s (Mult: %.2f)", symbol, regime_info["regime"], regime_info["action_multiplier"])
                     
-                    avg_sentiment = self.news_processor.aggregate_sentiment(processed_news)
+                    avg_sentiment = self.news_processor.aggregate_sentiment(fresh_news)
                     trend_score = self.news_processor.aggregate_trend_score(trends) if hasattr(self.news_processor, "aggregate_trend_score") else 0.0
                     news_provider_health = self.news_processor.health() if hasattr(self.news_processor, "health") else {}
-                    news_gate = evaluate_news_gate(processed_news, news_provider_health, self.settings)
+                    news_gate = evaluate_news_gate(
+                        processed_news, news_provider_health, self.settings, now=news_observed_at
+                    )
                     news_latency_ms = (time.perf_counter() - news_started) * 1000.0
                     AI_NEWS_FETCH_LATENCY.observe(news_latency_ms / 1000.0)
                     signal_compute_started = time.perf_counter()
@@ -426,7 +432,7 @@ class RoboTraderUnified:
                     multi_timeframe_ok = not self.settings.MULTI_TIMEFRAME_ENABLED or multi_timeframe["confirmed"]
                     pre_market = self.pre_market_gate.evaluate(
                         historical_data,
-                        {"articles": processed_news, "provider_health": self.news_processor.health()},
+                        {"articles": fresh_news, "provider_health": news_provider_health},
                         market_open=True,
                     )
                     reversal_signal = detect_reversal_signal(
@@ -536,7 +542,8 @@ class RoboTraderUnified:
                         "balance_data_available": balance_data_available,
                         "news_sentiment": avg_sentiment,
                         "trend_score": trend_score,
-                        "news_count": len(processed_news),
+                        "news_count": len(fresh_news),
+                        "news_received_count": len(processed_news),
                         "market_signal": market_signal.to_dict(),
                         "reversal_signal": reversal_signal,
                         "pullback_signal": market_signal.pullback,

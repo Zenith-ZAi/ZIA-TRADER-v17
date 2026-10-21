@@ -81,6 +81,7 @@ class ForexPaperAdapter:
             "ask": price + self.spread / 2.0,
             "volume": 1.0,
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp_source": "simulated",
         }
 
     async def get_order_book(self, symbol: str, limit: int = 20) -> Dict[str, Any]:

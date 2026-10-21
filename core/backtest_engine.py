@@ -55,6 +55,21 @@ class BacktestEngine:
         value = row.get(preferred, row.get(fallback, np.nan))
         return float(value) if pd.notna(value) else float("nan")
 
+    @staticmethod
+    def _next_bar_execution_price(row: pd.Series, previous_close: float) -> float:
+        """Use next-bar open; if unavailable, fall back only to the known prior close."""
+        try:
+            price = float(row.get("open", np.nan))
+        except (TypeError, ValueError):
+            price = float("nan")
+        if np.isfinite(price) and price > 0:
+            return price
+        try:
+            fallback = float(previous_close)
+        except (TypeError, ValueError):
+            return float("nan")
+        return fallback if np.isfinite(fallback) and fallback > 0 else float("nan")
+
     def _close_trade(
         self,
         trade: Dict[str, Any],
@@ -179,9 +194,10 @@ class BacktestEngine:
         start_index = max(35, int(self.settings.BACKTEST_WARMUP_BARS))
         for index in range(start_index, len(data)):
             row = data.iloc[index]
-            price = self._price(row, "open")
-            if not np.isfinite(price) or price <= 0:
-                price = self._price(row, "close")
+            decision_index = index - 1  # a barra de execução ainda não estava fechada no instante do sinal
+            price = self._next_bar_execution_price(
+                row, self._price(data.iloc[decision_index], "close")
+            )
             if not np.isfinite(price) or price <= 0:
                 quality_counts["bad_data"] += 1
                 equity_curve.append(capital)
@@ -189,7 +205,7 @@ class BacktestEngine:
 
             pullback = None
             signal = signal_cache.at(
-                index,
+                decision_index,
                 min_confidence=float(self.settings.MIN_CONFIDENCE_THRESHOLD),
                 max_volatility=float(self.settings.BACKTEST_MAX_VOLATILITY),
             )
@@ -199,7 +215,7 @@ class BacktestEngine:
                 blocked_event_bars += 1
                 blocked_event_candidates += int(raw_signal_action in {"buy", "sell"})
             if pullback_cache is not None:
-                pullback = pullback_cache.at(index)
+                pullback = pullback_cache.at(decision_index)
                 if pullback.valid:
                     pullback_score = pullback.confidence if pullback.action == "buy" else -pullback.confidence
                     signal = MarketSignal(
@@ -231,11 +247,11 @@ class BacktestEngine:
                 if raw_signal_action not in {"buy", "sell"} and signal.action in {"buy", "sell"}:
                     blocked_event_candidates += 1
             if ensemble_model and ensemble_model.is_trained and signal.action in {"buy", "sell"}:
-                if model_features is None or data.index[index] not in model_features.index:
+                if model_features is None or data.index[decision_index] not in model_features.index:
                     model_predictions = [{"model": "ensemble", "status": "missing_features"}]
                 else:
                     try:
-                        model_action, model_confidence = ensemble_model.predict(model_features.loc[[data.index[index]]])
+                        model_action, model_confidence = ensemble_model.predict(model_features.loc[[data.index[decision_index]]])
                         model_predictions = [{
                             "model": "ensemble",
                             "action": model_action,
@@ -266,7 +282,7 @@ class BacktestEngine:
                         pullback=signal.pullback,
                     )
             if pattern_memory is not None and pattern_memory.enabled and signal.action in {"buy", "sell"}:
-                pattern_signature = build_pattern_signature(data.iloc[: index + 1], signal)
+                pattern_signature = build_pattern_signature(data.iloc[: decision_index + 1], signal)
                 pattern_match = pattern_memory.find_match(symbol, pattern_signature)
                 if not pattern_match.matched:
                     pattern_rejections += 1
@@ -298,8 +314,8 @@ class BacktestEngine:
             quality_counts[signal.status] = quality_counts.get(signal.status, 0) + 1
             if self.db_manager is not None:
                 model_feature_context = {}
-                if model_features is not None and data.index[index] in model_features.index:
-                    model_feature_context = model_features.loc[data.index[index]].to_dict()
+                if model_features is not None and data.index[decision_index] in model_features.index:
+                    model_feature_context = model_features.loc[data.index[decision_index]].to_dict()
                 self.db_manager.create_decision_snapshot(build_decision_snapshot(
                     symbol=symbol,
                     timeframe=str(getattr(self.settings, "TIMEFRAME", "1h")),
@@ -314,11 +330,13 @@ class BacktestEngine:
                         "market_signal": signal.to_dict(),
                         "event_guard": event_status,
                         "position": position or {},
-                        "bar_index": index,
+                        "decision_bar_index": decision_index,
+                        "execution_bar_index": index,
+                        "execution_at": pd.Timestamp(data.index[index]).isoformat(),
                         "model_rejections": ensemble_rejections,
                         "pattern_rejections": pattern_rejections,
                     },
-                    observed_at=pd.Timestamp(data.index[index]).to_pydatetime(),
+                    observed_at=pd.Timestamp(data.index[decision_index]).to_pydatetime(),
                     dataset_sha256=dataset_hash,
                     feature_context=model_feature_context or signal.indicators,
                 ))

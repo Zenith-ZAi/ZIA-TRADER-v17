@@ -1,0 +1,31 @@
+# Matriz de conclusão das sete fases — ZIA-TRADER v17
+
+**Data de corte:** 2026-10-21. **Branch de trabalho:** `phase7/core-ai-data-causality`. **Base:** `861d5f96e808725b3df311382a69da496cf15c98` (`master`, PR #17). Esta matriz segue as sete fases do prompt original e separa implementação no repositório de homologação operacional. “Concluída” não significa validada em VPS, com capital real ou livre de defeitos.
+
+## Estado por fase
+
+| Fase | Escopo | Implementação no repositório | Evidência principal | Homologação externa / pendências |
+|---|---|---|---|---|
+| 1 | Banco de dados robusto | **Concluída e integrada** (PR #10). Alembic versionado, PostgreSQL como alvo, pool configurável, constraints/índices e tooling de backup. | `tests/test_database_migrations.py`; CI inclui PostgreSQL 16; `docs/DATABASE_OPERATIONS.md`. | Não foi feito restore de backup em VPS nesta rodada. TimescaleDB permanece opt-in e não foi exercitado contra serviço TimescaleDB. |
+| 2 | Pipeline de dados | **Concluída e integrada** (PR #11). Validação de OHLCV, staleness/gaps e persistência limitada de order book. | `tests/test_feed_quality.py`, `tests/test_feed_persistence.py`; `docs/FEED_QUALITY_PIPELINE.md`. | Sem calendário oficial de feriados/DST; não há feed externo homologado para execução. Nesta Fase 7 foram adicionados drops de candle ainda aberto e gates de timestamp de cotação/notícia. |
+| 3 | IA e análise avançada | **Pipeline implementado** (PR #12), com walk-forward, purge/embargo, registry, métricas e monitor invocável de drift. | `docs/AI_TRAINING_AND_VALIDATION.md`; `tests/test_training_pipeline.py` e testes de registry/drift. | **Bloqueada para validação de mercado:** não há dataset de procedência verificada nem artefato aprovado/ativo; nenhum novo treino, promoção ou alegação de performance foi realizado. |
+| 4 | Performance e paridade | **Concluída no escopo estrutural** (PR #13 e #14): resiliência HTTP e cache incremental de features/pullback com guard de warm-up. | `docs/reports/phase4_status.md`; testes de paridade numérica e resiliência. | Paridade cobre fixtures sintéticas e componentes específicos; não prova equivalência live/backtest integral em mercado, venue, notícias, risco ou fills reais. |
+| 5 | Robustez do broker | **Concluída para mocks/recuperação definida** (PR #15): reconciliação de intents abertas, recuperação pós-restart e consulta read-only por client ID. | `docs/reports/phase5_status.md`; `tests/test_e2e_resilience.py`, `tests/test_phase5_broker_resilience.py`. | Sem chamada real a exchange, Demo/Testnet ou stream WebSocket de broker. A limitação de `client_order_id` no adapter mainnet segue documentada; capital real permanece bloqueado. |
+| 6 | Deploy em VPS | **Parcial.** Compose, Dockerfile, preflight, volumes, auth, bindings locais e runbook existem. Nesta branch `db-init` passa a executar `alembic upgrade head`; o preflight estrito exige a revisão corrente. | `docker-compose.vps.yml`, `scripts/vps_preflight.py`, `docs/VPS_DEPLOYMENT_RUNBOOK.md`; YAML e invariantes estáticos passaram. | Docker/Compose não estão instalados no Sandbox: sem `docker compose config`, build, boot, health check de container ou teste de reinício nesta rodada. VPS, PostgreSQL/Redis externos, TLS/certificados, firewall, backup/restore e limites de recursos não foram exercitados. Dependências ainda precisam de build limpo reproduzível. |
+| 7 | Observabilidade e conformidade | **Parcial.** Há logs estruturados, correlation ID, `/metrics`, Prometheus/alert rules e correções temporais do core nesta continuação. | `monitoring/`, `deploy/prometheus.yml`, `deploy/alert_rules.yml`, `docs/reports/phase7_core_ai_audit.md`; suíte completa desta branch. | Não há evidência de Alertmanager/Grafana implantados, alertas testados em operação, inventário/retention/exportação LGPD concluídos, nem dataset operacional para drift. Deve haver revisão humana de privacidade e operação antes de considerar esta fase completa. |
+
+## Segurança e gates de aceite
+
+| Gate | Estado em 2026-10-21 | Evidência / condição para desbloqueio |
+|---|---|---|
+| `LIVE_TRADING_ENABLED`, `LIVE_MODE`, `AUTO_START_ENGINES`, autonomia e execução manual real desligados | **Mantido OFF** | `.env.vps.example` e `docker-compose.vps.yml` mantêm defaults false; `LIVE_KILL_SWITCH=true`. Não houve ordem nem acesso transacional a broker. |
+| Ledger financeiro verificável (`equity_ledger_v1`) para P&L diário/semanal/mensal | **Bloqueador** | `DatabaseManager.get_verified_risk_periods()` ainda falha fechado (`None`). Implementar proveniência, completeness, fees/funding/fluxos e reconciliação com evidência e testes antes de qualquer entrada. |
+| Ledger de execuções fechadas (`closed_execution_ledger_v1`) para Kelly | **Bloqueador** | `get_verified_trade_returns()` ainda falha fechado; `ADAPTIVE_KELLY_ENABLED` não basta para ativar sizing sem amostra verificável. |
+| Dataset de mercado de procedência verificada e aprovado | **Bloqueador para avaliação do modelo** | Não encontrado no checkout/ambiente; nenhum treino ou promoção foi feito nesta rodada. |
+| Modelo ativo aprovado e hash verificado | **Ausente; comportamento esperado é HOLD** | `models/` sem artefato aprovado identificado nesta revisão; flags neurais e uso do Ensemble continuam false no Compose VPS. |
+| Compose em Docker real/VPS | **Não validado** | Somente análise YAML e invariantes estáticos; é necessário executar `docker compose config`, build, migrations e smoke em ambiente isolado. |
+| Dependências reproduzíveis | **Pendente** | `uv pip check` retornou exit 1 por incompatibilidade de plataforma em `nvidia-cusparselt-cu13`; o Dockerfile usa `requirements.txt`, não `requirements.lock`, e não houve build limpo. |
+
+## Conclusão
+
+Fases 1–5 estão integradas no histórico, com os limites de homologação descritos acima. A implementação da Fase 6 é parcial e a Fase 7 não atende integralmente os critérios originais de observabilidade/conformidade. O trabalho de integridade temporal desta branch passa os testes locais disponíveis, mas **não autoriza deploy de trading autônomo nem capital real**. Para a decisão consolidada, consulte `docs/VPS_READINESS.md` e `docs/reports/phase7_final_assessment_2026-10-21.md`.

@@ -115,7 +115,17 @@ class YahooB3Adapter:
     async def get_market_data(self, symbol: str) -> Dict[str, Any]:
         frame = await self.get_historical_data(symbol, "1h", 2)
         price = float(frame["close"].iloc[-1])
-        return {"symbol": normalize_symbol(symbol, "b3"), "last": price, "bid": price, "ask": price, "volume": float(frame["volume"].iloc[-1] or 0.0), "timestamp": datetime.now(timezone.utc).isoformat()}
+        return {
+            "symbol": normalize_symbol(symbol, "b3"),
+            "last": price,
+            "bid": price,
+            "ask": price,
+            "volume": float(frame["volume"].iloc[-1] or 0.0),
+            "timestamp": pd.Timestamp(frame.index[-1]).isoformat(),
+            "timestamp_source": "ohlcv_candle",
+            "timestamp_timeframe": "1h",
+            "read_only": True,
+        }
 
     async def get_order_book(self, symbol: str, limit: int = 20) -> Dict[str, Any]:
         return {"symbol": normalize_symbol(symbol, "b3"), "bids": [], "asks": [], "limit": limit, "read_only": True}
@@ -172,7 +182,7 @@ class ForexPublicReadOnlyAdapter:
         base, quote = self._parts(symbol)
         return f"{base}{quote}=X"
 
-    async def _yahoo_price(self, symbol: str) -> float:
+    async def _yahoo_price(self, symbol: str) -> tuple[float, str]:
         payload = await self.http_client.get_json(
             "yahoo_forex",
             f"{self.base_url}/{self._yahoo_ticker(symbol)}",
@@ -184,15 +194,19 @@ class ForexPublicReadOnlyAdapter:
         if not result:
             raise MarketConnectorError("Yahoo não retornou cotação Forex")
         quote = (result[0].get("indicators", {}).get("quote", [{}]) or [{}])[0]
-        closes = [float(value) for value in quote.get("close", []) if value is not None]
-        if not closes:
+        timestamps = result[0].get("timestamp", [])
+        valid_rows = [(float(stamp), float(close)) for stamp, close in zip(timestamps, quote.get("close", [])) if stamp is not None and close is not None]
+        if not valid_rows:
             raise MarketConnectorError("Yahoo retornou cotação Forex vazia")
-        return closes[-1]
+        stamp, close = valid_rows[-1]
+        return close, datetime.fromtimestamp(stamp, tz=timezone.utc).isoformat()
 
     async def get_market_data(self, symbol: str) -> Dict[str, Any]:
         base, quote = self._parts(symbol)
         price = None
+        quote_timestamp = None
         source = "forex-python"
+        timestamp_source = "unverified"
         try:
             def fetch_rate() -> float:
                 from forex_python.converter import CurrencyRates
@@ -206,7 +220,8 @@ class ForexPublicReadOnlyAdapter:
         except Exception as exc:
             logger.warning("forex-python indisponível para %s; usando Yahoo: %s", symbol, exc)
             source = "yahoo-finance"
-            price = await self._yahoo_price(symbol)
+            price, quote_timestamp = await self._yahoo_price(symbol)
+            timestamp_source = "ohlcv_candle"
         return {
             "symbol": f"{base}/{quote}",
             "last": price,
@@ -215,7 +230,9 @@ class ForexPublicReadOnlyAdapter:
             "volume": 0.0,
             "source": source,
             "read_only": True,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": quote_timestamp,
+            "timestamp_source": timestamp_source,
+            "timestamp_timeframe": "1m" if timestamp_source == "ohlcv_candle" else None,
         }
 
     async def get_historical_data(self, symbol: str, timeframe: str, limit: int = 100) -> pd.DataFrame:
@@ -324,7 +341,20 @@ class CCXTAdapter:
         if not self.is_connected or self.exchange is None:
             raise MarketConnectorError("CCXT não está conectado")
         ticker = await self.exchange.fetch_ticker(self._ccxt_symbol(symbol))
-        return {"symbol": symbol, "last": ticker.get("last"), "bid": ticker.get("bid"), "ask": ticker.get("ask"), "volume": ticker.get("baseVolume"), "timestamp": datetime.now(timezone.utc).isoformat()}
+        timestamp_ms = ticker.get("timestamp")
+        try:
+            timestamp = datetime.fromtimestamp(float(timestamp_ms) / 1000.0, tz=timezone.utc).isoformat()
+        except (TypeError, ValueError, OverflowError, OSError):
+            timestamp = None
+        return {
+            "symbol": symbol,
+            "last": ticker.get("last"),
+            "bid": ticker.get("bid"),
+            "ask": ticker.get("ask"),
+            "volume": ticker.get("baseVolume"),
+            "timestamp": timestamp,
+            "timestamp_source": "exchange_tick",
+        }
 
     async def get_order_book(self, symbol: str, limit: int = 20) -> Dict[str, Any]:
         if not self.is_connected or self.exchange is None:
