@@ -1,10 +1,11 @@
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd
+import pytest
 
 from config.settings import Settings
 from core.daily_state_manager import DailyStateManager
-from core.data_feeds import MultiTimeframeFeed
+from core.data_feeds import FeedUnavailable, MultiTimeframeFeed
 from core.flow_analysis import analyze_order_flow
 from core.command_manager import CoreCommandManager
 from core.learning_layer import SignalLearningLayer
@@ -59,7 +60,15 @@ class _Market:
         return _frame(min(limit, 80), timeframe)
 
     async def get_market_data(self, symbol):
-        return {"symbol": symbol, "last": 115.8, "bid": 115.7, "ask": 115.9, "volume": 1000.0}
+        return {
+            "symbol": symbol,
+            "last": 115.8,
+            "bid": 115.7,
+            "ask": 115.9,
+            "volume": 1000.0,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp_source": "simulated",
+        }
 
     async def get_order_book(self, symbol, limit=20):
         return {"symbol": symbol, "bids": [[115.7, 2.2]], "asks": [[115.9, 1.0]]}
@@ -77,9 +86,11 @@ def test_multi_timeframe_feed_and_learning_layer(tmp_path):
     feed = MultiTimeframeFeed(_Market(), _News(), settings)
     snapshot = __import__("asyncio").run(feed.fetch_snapshot("BTC/USDT", limit=80))
     assert set(snapshot.historical) == {"15m", "1h"}
+    assert snapshot.data_quality["1h"]["incomplete_last_candle_dropped"] is True
+    assert snapshot.data_quality["quote"]["source"] == "simulated"
+    assert snapshot.primary_history.index[-1] + pd.Timedelta(hours=1) <= pd.Timestamp.now(tz="UTC")
     assert snapshot.order_flow["action"] == "buy"
     assert snapshot.trends[0]["price_change_24h"] == 2.0
-
     observed_at = _frame().index[-4].to_pydatetime()
     db.create_ai_observation({
         "symbol": "BTC/USDT",
@@ -96,6 +107,18 @@ def test_multi_timeframe_feed_and_learning_layer(tmp_path):
     record = db.get_ai_observations("BTC/USDT", limit=1)[0]
     assert record.outcome_label == 1
     assert record.metadata_json["after"]["future_price"] > 100.0
+
+
+def test_feed_blocks_positive_quote_without_timestamp_provenance():
+    class MissingTimestampMarket(_Market):
+        async def get_market_data(self, symbol):
+            return {"symbol": symbol, "last": 115.8, "bid": 115.7, "ask": 115.9}
+
+    settings = Settings(ANALYSIS_TIMEFRAMES="1h", TIMEFRAME="1h")
+    feed = MultiTimeframeFeed(MissingTimestampMarket(), _News(), settings)
+
+    with pytest.raises(FeedUnavailable, match="proveniência"):
+        __import__("asyncio").run(feed.fetch_snapshot("BTC/USDT", limit=80))
 
 
 def test_core_command_analyzes_without_orders(tmp_path):

@@ -67,6 +67,75 @@ def test_timestamp_column_is_normalized_and_future_timestamp_is_rejected():
         assess_ohlcv_quality(make_frame(future_index), timeframe="1h", now=now)
 
 
+def test_incomplete_last_candle_is_removed_before_runtime_features():
+    now = pd.Timestamp("2026-01-05T12:05:00Z")
+    frame = make_frame(pd.date_range(end=now.floor("h"), periods=8, freq="h"))
+
+    closed, dropped = MultiTimeframeFeed._drop_incomplete_last_candle(frame, "1h", now=now)
+
+    assert dropped is True
+    assert len(closed) == len(frame) - 1
+    assert closed.index[-1] == pd.Timestamp("2026-01-05T11:00:00Z")
+
+
+def test_last_candle_is_retained_at_interval_boundary():
+    now = pd.Timestamp("2026-01-05T12:00:00Z")
+    frame = make_frame(pd.date_range(end=now - pd.Timedelta(hours=1), periods=8, freq="h"))
+
+    closed, dropped = MultiTimeframeFeed._drop_incomplete_last_candle(frame, "1h", now=now)
+
+    assert dropped is False
+    assert closed.equals(frame)
+
+
+def test_quote_requires_verifiable_fresh_timestamp():
+    now = pd.Timestamp("2026-01-05T12:00:00Z")
+    settings = Settings(QUOTE_MAX_AGE_SECONDS=60, FEED_STALENESS_MULTIPLIER=3.0)
+
+    quality = MultiTimeframeFeed._validate_market_quote(
+        {"timestamp": (now - pd.Timedelta(seconds=20)).isoformat(), "timestamp_source": "exchange_tick"},
+        "1h",
+        settings,
+        now=now,
+    )
+    assert quality["valid"] is True
+    assert quality["age_seconds"] == 20.0
+
+    with pytest.raises(FeedUnavailable, match="timestamp|proveniência"):
+        MultiTimeframeFeed._validate_market_quote({"timestamp": now.isoformat()}, "1h", settings, now=now)
+    with pytest.raises(FeedUnavailable, match="futuro"):
+        MultiTimeframeFeed._validate_market_quote(
+            {"timestamp": (now + pd.Timedelta(seconds=2)).isoformat(), "timestamp_source": "exchange_tick"},
+            "1h",
+            settings,
+            now=now,
+        )
+    with pytest.raises(FeedUnavailable, match="obsoleta"):
+        MultiTimeframeFeed._validate_market_quote(
+            {"timestamp": (now - pd.Timedelta(seconds=61)).isoformat(), "timestamp_source": "exchange_tick"},
+            "1h",
+            settings,
+            now=now,
+        )
+
+
+def test_quote_bar_timestamp_uses_its_own_interval_freshness_limit():
+    now = pd.Timestamp("2026-01-05T12:00:00Z")
+    settings = Settings(QUOTE_MAX_AGE_SECONDS=60, FEED_STALENESS_MULTIPLIER=3.0)
+    market = {
+        "timestamp": (now - pd.Timedelta(seconds=170)).isoformat(),
+        "timestamp_source": "ohlcv_candle",
+        "timestamp_timeframe": "1m",
+    }
+
+    quality = MultiTimeframeFeed._validate_market_quote(market, "1h", settings, now=now)
+    assert quality["valid"] is True
+
+    market["timestamp"] = (now - pd.Timedelta(seconds=181)).isoformat()
+    with pytest.raises(FeedUnavailable, match="obsoleta"):
+        MultiTimeframeFeed._validate_market_quote(market, "1h", settings, now=now)
+
+
 def test_session_closures_do_not_become_false_b3_or_forex_gaps():
     now = pd.Timestamp("2026-01-06T13:05:00Z")
     b3_index = pd.DatetimeIndex(["2026-01-05T13:00:00Z", "2026-01-06T13:00:00Z"])

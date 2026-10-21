@@ -282,13 +282,19 @@ class BinanceSpotAdapter:
             self._request("GET", "/v3/ticker/24hr", {"symbol": code}),
             self._request("GET", "/v3/ticker/bookTicker", {"symbol": code}),
         )
+        close_time = ticker.get("closeTime")
+        try:
+            quote_timestamp = datetime.fromtimestamp(float(close_time) / 1000.0, tz=timezone.utc).isoformat()
+        except (TypeError, ValueError, OverflowError, OSError):
+            quote_timestamp = None
         return {
             "symbol": symbol,
             "last": float(ticker["lastPrice"]),
             "bid": float(book["bidPrice"]),
             "ask": float(book["askPrice"]),
             "volume": float(ticker["volume"]),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": quote_timestamp,
+            "timestamp_source": "exchange_tick",
         }
 
     async def get_order_book(self, symbol: str, limit: int = 20) -> Dict[str, Any]:

@@ -52,6 +52,7 @@ class SimulatedExchangeAdapter:
             "ask": price * 1.001,
             "volume": random.uniform(1000, 100000),
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp_source": "simulated",
         }
 
     async def get_order_book(self, symbol: str, limit: int = 20) -> Dict[str, Any]:

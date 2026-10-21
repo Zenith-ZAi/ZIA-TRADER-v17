@@ -51,7 +51,7 @@ class FakeSession:
         if url.endswith("/v3/account"):
             return FakeResponse({"balances": [{"asset": "USDT", "free": "1000", "locked": "0"}]})
         if url.endswith("/v3/ticker/24hr"):
-            return FakeResponse({"lastPrice": "50000", "volume": "123"})
+            return FakeResponse({"lastPrice": "50000", "volume": "123", "closeTime": 1700000000000})
         if url.endswith("/v3/ticker/bookTicker"):
             return FakeResponse({"bidPrice": "49999", "askPrice": "50001"})
         if url.endswith("/v3/klines"):
@@ -87,6 +87,8 @@ def test_adapter_connect_market_balance_history_and_filters():
     market = asyncio.run(adapter.get_market_data("BTC/USDT"))
     assert market["last"] == 50000.0
     assert market["bid"] < market["ask"]
+    assert market["timestamp"] == "2023-11-14T22:13:20+00:00"
+    assert market["timestamp_source"] == "exchange_tick"
 
     history = asyncio.run(adapter.get_historical_data("BTC/USDT", "1m", 1))
     assert list(history.columns) == ["open", "high", "low", "close", "volume"]

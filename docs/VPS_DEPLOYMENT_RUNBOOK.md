@@ -52,12 +52,13 @@ Suba primeiro somente os serviços de persistência e valide o schema e os volum
 
 ```bash
 docker compose --env-file .env.vps -f docker-compose.vps.yml up -d db redis
+docker compose --env-file .env.vps -f docker-compose.vps.yml run --rm db-init
 docker compose --env-file .env.vps -f docker-compose.vps.yml run --rm --no-deps api python scripts/vps_preflight.py --strict
 docker compose --env-file .env.vps -f docker-compose.vps.yml up -d api worker
 curl --fail http://127.0.0.1:8000/healthz
 ```
 
-O preflight bloqueia se flags de live/autonomia/manual estiverem ativas, se o PostgreSQL ou Redis não responder, se o schema mínimo não existir, se a persistência exigida estiver indisponível ou se os diretórios não forem graváveis. O `create_all` é aditivo e adequado para inicialização controlada; alterações de schema futuras devem ser migradas com ferramenta de migração versionada antes de uma operação longa.
+O serviço `db-init` executa `alembic upgrade head`; API e worker só são iniciados depois de sua conclusão. O preflight, com `REQUIRE_ALEMBIC_HEAD=true`, verifica a revisão atual contra o head versionado e **não cria schema** durante a checagem. Também bloqueia flags live/autonomia/manual ativas, PostgreSQL/Redis indisponíveis, tabelas mínimas ausentes, persistência não confirmada ou diretórios não graváveis. O caminho PostgreSQL de `DatabaseManager.create_tables()` também delega ao Alembic e serializa upgrades com advisory lock; SQLite/create_all permanece restrito a desenvolvimento/testes locais.
 
 ## 5. Backtesting de um mês
 
@@ -139,8 +140,8 @@ Mesmo depois desses critérios, o saldo deve ser mínimo, as chaves devem negar 
 
 Para o workload descrito, o VPS é uma escolha coerente porque o projeto já usa Docker, Python científico, PostgreSQL/Redis, jobs e volumes persistentes. A recomendação é começar com recursos moderados e medir CPU, RAM, I/O, tempo de coleta e duração do backtest antes de aumentar o plano; não é necessário GPU para o fluxo Ensemble/OOS descrito.
 
-## 11. Validação pré-VPS desta rodada
+## 11. Validação pré-VPS (atualizada em 2026-10-21)
 
-A preparação foi verificada sem Docker disponível no Sandbox, portanto o build real da imagem e a execução do Compose deverão ser confirmados no VPS ou em um runner CI com Docker. A estrutura YAML foi validada estaticamente, incluindo os serviços `db`, `db-init`, `redis`, `api`, `worker`, `monthly-backtest`, `news-ingest` e `prometheus`; API, worker e jobs aguardam o schema inicializado; a API está vinculada a localhost; e as flags `LIVE_TRADING_ENABLED`/`LIVE_MODE` estão fixadas em `false` no compose.
+Nesta rodada, `docker`/Compose/Podman não estavam instalados no Sandbox. Os dois arquivos Compose passaram por leitura YAML estática e por asserts de contrato: `db-init` usa `alembic upgrade head`, flags live/autostart permanecem false, API está vinculada a loopback e API/worker usam filesystem somente leitura e `cap_drop`. Isso não é equivalente a `docker compose config`, build ou smoke real; a execução no VPS/runner Docker continua obrigatória. Consulte `docs/INFRASTRUCTURE_AUDIT.md`.
 
-A suíte completa terminou com **77 testes aprovados** e dois warnings não bloqueantes. O runner mensal foi executado com **31 dias de BTCUSDT em 1h**, usando candles públicos fechados, 743 barras, hash SHA-256 `6c8ad295a07962ea5b99b59dc0fe1bbaa080243d16b7662cb7ddbd31927a6c79` e persistência em banco SQLite temporário. O resultado foi `orders_sent: 0`, `live_trading_enabled: false`, `model_promoted: false`, status `ok` e zero trades nesse recorte; isso valida o fluxo técnico, não representa expectativa de retorno nem substitui uma amostra multiativo e revisão OOS.
+A suíte local desta revisão terminou com **189 passed, 3 skipped, 1 warning**; `compileall` e `git diff --check` passaram. `uv pip check` terminou com exit 1 por incompatibilidade de plataforma em `nvidia-cusparselt-cu13`. Um experimento histórico de backtest de 31 dias BTCUSDT/1h, 743 barras, persistido em SQLite temporário e com zero trades continua registrado como fluxo técnico de uma rodada anterior; ele não é dataset de procedência validada, evidência OOS nem indicação de retorno. Nenhum treino, promoção de modelo, conexão a exchange, deploy VPS ou ordem real foi executado nesta avaliação.

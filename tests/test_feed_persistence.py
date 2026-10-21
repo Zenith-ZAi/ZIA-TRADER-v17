@@ -90,7 +90,14 @@ class _Market:
 
     async def get_market_data(self, symbol):
         self.quote_calls += 1
-        return {"symbol": symbol, "last": 100.0, "bid": 99.9, "ask": 100.1}
+        return {
+            "symbol": symbol,
+            "last": 100.0,
+            "bid": 99.9,
+            "ask": 100.1,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp_source": "simulated",
+        }
 
     async def get_order_book(self, symbol, limit=20):
         return {

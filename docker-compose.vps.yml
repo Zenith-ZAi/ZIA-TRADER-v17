@@ -40,7 +40,7 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: "no"
-    command: ["python", "scripts/initialize_schema.py"]
+    command: ["alembic", "upgrade", "head"]
     environment:
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
     depends_on:
@@ -103,6 +103,7 @@ services:
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://127.0.0.1}
       CORS_ALLOW_CREDENTIALS: "false"
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-zia-trader-api}
+      REQUIRE_ALEMBIC_HEAD: "true"
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://localhost:4317}
     ports:
       - "127.0.0.1:${API_PORT:-8000}:8000"
@@ -176,6 +177,7 @@ services:
       QUOTE_CACHE_TTL_SECONDS: ${QUOTE_CACHE_TTL_SECONDS:-30}
       NEWS_CACHE_TTL_SECONDS: ${NEWS_CACHE_TTL_SECONDS:-300}
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-zia-trader-worker}
+      REQUIRE_ALEMBIC_HEAD: "true"
       NEURAL_MODELS_ENABLED: "false"
       BACKTEST_USE_ENSEMBLE: "false"
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://localhost:4317}

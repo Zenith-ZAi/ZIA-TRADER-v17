@@ -11,7 +11,7 @@ from typing import Any, Dict, Iterable
 
 import pandas as pd
 
-from core.feed_quality import FeedQualityError, assess_ohlcv_quality
+from core.feed_quality import TIMEFRAME_SECONDS, FeedQualityError, assess_ohlcv_quality
 from core.flow_analysis import analyze_order_flow
 
 logger = logging.getLogger(__name__)
@@ -140,10 +140,88 @@ class MultiTimeframeFeed:
                 result.append(timeframe)
         return result
 
+    @staticmethod
+    def _drop_incomplete_last_candle(
+        frame: pd.DataFrame,
+        timeframe: str,
+        now: datetime | pd.Timestamp | None = None,
+    ) -> tuple[pd.DataFrame, bool]:
+        """Exclude the current, not-yet-closed OHLCV candle from runtime analysis."""
+        interval = TIMEFRAME_SECONDS.get(str(timeframe).strip().lower())
+        if interval is None or not isinstance(frame, pd.DataFrame) or frame.empty:
+            return frame, False
+        if isinstance(frame.index, pd.DatetimeIndex):
+            last_value = frame.index[-1]
+        elif "open_time" in frame.columns:
+            last_value = frame["open_time"].iloc[-1]
+        elif "timestamp" in frame.columns:
+            last_value = frame["timestamp"].iloc[-1]
+        else:
+            return frame, False
+        last_open = pd.Timestamp(last_value)
+        last_open = last_open.tz_localize("UTC") if last_open.tzinfo is None else last_open.tz_convert("UTC")
+        current = pd.Timestamp.now(tz="UTC") if now is None else pd.Timestamp(now)
+        current = current.tz_localize("UTC") if current.tzinfo is None else current.tz_convert("UTC")
+        if last_open <= current < last_open + pd.Timedelta(seconds=interval):
+            return frame.iloc[:-1].copy(), True
+        return frame, False
+
+    @staticmethod
+    def _validate_market_quote(
+        market: Dict[str, Any],
+        primary_timeframe: str,
+        settings: Any,
+        now: datetime | pd.Timestamp | None = None,
+    ) -> Dict[str, Any]:
+        """Require a source timestamp and reject stale/future quotes fail-closed."""
+        source = str(market.get("timestamp_source") or "").strip().lower()
+        if source not in {"exchange_tick", "ohlcv_candle", "simulated"}:
+            raise FeedUnavailable("cotação sem proveniência/timestamp de fonte verificável")
+        try:
+            raw_timestamp = market.get("timestamp")
+            if raw_timestamp is None:
+                raise ValueError("timestamp ausente")
+            published_at = pd.Timestamp(raw_timestamp)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise FeedUnavailable(f"timestamp de cotação inválido: {exc}") from exc
+        if published_at.tzinfo is None:
+            raise FeedUnavailable("timestamp de cotação sem timezone explícito")
+        published_at = published_at.tz_convert("UTC")
+        current = pd.Timestamp.now(tz="UTC") if now is None else pd.Timestamp(now)
+        current = current.tz_localize("UTC") if current.tzinfo is None else current.tz_convert("UTC")
+        age_seconds = (current - published_at).total_seconds()
+        if age_seconds < -1.0:
+            raise FeedUnavailable("timestamp de cotação está no futuro")
+        if source == "ohlcv_candle":
+            candle_timeframe = str(market.get("timestamp_timeframe") or "").strip().lower()
+            interval = TIMEFRAME_SECONDS.get(candle_timeframe)
+            if interval is None:
+                raise FeedUnavailable("timeframe de origem da cotação OHLCV ausente/não suportado")
+            max_age = interval * max(float(getattr(settings, "FEED_STALENESS_MULTIPLIER", 3.0)), 1.0)
+        else:
+            max_age = max(0.0, float(getattr(settings, "QUOTE_MAX_AGE_SECONDS", 60)))
+        if age_seconds > max_age:
+            raise FeedUnavailable(
+                f"cotação obsoleta: idade={age_seconds:.3f}s, máximo={max_age:.3f}s"
+            )
+        return {
+            "valid": True,
+            "source": source,
+            "timestamp": published_at.isoformat(),
+            "age_seconds": max(0.0, age_seconds),
+            "max_age_seconds": max_age,
+            "primary_timeframe": primary_timeframe,
+        }
+
     async def _history(self, symbol: str, timeframe: str, limit: int) -> tuple[pd.DataFrame, Dict[str, Any]]:
         frame = await self.market_connector.get_historical_data(symbol, timeframe, limit=limit)
         if not isinstance(frame, pd.DataFrame) or frame.empty:
             error = FeedUnavailable(f"histórico vazio para {timeframe}")
+            await self._record_unavailable(symbol, timeframe, "feed_unavailable", error)
+            raise error
+        frame, incomplete_candle_dropped = self._drop_incomplete_last_candle(frame, timeframe)
+        if frame.empty:
+            error = FeedUnavailable(f"sem candles fechados utilizáveis para {timeframe}")
             await self._record_unavailable(symbol, timeframe, "feed_unavailable", error)
             raise error
         volume_missing_rows = 0
@@ -173,6 +251,7 @@ class MultiTimeframeFeed:
             raise FeedUnavailable(str(exc)) from exc
         if volume_missing_rows:
             report["volume_missing_rows_filled_zero"] = volume_missing_rows
+        report["incomplete_last_candle_dropped"] = incomplete_candle_dropped
         await self._record_incidents(symbol, timeframe, list(report.get("incidents", [])))
         return frame, report
 
@@ -230,6 +309,12 @@ class MultiTimeframeFeed:
             error = FeedUnavailable("cotação com preço ausente, não numérico ou não positivo")
             await self._record_unavailable(symbol, "quote", "market_quote_unavailable", error)
             raise error
+        try:
+            quote_quality = self._validate_market_quote(market, primary, self.settings)
+        except FeedUnavailable as error:
+            await self._record_unavailable(symbol, "quote", "market_quote_unavailable", error)
+            raise
+        data_quality["quote"] = quote_quality
         await self._record_incidents(symbol, "quote", [])
         if isinstance(book_result, Exception) or not isinstance(book_result, dict):
             errors["order_book"] = str(book_result)

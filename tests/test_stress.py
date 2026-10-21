@@ -6,7 +6,7 @@ import pandas as pd
 
 from config.settings import Settings
 from core.backtest_engine import BacktestEngine
-from core.market_signals import calculate_market_signal
+from core.market_signals import MarketSignalCache, calculate_market_signal
 from data.news_processor import NewsProcessor
 from tests.fakes import FakeAsyncHTTP
 from database import MarketType
@@ -73,6 +73,34 @@ def test_backtest_is_deterministic_and_reports_risk_metrics():
     assert first["max_drawdown"] <= 0
     assert first["signal_quality"] == second["signal_quality"]
     assert first["total_pnl"] == second["total_pnl"]
+
+
+def test_backtest_decision_uses_previous_closed_bar_for_next_open(monkeypatch):
+    settings = make_settings(BACKTEST_WARMUP_BARS=35, PULLBACK_STRATEGY_ENABLED=False)
+    data = make_ohlcv(length=80)
+    requested_positions = []
+    original_at = MarketSignalCache.at
+
+    def track_position(cache, position, *args, **kwargs):
+        requested_positions.append(position)
+        return original_at(cache, position, *args, **kwargs)
+
+    monkeypatch.setattr(MarketSignalCache, "at", track_position)
+    result = asyncio.run(BacktestEngine(settings, None).run("BTC/USDT", data))
+
+    start_index = max(35, int(settings.BACKTEST_WARMUP_BARS))
+    assert result["status"] == "ok"
+    assert requested_positions == list(range(start_index - 1, len(data) - 1))
+
+
+def test_backtest_execution_price_falls_back_only_to_previous_close():
+    missing_open = pd.Series({"close": 999.0})
+    invalid_open = pd.Series({"open": np.nan, "close": 999.0})
+    valid_open = pd.Series({"open": 101.0, "close": 999.0})
+
+    assert BacktestEngine._next_bar_execution_price(missing_open, 100.0) == 100.0
+    assert BacktestEngine._next_bar_execution_price(invalid_open, 100.0) == 100.0
+    assert BacktestEngine._next_bar_execution_price(valid_open, 100.0) == 101.0
 
 
 def test_backtest_fails_closed_when_requested_ensemble_is_not_active(tmp_path):
