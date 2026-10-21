@@ -2,6 +2,8 @@
 
 **Data:** 2026-10-21. **Status:** implementação local da continuação Fase 7 validada; **transição operacional para VPS ainda não aprovada**. **Branch:** `phase7/core-ai-data-causality` a partir do commit base `861d5f9` (PR #17 já integrado).
 
+> **Nota de atualização:** este relatório registra o estado no fechamento da Fase 7 e preserva seus resultados históricos. O trabalho posterior de compatibilidade/lock CPU está em `docs/DEPENDENCY_AUDIT.md` e o estado/plano atual está em `docs/FINALIZATION_ROADMAP.md`; a prontidão VPS permanece não aprovada.
+
 ## Resumo executivo
 
 A continuação preservou o core de negociação e corrigiu defeitos reproduzíveis de integridade temporal: frescor de notícias, remoção de candle em formação, proveniência/idade de quotes, uso da barra anterior para a decisão de backtest e fallback causal quando `open` está ausente. Durante a revisão final, o Compose VPS também foi alinhado ao fluxo de migrations versionadas: `db-init` executa Alembic; API/worker aguardam a conclusão; preflight estrito verifica o head aplicado sem criar schema.
