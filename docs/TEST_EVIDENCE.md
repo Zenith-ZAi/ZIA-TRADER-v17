@@ -26,7 +26,7 @@ O warning atual é `PendingDeprecationWarning` de `starlette/formparsers.py:12`,
 
 ## CI remoto
 
-A última execução consultada antes das alterações finais foi `ZIA Trader CI`, run `39361245138`, conclusão `success`, branch `master`, criada em 2026-10-20. O workflow instala `requirements.txt`, executa compile/pytest com PostgreSQL 16 e tem job `docker build`. É evidência da branch-base/PR #17; **não é CI da branch atual** e não valida o novo código até o push/execução do workflow.
+A última execução de baseline antes da branch foi `ZIA Trader CI`, run `39361245138`, conclusão `success`, branch `master`, criada em 2026-10-20. Após o push da implementação, o CI do PR #18 (workflow run `39635864347`) concluiu com os jobs `test` e `container` em **SUCCESS**; o status CodeRabbit foi “Review skipped”, portanto não é uma revisão de código aprovada. O PR #18 foi integrado em 2026-10-21 no merge commit `847e09a7beeac643b2837e6e00d5b42a249a468c`. O CI valida a branch submetida ao PR; não substitui build/execução em uma VPS real.
 
 ## Limites das evidências
 

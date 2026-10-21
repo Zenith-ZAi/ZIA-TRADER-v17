@@ -8,6 +8,8 @@ A continuação preservou o core de negociação e corrigiu defeitos reproduzív
 
 Resultado de testes local: **189 passed, 3 skipped, 1 warning**, com `compileall` e `git diff --check` sem erro. Essa evidência demonstra invariantes locais, não validação de mercado ou infraestrutura real. O Docker CLI/Compose e daemon não estão disponíveis aqui; Compose foi validado apenas estaticamente. A verificação de consistência de dependências retorna erro por uma dependência NVIDIA construída para plataforma diferente.
 
+**Atualização pós-merge:** PR #18 foi integrado em `master` em 2026-10-21 como merge commit `847e09a7beeac643b2837e6e00d5b42a249a468c`. No workflow `ZIA Trader CI` (`39635864347`), os jobs `test` e `container` passaram; CodeRabbit indicou “Review skipped”, sem revisão automática concluída. O CI não executou um deployment em VPS.
+
 ## Entregas desta continuação
 
 - Backtest causal: sinais/features usam barra fechada anterior, execução na barra seguinte; `open` inexistente ou inválido usa close anterior, nunca close corrente.
@@ -28,4 +30,4 @@ Resultado de testes local: **189 passed, 3 skipped, 1 warning**, com `compileall
 
 Todas as flags de live, autonomia, execução manual real e auto-start permanecem desligadas no perfil VPS. O Compose não publica DB/Redis e limita API a loopback; Nginx/TLS é opcional e não foi operacionalizado. Nenhuma credencial real foi usada.
 
-**Conclusão:** o código e a documentação estão aptos a seguir para revisão de PR e validação em staging isolado, mantendo trading totalmente desativado. Não declarar “pronto para VPS” até resolver dependências, fazer build real, validar migrações/serviços persistentes e restore no ambiente alvo. Não habilitar entradas nem capital real enquanto ledger e dataset/modelo verificados estiverem ausentes. A matriz detalhada está em `docs/PHASE_COMPLETION_MATRIX.md`; a decisão de ambiente, em `docs/VPS_READINESS.md`.
+**Conclusão:** a implementação da continuação Fase 7 está integrada em `master` e passou CI da branch, mas o aceite operacional continua pendente. Não declarar “pronto para VPS” até resolver dependências, fazer build/execução real, validar migrações/serviços persistentes e restore no ambiente alvo. Não habilitar entradas nem capital real enquanto ledger e dataset/modelo verificados estiverem ausentes. A matriz detalhada está em `docs/PHASE_COMPLETION_MATRIX.md`; a decisão de ambiente, em `docs/VPS_READINESS.md`.
