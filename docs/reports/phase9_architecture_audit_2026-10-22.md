@@ -1,6 +1,6 @@
 # Fase 9 — auditoria arquitetural e primeira refatoração
 
-**Data:** 2026-10-22. **Base:** `master` no merge do PR #20 (`f39ae9711f68ba59882a196c72e7fd4f123aa205`). **Estado desta entrega:** implementação local + testes; ainda não integrada. **Objetivo:** preparar backend para execução supervisionada e verificável, não ativar negociação autônoma, não afirmar rentabilidade e não dispensar validação externa.
+**Data:** 2026-10-22. **Base:** `master` no merge do PR #20 (`f39ae9711f68ba59882a196c72e7fd4f123aa205`). A subfase foi integrada pelo PR #21: commit de origem `3db6ad68926e2f18c46334515a9efc35e7efb999`, merge commit `eac2a4d2d1b8cceb8dc9ea619de16e7e2ebf80f4`. **Objetivo:** preparar backend para execução supervisionada e verificável, não ativar negociação autônoma, não afirmar rentabilidade e não dispensar validação externa.
 
 ## 1. DIAGNÓSTICO DO CÓDIGO ATUAL
 
@@ -75,6 +75,7 @@ Implementada a subfase 9.1, sem alteração de fórmula de sinal, indicadores, t
 - Focada: **28 passed, 1 warning** (API/lifecycle, stop, cleanup parcial, safety gates e contratos de período/Kelly).
 - Suíte integral: **198 passed, 3 skipped, 1 warning**, Python 3.12.3 em venv ARM64 limpo; skip de integração depende de serviço externo não configurado; warning conhecido Starlette/PendingDeprecation.
 - `compileall -q .` e `git diff --check`: exit 0. Nenhum Docker/Compose ou VPS foi executado nesta sessão.
+- CI remoto do PR #21 (run `39812717326`): jobs `test` e `container` passaram; o job `container` construiu a imagem. CodeRabbit mostrou “Review skipped: manual review requested”; portanto não houve revisão manual registrada. Build em CI não é deployment nem teste de Compose/VPS.
 - Flags em `.env.vps.example`: `LIVE_TRADING_ENABLED=false`, `LIVE_MODE=false`, `LIVE_KILL_SWITCH=true`, `AUTO_START_ENGINES=false`, `AUTONOMOUS_TRADING_ENABLED=false`, `MANUAL_TRADING_ENABLED=false`, `NEURAL_MODELS_ENABLED=false`, `BACKTEST_USE_ENSEMBLE=false` — mantidas.
 
 ### O que esta atualização não resolveu

@@ -49,18 +49,18 @@ Operar em staging contínuo por janela acordada, revisar alertas, drift, disco, 
 
 **Iniciada em 2026-10-22.** A Fase 9 parte do diagnóstico anexado pelo usuário e se concentra em fronteiras de runtime, async real e contratos de integração; não muda estratégia, thresholds, sizing ou autorização de ordens.
 
-- **9.1 — lifecycle ASGI (implementado localmente, CI pendente):** mover construção de `DatabaseManager`/`TradingManager` e migration da importação para lifespan; fazer migration em thread; runtime ausente retorna 503; separar stop reiniciável dos motores do shutdown de recursos. Evidência: `docs/reports/phase9_architecture_audit_2026-10-22.md` e testes `test_application_runtime.py`, `test_manager_lifecycle.py`, `test_api.py`.
+- **9.1 — lifecycle ASGI (concluída e integrada — PR #21):** mover construção de `DatabaseManager`/`TradingManager` e migration da importação para lifespan; fazer migration em thread; runtime ausente retorna 503; separar stop reiniciável dos motores do shutdown de recursos. CI run `39812717326`: jobs `test` e `container` verdes; CodeRabbit marcou revisão manual como ignorada. Evidência: `docs/reports/phase9_architecture_audit_2026-10-22.md` e testes `test_application_runtime.py`, `test_manager_lifecycle.py`, `test_api.py`.
 - **9.2 — app factory e routers:** criar injeção explícita por `app.state`, dividir rotas e eliminar acoplamento global incrementalmente com testes de compatibilidade.
 - **9.3 — persistência não bloqueante:** mapear operações ORM síncronas dentro de corrotinas; escolher SQLAlchemy async/repositórios por escopo, sem compartilhar `Session` entre threads/tasks; medir p95, cancelamento e saturação do pool.
 - **9.4 — stream de mercado read-only:** implementar protocolo/adapter só depois da seleção de venue/fonte; cobertura obrigatória de gaps, sequência, heartbeat, reconexão, staleness e backpressure.
 - **9.5 — execução em Demo/Testnet supervisionado:** ensaiar intent/idempotência, partial fill, timeout, restart e kill switch após gates de ledger/dataset; mainnet não é parte da Fase 9 inicial.
 - **9.6 — LLM opcional e isolado:** não é requisito para core trader. Se houver caso de uso aprovado, restrito a sumarização read-only estruturada e sem caminho para `RiskAI`/`OrderManager`.
 
-**Estado da Fase 9 como um todo:** em andamento. `198 passed, 3 skipped, 1 warning` (28 testes focados) nesta implementação local não significa aprovação de produção, ledger ou VPS. Testar a branch/CI antes de integrar; manter live/autonomia OFF.
+**Estado da Fase 9 como um todo:** em andamento; somente 9.1 está concluída. Suíte local `198 passed, 3 skipped, 1 warning` (28 testes focados) e CI remoto de teste/build verdes não significam aprovação de produção, ledger ou VPS. Manter live/autonomia OFF.
 
 ## Próximo passo executável
 
-Concluir revisão/CI da subfase 9.1; seguir para 9.2/9.3 com migração incremental e contratos de teste. Em paralelo, ledger 8B e requisitos de dados 8C permanecem bloqueadores — não substituir fontes reais por fixtures como prova de mercado. Só depois de ledger/dataset e escolha explícita de ambiente avançar para staging. Manter `LIVE_TRADING_ENABLED=false`, `LIVE_MODE=false`, `LIVE_KILL_SWITCH=true`, `AUTO_START_ENGINES=false`, `AUTONOMOUS_TRADING_ENABLED=false`, `MANUAL_TRADING_ENABLED=false`, `NEURAL_MODELS_ENABLED=false` e `BACKTEST_USE_ENSEMBLE=false`.
+Prosseguir para 9.2/9.3 com migração incremental e contratos de teste. Em paralelo, ledger 8B e requisitos de dados 8C permanecem bloqueadores — não substituir fontes reais por fixtures como prova de mercado. Só depois de ledger/dataset e escolha explícita de ambiente avançar para staging. Manter `LIVE_TRADING_ENABLED=false`, `LIVE_MODE=false`, `LIVE_KILL_SWITCH=true`, `AUTO_START_ENGINES=false`, `AUTONOMOUS_TRADING_ENABLED=false`, `MANUAL_TRADING_ENABLED=false`, `NEURAL_MODELS_ENABLED=false` e `BACKTEST_USE_ENSEMBLE=false`.
 
 ## Limites e decisões externas
 
