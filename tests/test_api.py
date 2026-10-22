@@ -49,6 +49,15 @@ def test_demo_login_and_public_user(monkeypatch, tmp_path):
             runtime_status = websocket.receive_json()
             assert "runtime" in runtime_status
 
+        runtime = module.app.state.runtime
+        stop_response = client.post(
+            "/trading/stop",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert stop_response.status_code == 200
+        assert not runtime.trading_manager.http_client.client.is_closed
+        assert runtime.trading_manager.exchange_connector.is_connected
+
         # Reabrir a mesma conexão autenticada simula o ciclo de reconnect do cliente.
         with client.websocket_connect(f"/ws/dashboard?token={token}") as websocket:
             runtime_status = websocket.receive_json()
@@ -98,13 +107,15 @@ def test_engine_start_is_blocked_when_reconciliation_needs_attention(monkeypatch
     async def should_not_start():
         raise AssertionError("engine factory must not be scheduled")
 
-    monkeypatch.setattr(module.trading_manager.exchange_connector, "connect", connect)
-    monkeypatch.setattr(module.trading_manager, "reconcile", reconcile)
+    with TestClient(module.app):
+        manager = module._trading_manager()
+        monkeypatch.setattr(manager.exchange_connector, "connect", connect)
+        monkeypatch.setattr(manager, "reconcile", reconcile)
 
-    async def invoke():
-        with pytest.raises(HTTPException) as raised:
-            await module._start_engine("phase5-reconcile-gate", should_not_start)
-        assert raised.value.status_code == 503
+        async def invoke():
+            with pytest.raises(HTTPException) as raised:
+                await module._start_engine("phase5-reconcile-gate", should_not_start)
+            assert raised.value.status_code == 503
 
-    asyncio.run(invoke())
-    assert "phase5-reconcile-gate" not in module.engine_tasks
+        asyncio.run(invoke())
+        assert "phase5-reconcile-gate" not in module.engine_tasks
