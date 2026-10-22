@@ -1,6 +1,6 @@
-# Plano de finalização — ZIA-TRADER v17 após a Fase 7
+# Plano de finalização — ZIA-TRADER v17, Fase 9 em andamento
 
-**Atualizado:** 2026-10-21. **Base:** `master` após PR #19; branch de execução atual `phase8/cpu-lock-and-final-readiness`. O objetivo é chegar a **pré-produção supervisionada em VPS**, não prometer capital real ou código sem defeitos.
+**Atualizado:** 2026-10-22. **Base:** `master` após PR #20 (`f39ae9711f68ba59882a196c72e7fd4f123aa205`); branch local de execução da Fase 9 ainda não publicada. O objetivo é chegar a **pré-produção supervisionada em VPS**, não prometer capital real ou código sem defeitos.
 
 ## Onde estamos: pontuação de engenharia, não métrica estatística
 
@@ -9,7 +9,7 @@ Os percentuais abaixo são uma avaliação de gates/evidências, não uma contag
 | Dimensão | Estimativa | Evidência e limitador dominante |
 |---|---:|---|
 | Arquitetura backend e controles de segurança | **75–80%** | Alembic/PostgreSQL, gates fail-closed, OrderManager, reconciliação, controles de risco, logs e regressões temporais existem; ledger financeiro verificável e revisão independente continuam ausentes. |
-| Estrutura de engenharia e testes locais | **75%** | 189 testes passaram no baseline Phase 7; agora 192 passaram no venv limpo Phase 8A; CI de #18/#19 passou e o CI Phase 8A aprovou `test` e `container`. `uv pip check` do venv antigo revelou wheel incompatível, tratado por lock CPU. |
+| Estrutura de engenharia e testes locais | **75%** | Fase 8A integrada por PR #20; 192 testes passaram no lock CPU antes da Fase 9, e agora 197 passam após a refatoração local de runtime. CI de #18/#19 e Phase 8A aprovou `test`/`container`; CI desta branch Phase 9 pendente. |
 | IA/dados prontos para validação OOS | **25–30%** | Pipeline walk-forward/registry/drift está presente; falta dataset real licenciado/proveniente e modelo validado/aprovado. |
 | VPS e operação 24/7 comprovadas | **30–35%** | Compose e container build no CI existem; não houve boot, PostgreSQL/Redis persistentes, TLS, backup/restore, alertas ou restart test em VPS alvo. |
 | Autonomia real autorizável hoje | **0% habilitado; cerca de 10% de prontidão de engenharia** | Flags reais continuam OFF; equity/trade ledgers inexistentes e não há soak Demo/Testnet. Não habilitar execução autônoma real nesta situação. |
@@ -19,11 +19,11 @@ O repositório está mais adiantado que a prontidão do sistema para assumir ris
 
 ## Fases finais propostas
 
-### Fase 8A — Dependências e build reproduzível (em andamento nesta branch)
+### Fase 8A — Dependências e build reproduzível (**concluída e integrada — PR #20**)
 
 - **Defeito:** o lock anterior foi exportado de um ambiente diferente e continha `nvidia-cusparselt-cu13` (`manylinux2014_sbsa`), enquanto a virtualenv ativa do Sandbox é ARM64. O Dockerfile e CI instalavam `requirements.txt`, ignorando o lock; portanto o lock não era nem usado nem portátil.
-- **Correção em implementação:** resolver Torch em backend CPU explícito, fixar dependências por versão e SHA-256, remover artefatos CUDA/NVIDIA desnecessários para VPS CPU, sincronizar exatamente o lock em CI e Docker e executar `uv pip check`.
-- **Aceite local:** instalação limpa ARM64 a partir do lock, Torch reporta `cuda_build=None`, nenhum wheel NVIDIA incompatível, `uv pip check` passa e 192 testes passam. **Aceite da branch:** jobs `test` e `container` do PR #20 verdes no run `39651671722`; imagem construída em runner GitHub x86_64. Build ARM e execução do Compose/VPS continuam não testados.
+- **Correção concluída:** resolver Torch em backend CPU explícito, fixar dependências por versão e SHA-256, remover artefatos CUDA/NVIDIA desnecessários para VPS CPU, sincronizar lock em CI/Docker e executar `uv pip check`.
+- **Aceite:** venv limpo ARM64, Torch CPU sem CUDA/NVIDIA, `uv pip check` passou e 192 testes passaram. Jobs `test` e `container` do PR #20 verdes (runs `39651671722` e `39652262792`); imagem construída em runner GitHub x86_64. Build ARM e execução do Compose/VPS continuam não testados.
 
 ### Fase 8B — Ledger financeiro e reconciliação
 
@@ -45,9 +45,22 @@ Antes de considerar autonomia, executar primeiro shadow/paper sem rota de ordem;
 
 Operar em staging contínuo por janela acordada, revisar alertas, drift, disco, atraso de feed, falhas, backups e latência; demonstrar restore e rollback. Fazer revisão de segurança independente, LGPD/retention/export/delete, resposta a incidente e responsabilidade operacional. A autorização de qualquer modo de live é uma decisão humana separada, depois da evidência, e não será ativada automaticamente pelo código ou por um merge.
 
+### Fase 9 — auditoria arquitetural e preparação para operação autônoma supervisionada
+
+**Iniciada em 2026-10-22.** A Fase 9 parte do diagnóstico anexado pelo usuário e se concentra em fronteiras de runtime, async real e contratos de integração; não muda estratégia, thresholds, sizing ou autorização de ordens.
+
+- **9.1 — lifecycle ASGI (implementado localmente, CI pendente):** mover construção de `DatabaseManager`/`TradingManager` e migration da importação para lifespan; fazer migration em thread; runtime ausente retorna 503; separar stop reiniciável dos motores do shutdown de recursos. Evidência: `docs/reports/phase9_architecture_audit_2026-10-22.md` e testes `test_application_runtime.py`, `test_manager_lifecycle.py`, `test_api.py`.
+- **9.2 — app factory e routers:** criar injeção explícita por `app.state`, dividir rotas e eliminar acoplamento global incrementalmente com testes de compatibilidade.
+- **9.3 — persistência não bloqueante:** mapear operações ORM síncronas dentro de corrotinas; escolher SQLAlchemy async/repositórios por escopo, sem compartilhar `Session` entre threads/tasks; medir p95, cancelamento e saturação do pool.
+- **9.4 — stream de mercado read-only:** implementar protocolo/adapter só depois da seleção de venue/fonte; cobertura obrigatória de gaps, sequência, heartbeat, reconexão, staleness e backpressure.
+- **9.5 — execução em Demo/Testnet supervisionado:** ensaiar intent/idempotência, partial fill, timeout, restart e kill switch após gates de ledger/dataset; mainnet não é parte da Fase 9 inicial.
+- **9.6 — LLM opcional e isolado:** não é requisito para core trader. Se houver caso de uso aprovado, restrito a sumarização read-only estruturada e sem caminho para `RiskAI`/`OrderManager`.
+
+**Estado da Fase 9 como um todo:** em andamento. `198 passed, 3 skipped, 1 warning` (28 testes focados) nesta implementação local não significa aprovação de produção, ledger ou VPS. Testar a branch/CI antes de integrar; manter live/autonomia OFF.
+
 ## Próximo passo executável
 
-Concluir 8A com CI do PR desta branch e ajustar conforme o resultado. Em paralelo, definir interfaces e testes fake para 8B/8C sem substituir fontes reais nem enfraquecer risco. Só depois da aprovação desses contratos avançar a qualquer staging de venue. Manter permanentemente `LIVE_TRADING_ENABLED=false`, `LIVE_MODE=false`, `LIVE_KILL_SWITCH=true`, `AUTO_START_ENGINES=false`, `AUTONOMOUS_TRADING_ENABLED=false`, `MANUAL_TRADING_ENABLED=false`, `NEURAL_MODELS_ENABLED=false` e `BACKTEST_USE_ENSEMBLE=false` durante o trabalho desta fase.
+Concluir revisão/CI da subfase 9.1; seguir para 9.2/9.3 com migração incremental e contratos de teste. Em paralelo, ledger 8B e requisitos de dados 8C permanecem bloqueadores — não substituir fontes reais por fixtures como prova de mercado. Só depois de ledger/dataset e escolha explícita de ambiente avançar para staging. Manter `LIVE_TRADING_ENABLED=false`, `LIVE_MODE=false`, `LIVE_KILL_SWITCH=true`, `AUTO_START_ENGINES=false`, `AUTONOMOUS_TRADING_ENABLED=false`, `MANUAL_TRADING_ENABLED=false`, `NEURAL_MODELS_ENABLED=false` e `BACKTEST_USE_ENSEMBLE=false`.
 
 ## Limites e decisões externas
 

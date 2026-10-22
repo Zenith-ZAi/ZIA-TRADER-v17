@@ -14,6 +14,7 @@ from prometheus_client import generate_latest
 from config.settings import settings
 from core.manager import TradingManager
 from database_manager import DatabaseManager
+from api.application_runtime import ApplicationRuntime, build_application_runtime
 from monitoring.telemetry.telemetry_setup import setup_telemetry
 from security.jwt_utils import create_access_token, verify_token
 from security.rbac_utils import is_admin, is_trader
@@ -25,8 +26,6 @@ configure_json_logging()
 logger = logging.getLogger(__name__)
 
 
-db_manager = DatabaseManager(settings.DATABASE_URL)
-db_manager.create_tables()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 # Usuários de demonstração somente. Em produção, substitua esta camada pelo banco de usuários.
@@ -43,41 +42,45 @@ FAKE_USERS_DB: Dict[str, Dict[str, Any]] = {
     },
 }
 
-trading_manager = TradingManager(settings, db_manager)
 engine_tasks: Dict[str, asyncio.Task] = {}
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
+async def lifespan(application: FastAPI):
     """Inicializa infraestrutura e encerra motores em ordem determinística."""
     logger.info("Iniciando %s v%s...", settings.PROJECT_NAME, settings.VERSION)
-    setup_telemetry(app)
-    db_manager.create_tables()
-    await trading_manager.exchange_connector.connect()
-    if settings.AUTO_START_ENGINES:
-        try:
-            await _ensure_reconciliation_ok("auto-start")
-        except HTTPException as exc:
-            logger.error("Motores não iniciados após restart: %s", exc.detail)
-        else:
-            await _start_engine("trading", trading_manager.start_trading, preflight=False)
-            if settings.SNIPER_ENABLED:
-                await _start_engine("sniper", trading_manager.start_sniper, preflight=False)
-            else:
-                logger.info("SNIPER_ENABLED=false; somente o motor principal foi considerado no auto-start.")
-            logger.info("Auto-start de motores concluído segundo as flags de execução.")
-    else:
-        logger.info("Motores não iniciados automaticamente; use os endpoints de controle.")
+    application.state.runtime = None
     try:
+        setup_telemetry(application)
+        runtime = await build_application_runtime(settings)
+        application.state.runtime = runtime
+        if settings.AUTO_START_ENGINES:
+            try:
+                await _ensure_reconciliation_ok("auto-start")
+            except HTTPException as exc:
+                logger.error("Motores não iniciados após restart: %s", exc.detail)
+            else:
+                await _start_engine("trading", _trading_manager().start_trading, preflight=False)
+                if settings.SNIPER_ENABLED:
+                    await _start_engine("sniper", _trading_manager().start_sniper, preflight=False)
+                else:
+                    logger.info("SNIPER_ENABLED=false; somente o motor principal foi considerado no auto-start.")
+                logger.info("Auto-start de motores concluído segundo as flags de execução.")
+        else:
+            logger.info("Motores não iniciados automaticamente; use os endpoints de controle.")
         yield
     finally:
         logger.info("Desligando motores de trading e sniper...")
-        await trading_manager.stop_all()
         await _stop_engine_tasks()
+        runtime = getattr(application.state, "runtime", None)
+        application.state.runtime = None
+        if runtime is not None:
+            await runtime.close()
         logger.info("Todos os motores parados com sucesso.")
 
 
 app = FastAPI(title=settings.PROJECT_NAME, version=settings.VERSION, lifespan=lifespan)
+app.state.runtime = None
 allowed_origins = [origin.strip() for origin in settings.CORS_ALLOWED_ORIGINS.split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
@@ -88,6 +91,21 @@ app.add_middleware(
 )
 app.add_middleware(RequestRateLimitMiddleware, settings=settings)
 app.add_middleware(CorrelationIdMiddleware)
+
+
+def _application_runtime() -> ApplicationRuntime:
+    runtime = getattr(app.state, "runtime", None)
+    if runtime is None:
+        raise HTTPException(status_code=503, detail="application_runtime_not_started")
+    return runtime
+
+
+def _database_manager() -> DatabaseManager:
+    return _application_runtime().db_manager
+
+
+def _trading_manager() -> TradingManager:
+    return _application_runtime().trading_manager
 
 
 def _public_user(user: Dict[str, Any]) -> Dict[str, Any]:
@@ -163,7 +181,7 @@ async def get_trader_user(
 async def _ensure_reconciliation_ok(name: str) -> None:
     """Bloqueia o start de engines quando a recuperação de ordens não é conclusiva."""
     try:
-        reconciliation = await trading_manager.reconcile()
+        reconciliation = await _trading_manager().reconcile()
     except Exception as exc:
         logger.exception("Reconciliação pré-start falhou; motor %s permanecerá parado.", name)
         raise HTTPException(
@@ -185,8 +203,8 @@ async def _start_engine(name: str, factory, *, preflight: bool = True) -> bool:
     current_task = engine_tasks.get(name)
     if current_task and not current_task.done():
         return False
-    if not trading_manager.exchange_connector.is_connected:
-        await trading_manager.exchange_connector.connect()
+    if not _trading_manager().exchange_connector.is_connected:
+        await _trading_manager().exchange_connector.connect()
     if preflight:
         await _ensure_reconciliation_ok(name)
     task = asyncio.create_task(factory(), name=f"zia-{name}")
@@ -206,23 +224,23 @@ async def _stop_engine_tasks() -> None:
 def _health_payload() -> Dict[str, Any]:
     """Health detalhado sem expor credenciais, saldos ou payloads privados."""
     try:
-        with db_manager.engine.connect() as connection:
+        with _database_manager().engine.connect() as connection:
             connection.exec_driver_sql("SELECT 1")
         database_persistent = not settings.DATABASE_URL.startswith("sqlite:")
-        redis_health = trading_manager.redis_cache.health()
+        redis_health = _trading_manager().redis_cache.health()
         if settings.REQUIRE_PERSISTENT_DATABASE and not database_persistent:
             raise RuntimeError("PostgreSQL persistente obrigatório")
         if settings.REQUIRE_PERSISTENT_REDIS and not bool(redis_health.get("persistent")):
             raise RuntimeError("Redis persistente obrigatório")
-        providers = trading_manager.news_processor.health()
-        latest = db_manager.get_ai_observations(limit=1)
+        providers = _trading_manager().news_processor.health()
+        latest = _database_manager().get_ai_observations(limit=1)
         last_data_timestamp = latest[0].observed_at.isoformat() if latest and latest[0].observed_at else None
         provider_degraded = any(not bool(value.get("ok", False)) for value in providers.values()) if providers else False
         return {
             "status": "degraded" if provider_degraded else "ok",
             "service": settings.PROJECT_NAME,
             "version": settings.VERSION,
-            "exchange_connected": trading_manager.exchange_connector.is_connected,
+            "exchange_connected": _trading_manager().exchange_connector.is_connected,
             "database": {"persistent": database_persistent, "reachable": True},
             "redis": redis_health,
             "news_providers": providers,
@@ -309,13 +327,13 @@ def _runtime_status_payload() -> Dict[str, Any]:
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "engines": tasks,
-        "runtime": trading_manager.runtime_status(),
+        "runtime": _trading_manager().runtime_status(),
         "exchange": {
-            "connected": trading_manager.exchange_connector.is_connected,
+            "connected": _trading_manager().exchange_connector.is_connected,
             "mode": settings.BINANCE_MODE,
         },
-        "redis": trading_manager.redis_cache.health(),
-        "news_providers": trading_manager.news_processor.health(),
+        "redis": _trading_manager().redis_cache.health(),
+        "news_providers": _trading_manager().news_processor.health(),
     }
 
 
@@ -331,16 +349,16 @@ async def admin_kill_switch(
     reason: str = Body(..., embed=True, min_length=3, max_length=200),
     current_user: Dict[str, Any] = Depends(get_admin_user),
 ):
-    return await trading_manager.trigger_kill_switch(reason, actor=current_user["username"])
+    return await _trading_manager().trigger_kill_switch(reason, actor=current_user["username"])
 
 
 @app.get("/status")
 async def status_alias(
     current_user: Dict[str, Any] = Depends(get_trader_user),
 ) -> Dict[str, Any]:
-    account = db_manager.get_account_state("default_account")
-    positions = db_manager.get_open_positions("default_account")
-    daily = db_manager.get_daily_pnl("default_account", datetime.now(timezone.utc).replace(tzinfo=None))
+    account = _database_manager().get_account_state("default_account")
+    positions = _database_manager().get_open_positions("default_account")
+    daily = _database_manager().get_daily_pnl("default_account", datetime.now(timezone.utc).replace(tzinfo=None))
     payload = _runtime_status_payload()
     payload.update({
         "balance": float(account.balance) if account else 0.0,
@@ -365,7 +383,7 @@ async def create_order(
         raise HTTPException(status_code=400, detail="source só pode ser manual nesta rota")
     order.pop("confirmed", None)
     try:
-        return await trading_manager.order_manager.submit(order, source="manual", confirmed=False)
+        return await _trading_manager().order_manager.submit(order, source="manual", confirmed=False)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -378,7 +396,7 @@ async def confirm_order(
     token = str(request.get("confirmation_token", ""))
     approved = bool(request.get("approved", True))
     try:
-        return await trading_manager.order_manager.confirm(token, approved=approved)
+        return await _trading_manager().order_manager.confirm(token, approved=approved)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -389,9 +407,9 @@ async def market_alias(
     current_user: Dict[str, Any] = Depends(get_trader_user),
 ) -> Dict[str, Any]:
     try:
-        normalized = trading_manager.market_connector.normalize_symbol(symbol)
-        market_data = await trading_manager.market_connector.get_market_data(normalized)
-        order_book = await trading_manager.market_connector.get_order_book(normalized, limit=20)
+        normalized = _trading_manager().market_connector.normalize_symbol(symbol)
+        market_data = await _trading_manager().market_connector.get_market_data(normalized)
+        order_book = await _trading_manager().market_connector.get_order_book(normalized, limit=20)
         return {"symbol": normalized, "market": market_data, "order_book": order_book}
     except Exception as exc:
         raise HTTPException(status_code=503, detail="dados de mercado indisponíveis") from exc
@@ -402,7 +420,7 @@ async def logs_alias(
     current_user: Dict[str, Any] = Depends(get_trader_user),
 ) -> Dict[str, Any]:
     cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=24)
-    logs = [item for item in db_manager.get_system_logs("default_account") if item.timestamp and item.timestamp >= cutoff]
+    logs = [item for item in _database_manager().get_system_logs("default_account") if item.timestamp and item.timestamp >= cutoff]
     return {"since": cutoff.isoformat(), "logs": [{"timestamp": item.timestamp.isoformat(), "level": item.level, "module": item.module, "message": item.message} for item in logs]}
 
 
@@ -421,7 +439,7 @@ async def analyze_core_symbol(
 ) -> Dict[str, Any]:
     """Executa leitura explicável de mercado sem enviar ordem."""
     try:
-        return await trading_manager.command_manager.analyze_symbol(symbol, offline=offline)
+        return await _trading_manager().command_manager.analyze_symbol(symbol, offline=offline)
     except Exception as exc:
         logger.warning("Falha na análise do core para %s: %s", symbol, exc)
         raise HTTPException(status_code=503, detail="análise indisponível no momento") from exc
@@ -436,7 +454,7 @@ async def sync_core_data(
     raw_symbols = request.get("symbols") or settings.SYMBOLS
     symbols = [raw_symbols] if isinstance(raw_symbols, str) else raw_symbols
     try:
-        return await trading_manager.command_manager.sync_market(
+        return await _trading_manager().command_manager.sync_market(
             symbols=symbols,
             limit=int(request.get("limit", 250)),
             offline=bool(request.get("offline", False)),
@@ -458,14 +476,14 @@ async def optimize_sharpe(
         raise HTTPException(status_code=400, detail="asset_list não pode ser vazio")
     symbol = requested_assets[0]
     try:
-        historical_data = await trading_manager.exchange_connector.get_historical_data(
+        historical_data = await _trading_manager().exchange_connector.get_historical_data(
             symbol,
             settings.TIMEFRAME,
             limit=min(8760, 10000),
         )
         optimizer = StrategyOptimizer(
             settings,
-            trading_manager.backtest_engine.db_manager,
+            _trading_manager().backtest_engine.db_manager,
             budget=OptimizationBudget(
                 max_evaluations=settings.OPTIMIZER_MAX_EVALUATIONS,
                 max_seconds=settings.OPTIMIZER_MAX_SECONDS,
@@ -489,7 +507,7 @@ async def optimize_sharpe(
 async def reload_runtime(
     current_user: Dict[str, Any] = Depends(get_admin_user),
 ) -> Dict[str, Any]:
-    profile = trading_manager.reload_runtime_config()
+    profile = _trading_manager().reload_runtime_config()
     return {"reloaded": True, "profile": profile, "status": _runtime_status_payload()}
 
 
@@ -533,7 +551,7 @@ async def root_rate_limited(
 async def start_trading(
     current_user: Dict[str, Any] = Depends(get_trader_user),
 ) -> Dict[str, Any]:
-    started = await _start_engine("trading", trading_manager.start_trading)
+    started = await _start_engine("trading", _trading_manager().start_trading)
     return {"message": "Motor de Trading iniciado." if started else "Motor de Trading já estava em execução.", "started": started}
 
 
@@ -541,7 +559,7 @@ async def start_trading(
 async def start_sniper(
     current_user: Dict[str, Any] = Depends(get_trader_user),
 ) -> Dict[str, Any]:
-    started = await _start_engine("sniper", trading_manager.start_sniper)
+    started = await _start_engine("sniper", _trading_manager().start_sniper)
     return {"message": "Motor Sniper iniciado." if started else "Motor Sniper já estava em execução.", "started": started}
 
 
@@ -549,8 +567,10 @@ async def start_sniper(
 async def stop_trading(
     current_user: Dict[str, Any] = Depends(get_trader_user),
 ) -> Dict[str, str]:
-    await trading_manager.stop_all()
-    await _stop_engine_tasks()
+    try:
+        await _trading_manager().stop_engines()
+    finally:
+        await _stop_engine_tasks()
     return {"message": "Todos os motores parados."}
 
 

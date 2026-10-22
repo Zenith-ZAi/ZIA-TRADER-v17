@@ -148,12 +148,33 @@ class TradingManager:
         logger.info(f"Executando backtest para {symbol} com estratégia {strategy_name}...")
         return await self.backtest_engine.run(symbol, historical_data, strategy_name)
 
+    async def stop_engines(self) -> None:
+        """Stop strategy loops while keeping shared providers available for restart."""
+        logger.info("Parando motores de trading e sniper...")
+        results = await asyncio.gather(
+            self.trading_engine.stop(),
+            self.sniper_engine.stop(),
+            return_exceptions=True,
+        )
+        errors = [result for result in results if isinstance(result, BaseException)]
+        if errors:
+            raise RuntimeError(f"Falha ao parar {len(errors)} motor(es).") from errors[0]
+
     async def stop_all(self):
-        """Para todos os motores de trading ativos."""
-        logger.info("Parando todos os motores de trading...")
-        await self.trading_engine.stop()
-        await self.sniper_engine.stop() # Se o sniper_engine tiver um método stop
-        await self.news_processor.close()
-        await self.http_client.aclose()
-        await self.exchange_connector.close()
+        """Stop engines and release shared resources at application shutdown."""
+        cleanup_steps = (
+            ("engines", self.stop_engines),
+            ("news", self.news_processor.close),
+            ("http", self.http_client.aclose),
+            ("exchange", self.exchange_connector.close),
+        )
+        errors = []
+        for name, cleanup in cleanup_steps:
+            try:
+                await cleanup()
+            except Exception as exc:
+                errors.append(exc)
+                logger.exception("Falha ao fechar recurso de runtime: %s", name)
+        if errors:
+            raise RuntimeError(f"Falha ao fechar {len(errors)} recurso(s) de runtime.") from errors[0]
         logger.info("Todos os motores parados.")
