@@ -9,12 +9,14 @@ from config.settings import settings
 from core.manager import TradingManager
 from database_manager import DatabaseManager
 from monitoring.structured_logging import configure_json_logging
+from config.startup_validation import validate_startup_configuration
 
 configure_json_logging()
 logger = logging.getLogger(__name__)
 
 
 async def run_worker() -> None:
+    validate_startup_configuration(settings)
     db_manager = DatabaseManager(settings.DATABASE_URL)
     manager = None
     tasks: list[asyncio.Task] = []

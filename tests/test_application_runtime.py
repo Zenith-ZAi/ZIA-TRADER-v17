@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
 
 def test_main_import_does_not_construct_database_or_trading_runtime(monkeypatch):
@@ -36,11 +37,10 @@ def test_runtime_access_before_lifespan_fails_closed():
     module = importlib.import_module("main")
     module.app.state.runtime = None
 
-    with pytest.raises(HTTPException) as raised:
-        module._trading_manager()
-
-    assert raised.value.status_code == 503
-    assert raised.value.detail == "application_runtime_not_started"
+    client = TestClient(module.app, raise_server_exceptions=False)
+    response = client.get("/healthz")
+    assert response.status_code == 503
+    assert response.json()["detail"] == "application_runtime_not_started"
 
 
 def test_runtime_builds_schema_off_event_loop_and_closes_resources():

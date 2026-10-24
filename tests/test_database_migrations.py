@@ -89,7 +89,12 @@ def test_initial_migration_adopts_legacy_create_all_schema(tmp_path, monkeypatch
     Base.metadata.create_all(legacy_engine)
     with legacy_engine.begin() as connection:
         for table_name in ("model_metrics", "model_registry", "data_gaps", "audit_log", "market_candles"):
-            connection.execute(text(f'DROP TABLE "{table_name}"'))
+            Base.metadata.tables[table_name].drop(connection, checkfirst=True)
+        metadata_indexes = {
+            index.name: index
+            for table in Base.metadata.tables.values()
+            for index in table.indexes
+        }
         for index_name in (
             "ix_order_history_symbol_timestamp",
             "ix_execution_history_symbol_timestamp",
@@ -97,7 +102,7 @@ def test_initial_migration_adopts_legacy_create_all_schema(tmp_path, monkeypatch
             "ix_ai_observations_symbol_observed_at",
             "ix_decision_snapshots_symbol_timeframe_observed_at",
         ):
-            connection.execute(text(f'DROP INDEX IF EXISTS "{index_name}"'))
+            metadata_indexes[index_name].drop(connection, checkfirst=True)
     legacy_engine.dispose()
 
     monkeypatch.setenv("DATABASE_URL", database_url)

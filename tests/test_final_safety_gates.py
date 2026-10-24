@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
 from config.settings import Settings
 from core.manager import SniperDisabledError, TradingManager
@@ -297,21 +298,74 @@ def test_authorized_autonomous_entry_and_exit_are_centralized(tmp_path):
 
 
 def test_api_rejects_ai_source_and_client_supplied_confirmation(monkeypatch):
-    import importlib
+    from api.application import create_app
+    from api.dependencies import get_trader_user
+    from api.runtime_services import start_engine
+    from config.settings import settings
 
-    module = importlib.import_module("main")
-    with pytest.raises(HTTPException) as raised:
-        asyncio.run(module.create_order(
-            {"symbol": "BTC/USDT", "action": "buy", "source": "ai", "confirmed": True},
-            {"username": "trader", "roles": ["trader"]},
-        ))
-    assert raised.value.status_code == 400
+    submissions = []
 
-    monkeypatch.setattr(module.settings, "SNIPER_ENABLED", False)
+    class FakeOrderManager:
+        async def submit(self, order, *, source, confirmed):
+            submissions.append((order, source, confirmed))
+            return {"status": "pending_confirmation"}
+
+    class FakeManager:
+        order_manager = FakeOrderManager()
+
+    class FakeRuntime:
+        trading_manager = FakeManager()
+
+        async def close(self):
+            return None
+
+    async def runtime_builder(_settings):
+        return FakeRuntime()
+
+    app = create_app(settings, runtime_builder=runtime_builder)
+    app.dependency_overrides[get_trader_user] = lambda: {
+        "username": "trader",
+        "roles": ["trader"],
+    }
+    with TestClient(app) as client:
+        rejected = client.post(
+            "/order",
+            json={
+                "symbol": "BTC/USDT",
+                "action": "buy",
+                "source": "ai",
+                "confirmed": True,
+            },
+        )
+        assert rejected.status_code == 400
+        assert submissions == []
+
+        accepted_for_confirmation = client.post(
+            "/order",
+            json={
+                "symbol": "BTC/USDT",
+                "action": "buy",
+                "source": "manual",
+                "confirmed": True,
+            },
+        )
+        assert accepted_for_confirmation.status_code == 200
+        assert submissions == [
+            ({"symbol": "BTC/USDT", "action": "buy"}, "manual", False)
+        ]
+
+    monkeypatch.setattr(settings, "SNIPER_ENABLED", False)
 
     async def should_not_start():
         raise AssertionError("disabled Sniper must not start")
 
+    fake_application = SimpleNamespace(
+        state=SimpleNamespace(
+            settings=settings,
+            runtime=SimpleNamespace(trading_manager=SimpleNamespace()),
+            engine_tasks={},
+        )
+    )
     with pytest.raises(HTTPException) as sniper_error:
-        asyncio.run(module._start_engine("sniper", should_not_start))
+        asyncio.run(start_engine(fake_application, "sniper", should_not_start))
     assert sniper_error.value.status_code == 409
