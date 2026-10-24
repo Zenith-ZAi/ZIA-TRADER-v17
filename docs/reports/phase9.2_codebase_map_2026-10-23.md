@@ -1,14 +1,14 @@
 # Fase 9.2 — Mapa do código, hardening e estado de validação
 
-**Data:** 2026-10-23. **Checkout:** `/home/ubuntu/ZIA-TRADER-v17-remote`. **Branch de trabalho:** `phase9/app-factory-and-router-boundaries`. **Estado nesta revisão:** alterações locais testadas; PR/CI/merge ainda pendentes. Este relatório descreve engenharia do repositório, não autoriza execução financeira.
+**Data:** 2026-10-23. **Checkout:** `/home/ubuntu/ZIA-TRADER-v17-remote`. **Integração:** PR #23 merged em `001c3177f4b844532c1a6ada25705ca9e63eedf7`; CI run `40046660678` passou em teste/PostgreSQL e container smoke. CodeRabbit marcou revisão como skipped; não foi revisão humana. Este relatório descreve engenharia do repositório, não autoriza execução financeira.
 
 ## 1. Resumo executivo
 
 A subfase 9.2 conclui a separação inicial da API FastAPI: `main.py` deixa de concentrar rotas e fica com 12 linhas como entrypoint de compatibilidade; `api/application.py` cria a aplicação e seu lifespan; cinco routers separam autenticação, health/metrics, operações, mercado e motores; `api/dependencies.py` resolve settings/runtime por `Request` e `app.state`. Os caminhos HTTP/WebSocket preservados foram comparados ao contrato anterior e cobertos por teste: **24 combinações método/caminho**, sem alteração intencional em payloads, roles ou gates de execução.
 
-O segundo objetivo foi reforçar startup e concorrência. API e worker validam configuração de produção antes de abrir runtime, banco ou providers; valores de segredo/admin de exemplo, autenticação demo e flags de autonomia/live causam bloqueio. Start e stop agora compartilham o mesmo lock de lifecycle. O analisador AST de segurança foi corrigido para cobrir SQL interpolado inline e atribuído a nomes/aliases dentro do escopo analisado, recebeu regressões e foi conectado ao CI como triagem estática.
+O segundo objetivo foi reforçar startup e concorrência. API e worker validam configuração de produção antes de abrir runtime, banco ou providers; valores de segredo/admin de exemplo, autenticação demo e flags de autonomia/live causam bloqueio. Start e stop agora compartilham o mesmo lock de lifecycle. O analisador AST de segurança é uma heurística limitada; os padrões suportados têm regressões no pytest, mas a CLI não é gate de segurança do CI nem substitui SAST/DAST.
 
-A suíte local fecha em **219 passed, 3 skipped, 1 warning**. Compilação, `git diff --check`, scanner AST, `uv pip check` e parsing YAML passaram. O Sandbox não dispõe de Docker/Compose/Podman; a imagem e o novo workflow ainda precisam passar no CI remoto. **Não há aprovação de VPS, ledger financeiro, dataset/modelo de procedência, homologação de venue nem autorização para trading.**
+A suíte local fecha em **220 passed, 3 skipped, 1 warning**; o run remoto executou os testes com PostgreSQL e fechou em **223 passed, 1 warning**. O container foi construído no CI e o `docker run` importou `data.news_processor.NewsProcessor` e `scripts.ingest_news`. O Sandbox não dispõe de Docker/Compose/Podman, portanto não houve Compose up nem runtime VPS. **Não há aprovação de VPS, ledger financeiro, dataset/modelo de procedência, homologação de venue nem autorização para trading.**
 
 ## 2. Path e dimensões do repositório
 
@@ -52,17 +52,17 @@ A revisão encontrou uma corrida em que um stop poderia cruzar um start ainda em
 
 O antigo scanner `scripts/security_audit.py` baseava SQLi em busca textual e gerava falso positivo/falso negativo. Foi substituído por triagem AST de `execute`/`exec_driver_sql`, f-string, `%`, `.format`, composição, aliases/atributos locais, `AugAssign` e argumento nomeado `statement`/`sql`; reconhece prefixos/comandos como `TRUNCATE`, `MERGE` e `WITH`; avalia também `eval`, `exec` e `os.system`. O fixture de migration SQLite deixou de interpolar identificadores SQL e usa metadata SQLAlchemy. `tests/test_security_audit.py` cobre SQL parametrizado seguro, SQL interpolado inline/local/composto, em atributo, por keyword, AugAssign, alguns comandos e primitives dinâmicos. A CLI do scanner é **informativa, não é gate de segurança do CI**; o CI executa somente suas regressões como parte do pytest, e a imagem recebe smoke funcional de imports. Essa decisão evita apresentar a heurística como SAST. **Limite declarado:** não é SAST/DAST completo, não acompanha fluxo arbitrário entre funções/retornos, SQL montado dinamicamente por helpers ou fontes externas; zero achados quer dizer somente que os padrões implementados não encontraram uma ocorrência.
 
-`.dockerignore` exclui `.env` e `.env.*` recursivos, chaves/certificados, payloads/datasets locais sob `data/`, modelos, relatórios, documentação, testes, caches e artefatos, mas mantém o módulo runtime `data/news_processor.py`. Essa exceção é necessária: core e job de notícias importam esse módulo. Um teste verifica a allowlist e uma nova etapa CI fará `docker run` da imagem construída para importar `NewsProcessor` e `scripts.ingest_news`; essa execução no container ainda aguarda CI. Nenhum arquivo secreto foi copiado, inspecionado ou publicado nesta etapa.
+`.dockerignore` exclui `.env` e `.env.*` recursivos, chaves/certificados, payloads/datasets locais sob `data/`, modelos, relatórios, documentação, testes, caches e artefatos, mas mantém o módulo runtime `data/news_processor.py`. Essa exceção é necessária: core e job de notícias importam esse módulo. Um teste verifica a allowlist; o smoke do container foi executado com sucesso no CI, importando `NewsProcessor` e `scripts.ingest_news`. Nenhum arquivo secreto foi copiado, inspecionado ou publicado nesta etapa.
 
 ## 6. Evidências reproduzidas
 
 - `python -m pytest -q -rs`: **220 passed, 3 skipped, 1 warning**, em 20,31 s no venv limpo de Python 3.12 sincronizado pelo lock CPU.
-- Os 3 skips locais declaram ausência de `TEST_DATABASE_URL`: migration PostgreSQL (`tests/test_database_migrations.py:129`), integração do model registry (`tests/test_model_registry.py:107`) e backup/restore PostgreSQL (`tests/test_postgres_backup_restore.py:48`). O serviço PostgreSQL é exercitado no workflow CI, mas CI desta branch ainda estava pendente no instante de escrita.
+- Os 3 skips locais declaram ausência de `TEST_DATABASE_URL`: migration PostgreSQL (`tests/test_database_migrations.py:129`), integração do model registry (`tests/test_model_registry.py:107`) e backup/restore PostgreSQL (`tests/test_postgres_backup_restore.py:48`). No PR #23 o CI executou esses testes com PostgreSQL; resultado remoto: **223 passed, 1 warning**, run `40046660678`. O `duplicate key` registrado no log é esperado: `test_database_migrations.py` verifica explicitamente que a chave composta rejeita duplicata via `pytest.raises(IntegrityError)`.
 - Warning único: `PendingDeprecationWarning` de Starlette/form parser sugerindo `python_multipart`; não foi convertido em falha de teste.
 - Conjunto focado anterior de API/factory, segurança AST, startup settings e preflight: **39 passed, 1 warning**; foi acrescentado mais um teste de normalização AUTH_MODE, incluído na suíte integral final.
 - `python -m compileall -q .`: exit 0; `git diff --check`: exit 0; `uv pip check` no venv limpo: 117 pacotes compatíveis, exit 0.
-- Triagem AST local: sem ocorrências segundo os padrões limitados implementados; os casos suportados são exercitados por unit tests. `docker-compose.yml`, `docker-compose.vps.yml` e CI passaram por parser YAML. O CI contém smoke de import da imagem, ainda pendente nesta branch.
-- Docker, Docker Compose e Podman não estão instalados/acessíveis na Sandbox. Não foram executados build ou up local, serviços PostgreSQL/Redis externos, exchange, transação, backup/restore real, TLS, firewall ou VPS. O build do container e o smoke `docker run` de imports/runtime, além dos testes no PostgreSQL, aguardam CI remoto.
+- Triagem AST local: sem ocorrências segundo os padrões limitados implementados; os casos suportados são exercitados por unit tests. `docker-compose.yml`, `docker-compose.vps.yml` e CI passaram por parser YAML. CI run `40046660678` passou nos jobs `test` e `container`, incluindo build de imagem e smoke `docker run` de imports.
+- Docker, Docker Compose e Podman não estão instalados/acessíveis na Sandbox. Não foram executados Compose up local, serviços PostgreSQL/Redis persistentes de VPS, exchange, transação, backup/restore real, TLS, firewall ou soak. O build/smoke de imagem no CI não é homologação de Compose ou VPS.
 
 ## 7. Revisão independente e limitações
 
@@ -72,7 +72,7 @@ Permanecem limitações estruturais: chamadas síncronas de SQLAlchemy e partes 
 
 ## 8. Próximas etapas priorizadas
 
-1. Fechar revisão follow-up, CI PostgreSQL, testes do scanner como parte de pytest, build e smoke de imports da imagem no PR 9.2; resolver findings antes de merge. O CI verde não substitui revisão manual nem VPS.
+1. Subfase 9.2 integrada pelo PR #23, com CI e build/smoke de imagem aprovados; CodeRabbit reportou `Review skipped`, sem revisão humana registrada. CI verde não substitui validação VPS.
 2. **Fase 9.3:** decidir por SQLAlchemy async ou repositórios com fronteira explícita; remover I/O sync de corrotinas, nunca compartilhar `Session` entre tasks/threads; medir latência p50/p95/p99, cancelamento, saturação de pool e cleanup sob falha.
 3. **Fase 8B (bloqueador financeiro):** especificar e implementar ledgers imutáveis com `Decimal`, idempotência, fills parciais, fees, funding, depósitos/saques, timestamps UTC, completude e reconciliação; continuar rejeitando entrada até proveniência demonstrada.
 4. **Fase 8C (bloqueador de validação de IA):** escolher fonte/licença, coletar dataset identificado por instrumento/timeframe/hash, validar timezone/gaps/labels, executar walk-forward OOS com custos e revisão humana; não fabricar modelo aprovado.
