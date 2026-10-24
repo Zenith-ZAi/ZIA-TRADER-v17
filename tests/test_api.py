@@ -5,6 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 from fastapi.testclient import TestClient
+from api.runtime_services import start_engine
 
 
 def test_demo_login_and_public_user(monkeypatch, tmp_path):
@@ -108,14 +109,18 @@ def test_engine_start_is_blocked_when_reconciliation_needs_attention(monkeypatch
         raise AssertionError("engine factory must not be scheduled")
 
     with TestClient(module.app):
-        manager = module._trading_manager()
+        manager = module.app.state.runtime.trading_manager
         monkeypatch.setattr(manager.exchange_connector, "connect", connect)
         monkeypatch.setattr(manager, "reconcile", reconcile)
 
         async def invoke():
             with pytest.raises(HTTPException) as raised:
-                await module._start_engine("phase5-reconcile-gate", should_not_start)
+                await start_engine(
+                    module.app,
+                    "phase5-reconcile-gate",
+                    should_not_start,
+                )
             assert raised.value.status_code == 503
 
         asyncio.run(invoke())
-        assert "phase5-reconcile-gate" not in module.engine_tasks
+        assert "phase5-reconcile-gate" not in module.app.state.engine_tasks

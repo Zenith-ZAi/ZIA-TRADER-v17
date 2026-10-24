@@ -27,6 +27,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from database_manager import DatabaseManager
 from infra.redis_cache import RedisCache
+from config.settings import Settings
+from config.startup_validation import production_configuration_errors
 
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
@@ -73,6 +75,13 @@ def run_preflight(strict: bool = False) -> dict[str, Any]:
 
     def add(name: str, passed: bool, detail: str) -> None:
         checks.append({"name": name, "passed": bool(passed), "detail": detail})
+
+    security_errors = production_configuration_errors(Settings())
+    add(
+        "startup_security_configuration",
+        not security_errors,
+        "configuração compatível com startup" if not security_errors else "; ".join(security_errors),
+    )
 
     live_flags = {
         name: _bool_env(name)

@@ -18,3 +18,25 @@ models
 checkpoints
 *.log
 logs
+
+# Nested env files and private-key material must never enter build context.
+**/.env
+**/.env.*
+.env.example
+**/.env.example
+*.pem
+*.key
+**/*.pem
+**/*.key
+
+# Exclude local datasets/outputs but keep the runtime NewsProcessor module.
+data/*
+!data/news_processor.py
+reports/
+docs/
+tests/
+**/__pycache__/
+.mypy_cache/
+.ruff_cache
+htmlcov/
+.coverage

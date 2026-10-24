@@ -7,7 +7,13 @@ SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = settings.ALGORITHM
 ACCESS_TOKEN_EXPIRE_MINUTES = settings.ACCESS_TOKEN_EXPIRE_MINUTES
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+def create_access_token(
+    data: dict,
+    expires_delta: Optional[timedelta] = None,
+    *,
+    secret_key: Optional[str] = None,
+    algorithm: Optional[str] = None,
+) -> str:
     """Gera um token JWT com suporte a MFA e Roles."""
     to_encode = data.copy()
     if expires_delta:
@@ -20,13 +26,27 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
         to_encode["mfa_verified"] = False
         
     to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc)})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    encoded_jwt = jwt.encode(
+        to_encode,
+        secret_key or SECRET_KEY,
+        algorithm=algorithm or ALGORITHM,
+    )
     return encoded_jwt
 
-def verify_token(token: str, credentials_exception) -> Dict[str, Any]:
+def verify_token(
+    token: str,
+    credentials_exception,
+    *,
+    secret_key: Optional[str] = None,
+    algorithm: Optional[str] = None,
+) -> Dict[str, Any]:
     """Valida o token e retorna o payload completo para verificação de permissões."""
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(
+            token,
+            secret_key or SECRET_KEY,
+            algorithms=[algorithm or ALGORITHM],
+        )
         username: str = payload.get("sub")
         if username is None:
             raise credentials_exception

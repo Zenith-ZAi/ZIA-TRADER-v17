@@ -132,3 +132,28 @@ def test_production_preflight_accepts_current_alembic_head(monkeypatch, tmp_path
     assert result["status"] == "passed"
     assert checks["alembic_head"] is True
     assert checks["database_schema"] is True
+
+
+def test_production_preflight_rejects_placeholder_auth_secrets(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("SECRET_KEY", "replace-with-at-least-32-random-bytes")
+    monkeypatch.setenv("AUTH_MODE", "env")
+    monkeypatch.setenv("AUTH_USERNAME", "zia-admin")
+    monkeypatch.setenv("AUTH_PASSWORD", "replace-with-generated-admin-password")
+    monkeypatch.setenv("DEMO_AUTH_ENABLED", "false")
+    monkeypatch.setenv("LIVE_KILL_SWITCH", "true")
+    monkeypatch.setenv("SHADOW_MODE_ENABLED", "true")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'secrets.db'}")
+    monkeypatch.setenv("REDIS_URL", "redis://127.0.0.1:63999/0")
+    monkeypatch.setenv("REQUIRE_PERSISTENT_DATABASE", "false")
+    monkeypatch.setenv("REQUIRE_PERSISTENT_REDIS", "false")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("MODEL_DIR", str(tmp_path / "models"))
+    monkeypatch.setenv("LOG_DIR", str(tmp_path / "logs"))
+
+    result = run_preflight(strict=True)
+    checks = {check["name"]: check for check in result["checks"]}
+
+    assert checks["startup_security_configuration"]["passed"] is False
+    assert "SECRET_KEY" in checks["startup_security_configuration"]["detail"]
+    assert "replace-with-at-least-32-random-bytes" not in str(result)

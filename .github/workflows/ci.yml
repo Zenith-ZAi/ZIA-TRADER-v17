@@ -58,3 +58,5 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build container
         run: docker build --tag zia-trader:${{ github.sha }} .
+      - name: Smoke runtime imports from image
+        run: docker run --rm --entrypoint python zia-trader:${{ github.sha }} -c "from data.news_processor import NewsProcessor; import scripts.ingest_news"
