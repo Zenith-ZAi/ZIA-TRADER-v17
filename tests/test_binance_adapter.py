@@ -128,3 +128,14 @@ def test_adapter_queries_order_by_client_order_id():
     assert request["method"] == "GET"
     assert "symbol=BTCUSDT" in request["params"]
     assert "origClientOrderId=zia-restart-1" in request["params"]
+
+
+def test_market_order_preserves_exchange_partial_fill_status():
+    session = FakeSession()
+    adapter = BinanceSpotAdapter(sandbox_settings(), session=session)
+
+    result = asyncio.run(adapter.place_order("BTC/USDT", "buy", "market", 0.1))
+
+    assert result["status"] == "partially_filled"
+    assert result["exchange_status"] == "PARTIALLY_FILLED"
+    assert result["filled_quantity"] == 0.04

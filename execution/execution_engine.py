@@ -134,11 +134,60 @@ class ExecutionEngine:
                     return {"status": "success", "client_order_id": client_order_id, **order_result}
             else:
                 order_result = await send({"client_order_id": client_order_id})
-            if str(order_result.get("status", "")).lower() in {"failed", "error"}:
+            status = str(order_result.get("status", "")).lower()
+            intent_status = str((order_result.get("intent") or {}).get("status", "")).lower()
+            if status == "idempotent_recovered":
+                if intent_status != "filled":
+                    status = intent_status if intent_status in {"open", "pending", "partially_filled"} else "recovery_pending"
+                    return {
+                        "status": status,
+                        "order_id": order_result.get("order_id"),
+                        "client_order_id": client_order_id,
+                        "symbol": symbol,
+                        "action": action,
+                        "quantity": quantity,
+                        "filled_quantity": float(order_result.get("filled_quantity") or 0.0),
+                        "reason": "ordem recuperada sem confirmação de fill completo; posição local não foi alterada",
+                    }
+                status = "filled"
+            if status in {"failed", "error", "rejected", "canceled", "cancelled", "expired"}:
                 raise Exception(order_result.get("error") or order_result.get("reason") or "ordem rejeitada")
+            filled_quantity = float(order_result.get("filled_quantity") or 0.0)
+            if status in {"open", "pending", "partially_filled", "recovery_pending", "unknown"}:
+                return {
+                    "status": status,
+                    "order_id": order_result.get("order_id"),
+                    "client_order_id": client_order_id,
+                    "symbol": symbol,
+                    "action": action,
+                    "quantity": quantity,
+                    "filled_quantity": filled_quantity,
+                    "reason": order_result.get("reason") or "fill não terminal; posição local não foi alterada",
+                }
+            if status not in {"success", "filled"}:
+                return {
+                    "status": "recovery_pending",
+                    "order_id": order_result.get("order_id"),
+                    "client_order_id": client_order_id,
+                    "symbol": symbol,
+                    "action": action,
+                    "quantity": quantity,
+                    "filled_quantity": filled_quantity,
+                    "reason": f"status de execução não reconhecido ({status or 'ausente'}); posição local não foi alterada",
+                }
             order_id = order_result["order_id"]
             filled_price = float(order_result.get("filled_price") or order_data.get("price") or 0.0)
-            filled_quantity = float(order_result.get("filled_quantity") or quantity)
+            if filled_quantity + max(abs(float(quantity)) * 1e-9, 1e-12) < float(quantity):
+                return {
+                    "status": "partially_filled" if filled_quantity > 0 else "recovery_pending",
+                    "order_id": order_id,
+                    "client_order_id": client_order_id,
+                    "symbol": symbol,
+                    "action": action,
+                    "quantity": quantity,
+                    "filled_quantity": filled_quantity,
+                    "reason": "resposta success não confirma o preenchimento integral; posição local não foi alterada",
+                }
             if filled_price <= 0 or filled_quantity <= 0:
                 return {"status": "error", "reason": "Execução sem preço ou quantidade preenchida válida."}
 

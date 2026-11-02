@@ -5,7 +5,9 @@ import pytest
 from fastapi import HTTPException
 
 from fastapi.testclient import TestClient
+from api.application import create_app
 from api.runtime_services import start_engine
+from config.settings import Settings
 
 
 def test_demo_login_and_public_user(monkeypatch, tmp_path):
@@ -13,18 +15,18 @@ def test_demo_login_and_public_user(monkeypatch, tmp_path):
     monkeypatch.setenv("AUTO_START_ENGINES", "false")
     monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.setenv("DEMO_AUTH_ENABLED", "true")
-    monkeypatch.setenv("DEMO_USER_PASSWORD", "password")
-    monkeypatch.setenv("DEMO_ADMIN_PASSWORD", "admin")
+    monkeypatch.setenv("DEMO_USER_PASSWORD", "local-test-user-secret-2026")
+    monkeypatch.setenv("DEMO_ADMIN_PASSWORD", "local-test-admin-secret-2026")
 
-    module = importlib.import_module("main")
-    with TestClient(module.app) as client:
+    app = create_app(Settings(_env_file=None))
+    with TestClient(app) as client:
         health_response = client.get("/healthz")
         assert health_response.status_code == 200
         assert health_response.json()["status"] == "ok"
 
         token_response = client.post(
             "/token",
-            data={"username": "admin", "password": "admin"},
+            data={"username": "admin", "password": "local-test-admin-secret-2026"},
         )
         assert token_response.status_code == 200
         token = token_response.json()["access_token"]
@@ -50,7 +52,7 @@ def test_demo_login_and_public_user(monkeypatch, tmp_path):
             runtime_status = websocket.receive_json()
             assert "runtime" in runtime_status
 
-        runtime = module.app.state.runtime
+        runtime = app.state.runtime
         stop_response = client.post(
             "/trading/stop",
             headers={"Authorization": f"Bearer {token}"},
@@ -70,9 +72,10 @@ def test_invalid_demo_login_is_rejected(monkeypatch, tmp_path):
     monkeypatch.setenv("AUTO_START_ENGINES", "false")
     monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.setenv("DEMO_AUTH_ENABLED", "true")
+    monkeypatch.setenv("DEMO_ADMIN_PASSWORD", "local-test-admin-secret-2026")
 
-    module = importlib.import_module("main")
-    with TestClient(module.app) as client:
+    app = create_app(Settings(_env_file=None))
+    with TestClient(app) as client:
         response = client.post(
             "/token",
             data={"username": "admin", "password": "wrong"},

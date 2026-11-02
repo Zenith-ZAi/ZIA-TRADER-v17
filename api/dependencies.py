@@ -48,18 +48,20 @@ def auth_users(settings: Any) -> dict[str, dict[str, Any]]:
             }
         }
     if settings.DEMO_AUTH_ENABLED and environment not in {"production", "prod", "staging"}:
-        return {
-            "user": {
+        users = {}
+        if settings.DEMO_USER_PASSWORD:
+            users["user"] = {
                 "username": "user",
                 "password": settings.DEMO_USER_PASSWORD,
                 "roles": ["trader"],
-            },
-            "admin": {
+            }
+        if settings.DEMO_ADMIN_PASSWORD:
+            users["admin"] = {
                 "username": "admin",
                 "password": settings.DEMO_ADMIN_PASSWORD,
                 "roles": ["admin", "trader"],
-            },
-        }
+            }
+        return users
     return {}
 
 

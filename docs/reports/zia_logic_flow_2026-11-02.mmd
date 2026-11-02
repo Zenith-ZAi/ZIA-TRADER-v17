@@ -1,0 +1,65 @@
+flowchart TD
+  subgraph S[Startup e fronteira de segurança]
+    A[Entrypoint ASGI main.py] --> B[create_app e lifespan]
+    B --> C{Production ou staging?}
+    C -- Sim --> D{Segredos, auth, DB/Redis persistentes,
+flags e Alembic válidos?}
+    D -- Não --> X[Startup abortado;
+runtime não é criado]
+    D -- Sim --> E[Inicializar runtime e recursos]
+    C -- Não --> E
+  end
+
+  subgraph M[Dados, análise e decisão]
+    E --> F[Adapters de mercado e notícias]
+    F --> G{Fonte autorizada, dados frescos,
+completos e sem gaps?}
+    G -- Não --> H[HOLD / somente shadow;
+sem sinal elegível]
+    G -- Sim --> I[Normalização e features]
+    I --> J[Core de estratégia, notícias
+e modelos registrados]
+    J --> K{Dataset licenciado + validação OOS
++ modelo aprovado?}
+    K -- Não --> H
+    K -- Sim --> L[Sinal candidato]
+  end
+
+  subgraph R[Risco e submissão]
+    L --> N{Auth/role, flags, kill switch,
+limits e ledger verificado?}
+    N -- Não --> H
+    N -- Sim --> O[OrderManager e reconciliação prévia]
+    O --> P{Reconciliação saudável
+sem intents abertas?}
+    P -- Não --> H
+    P -- Sim --> Q[Persistir intent durável
+com client_order_id]
+    Q --> T[Enviar via adapter da venue]
+    T --> U{Status remoto + quantidade
+realmente executada}
+    U -- Fill completo --> V[Persistir execução/fill
+ e atualizar posição]
+    U -- Aberta, parcial ou desconhecida --> W[Persistir estado pendente;
+não registrar posição como completa]
+    U -- Rejeitada, cancelada ou expirada --> Y[Manter estado terminal;
+não reutilizar como sucesso]
+    V --> Z[Reconciliar DB/Redis/venue]
+    W --> Z
+    Y --> Z
+    Z --> AA{Sem divergências e
+sem estado não terminal?}
+    AA -- Não --> H
+    AA -- Sim --> AB[Preflight saudável;
+ordem ainda depende de autorização]
+  end
+
+  H --> AC[Estado atual: trading live e autonomia OFF;
+ledgers, dataset/OOS e VPS staging pendentes]
+
+  classDef blocked fill:#fee2e2,stroke:#b91c1c,color:#450a0a;
+  classDef guarded fill:#fef3c7,stroke:#b45309,color:#451a03;
+  classDef ok fill:#dcfce7,stroke:#15803d,color:#052e16;
+  class X,H,AC blocked;
+  class D,G,K,N,P,U,AA guarded;
+  class E,Q,T,V,Z,AB ok;
