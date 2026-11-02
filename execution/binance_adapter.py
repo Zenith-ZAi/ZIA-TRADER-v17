@@ -333,10 +333,22 @@ class BinanceSpotAdapter:
         payload = await self._request("POST", "/v3/order", params, signed=True)
         order_id = str(payload["orderId"])
         self._order_symbols[order_id] = code
+        exchange_status = str(payload.get("status", "UNKNOWN")).upper()
+        status_map = {
+            "NEW": "open",
+            "PENDING_NEW": "pending",
+            "PARTIALLY_FILLED": "partially_filled",
+            "FILLED": "filled",
+            "CANCELED": "canceled",
+            "CANCELLED": "canceled",
+            "REJECTED": "rejected",
+            "EXPIRED": "expired",
+            "EXPIRED_IN_MATCH": "expired",
+        }
         executed_qty = float(payload.get("executedQty", 0.0))
         quote_qty = float(payload.get("cummulativeQuoteQty", 0.0))
         return {
-            "status": "success" if payload.get("status") not in {"REJECTED", "EXPIRED"} else "failed",
+            "status": status_map.get(exchange_status, "unknown"),
             "order_id": order_id,
             "symbol": symbol,
             "action": action.lower(),
@@ -344,7 +356,7 @@ class BinanceSpotAdapter:
             "filled_price": quote_qty / executed_qty if executed_qty else float(price or 0.0),
             "filled_quantity": executed_qty,
             "commission": sum(float(fill.get("commission", 0.0)) for fill in payload.get("fills", [])),
-            "exchange_status": payload.get("status"),
+            "exchange_status": exchange_status,
             "raw": payload,
         }
 

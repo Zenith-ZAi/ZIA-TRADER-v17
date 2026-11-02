@@ -1,6 +1,6 @@
 # Plano de finalização — ZIA-TRADER v17, Fase 9 em andamento
 
-**Atualizado:** 2026-10-23. **Base:** `master` após PR #23 (`001c3177f4b844532c1a6ada25705ca9e63eedf7`); 9.2 integrada. O objetivo é chegar a **pré-produção supervisionada em VPS**, não prometer capital real ou código sem defeitos.
+**Atualizado:** 2026-11-02. **Base auditada:** `master` pós-PR #25, SHA `cfcec0e3f62dfd82f4bbbb0301b3b1616f38c115`; este adendo registra a revisão na branch `fix/audit-nov-2026`. O objetivo segue sendo **pré-produção supervisionada em VPS**, não prometer capital real ou código sem defeitos.
 
 ## Onde estamos: pontuação de engenharia, não métrica estatística
 
@@ -9,7 +9,7 @@ Os percentuais abaixo são uma avaliação de gates/evidências, não uma contag
 | Dimensão | Estimativa | Evidência e limitador dominante |
 |---|---:|---|
 | Arquitetura backend e controles de segurança | **75–80%** | Alembic/PostgreSQL, gates fail-closed, OrderManager, reconciliação, controles de risco, logs e regressões temporais existem; ledger financeiro verificável, SAST completo e revisão humana independente continuam pendentes. |
-| Estrutura de engenharia e testes locais | **78–80%** | Fase 8A integrada; Fase 9.1 e 9.2 integradas; 220 testes locais passaram; CI PR #23 executou 223 testes com PostgreSQL e passou o build/smoke da imagem. |
+| Estrutura de engenharia e testes locais | **78–80%** | Fase 8A integrada; Fase 9.1 e 9.2 integradas; PR #23 teve 220 testes locais e 223 no CI/PostgreSQL; validação local desta auditoria na branch de correções: 235 passed, 3 skipped, 1 warning. |
 | IA/dados prontos para validação OOS | **25–30%** | Pipeline walk-forward/registry/drift está presente; falta dataset real licenciado/proveniente e modelo validado/aprovado. |
 | VPS e operação 24/7 comprovadas | **30–35%** | Compose e container build no CI existem; não houve boot, PostgreSQL/Redis persistentes, TLS, backup/restore, alertas ou restart test em VPS alvo. |
 | Autonomia real autorizável hoje | **0% habilitado; cerca de 10% de prontidão de engenharia** | Flags reais continuam OFF; equity/trade ledgers inexistentes e não há soak Demo/Testnet. Não habilitar execução autônoma real nesta situação. |
@@ -65,3 +65,14 @@ Instrumentar baseline de SQL/pool/event-loop em ambiente isolado; então escolhe
 ## Limites e decisões externas
 
 Para avançar a testes de integração são necessários: definição do alvo VPS (arquitetura/OS), escolha de fornecedor autorizado de dados, e venue Demo/Testnet pretendida. Não são necessários para a resolução local 8A. Credenciais de live ou de carteiras não devem ser solicitadas nem usadas nesta etapa.
+
+
+## Adendo de auditoria — 2026-11-02
+
+A branch `fix/audit-nov-2026`, baseada no `master` pós-PR #25 (`cfcec0e`), corrigiu a semântica de fill zero/parcial e de estados de ordem desconhecidos/terminais, tornou auth demo explicitamente opt-in e alinhou `LIVE_KILL_SWITCH` para true por default e no `.env.example`. O teste de defaults confirma live/manual/autonomia/autostart/neural OFF e shadow/kill switch ON. O simulador E2E agora exige atenção e bloqueia preflight diante de intents abertas/parciais.
+
+Validação local atual: **235 passed, 3 skipped, 1 warning**; `compileall`, `git diff --check` e `uv pip check` passaram. O inventário encontrou 194 módulos Python e 27.855 linhas físicas. A triagem AST não detectou padrões suportados; `pip-audit` não reportou CVEs conhecidas no venv verificado. Isso não é auditoria SAST/DAST nem aprovação de segurança independente. Há 77 versões mais novas listadas pelo índice, incluindo saltos major; upgrade massivo foi deliberadamente separado para evitar misturar migrações de API com a correção de execução.
+
+A atualização não conclui a Fase 9.3: permanecem 59 chamadas ORM síncronas reconhecíveis em corrotinas segundo o inventário estático anterior, sem benchmark de latência e sem migração aplicada. As Fases 8B (ledger), 8C (dataset/OOS), 8D (VPS staging), 9.4 (feed read-only homologado), 9.5 (Demo/Testnet) e 8F (soak/aceite) continuam abertas. Não recalcular a pontuação de prontidão sem fechar evidência operacional. `LIVE_TRADING_ENABLED=false` e todas as flags de autonomia/manual continuam OFF.
+
+Relatório e fluxo lógico: `docs/reports/audit_2026-11-02.md` e `docs/reports/zia_logic_flow_2026-11-02.mmd`.

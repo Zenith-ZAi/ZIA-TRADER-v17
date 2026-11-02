@@ -30,3 +30,10 @@
 ## O que ainda não prova
 
 A resolução x86_64 e a instalação ARM64 em venv descartável, somadas ao build do job `container`, não executam Compose up, PostgreSQL/Redis persistentes, proxy TLS ou aplicação com feeds/broker reais. A tag `python:3.12-slim`, Postgres e Redis ainda não estão fixados por digest; scanner, SBOM, licenças, atualização de CVEs e medição de latência CPU permanecem gates do release.
+
+
+## Adendo de 2026-11-02 — auditoria do lock atual
+
+No venv descartável Python 3.12.3 sincronizado por `requirements.lock`, `uv pip check` verificou 117 pacotes compatíveis. `pip-audit` executado contra esse ambiente não reportou vulnerabilidades conhecidas; isso não cobre CVEs ainda não catalogadas, licenças, imagem Docker ou componentes do sistema operacional. A ferramenta documenta a consulta a bases de advisory conhecidas em https://pypi.org/project/pip-audit/.
+
+A enumeração `uv pip list --outdated` encontrou 77 pacotes com versões mais recentes disponíveis no índice consultado. Entre as diferenças de maior risco estão FastAPI 0.111→0.162, SQLAlchemy 2.0→2.1, Redis 5→8, NumPy 1→2, pandas 2→3, XGBoost 2→3 e Torch 2.13 CPU→2.15. Nenhum upgrade foi aplicado em massa: o resultado de compatibilidade e a ausência de CVEs conhecidos não justificam misturar mudanças de API em runtime e modelos com a correção de execução. Criar um ciclo separado de atualização por grupos, com lock/hash regenerado e CI integral após cada conjunto. O método CPU continua explícito com `uv pip --torch-backend cpu`, conforme o guia de integração PyTorch do uv: https://docs.astral.sh/uv/guides/integration/pytorch/.

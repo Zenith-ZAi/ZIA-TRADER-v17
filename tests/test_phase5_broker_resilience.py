@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from core.reconciliation import OrderReconciler
 from database_manager import DatabaseManager
 
@@ -197,3 +199,101 @@ def test_duplicate_call_after_filled_response_does_not_send_again(tmp_path):
     assert first["status"] == "success"
     assert second["status"] == "idempotent_reuse"
     assert len(broker.send_calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("filled_quantity", "expected_status"),
+    [(0.0, "pending"), (0.04, "partially_filled")],
+)
+def test_success_response_does_not_confirm_full_requested_quantity(tmp_path, filled_quantity, expected_status):
+    db = make_db(tmp_path)
+    broker = FakeBroker(send_result={
+        "status": "success",
+        "order_id": "exchange-incomplete",
+        "filled_quantity": filled_quantity,
+    })
+    reconciler = OrderReconciler(db, broker, max_attempts=2, base_delay_seconds=0.0)
+
+    result = asyncio.run(reconciler.submit_with_retry(order_data(), broker.send, "zia_incomplete_fill"))
+
+    assert result["status"] == expected_status
+    assert result["intent"]["status"] == expected_status
+    assert len(broker.send_calls) == 1
+
+
+def test_filled_status_with_short_quantity_is_partial(tmp_path):
+    db = make_db(tmp_path)
+    broker = FakeBroker(send_result={
+        "status": "filled",
+        "order_id": "exchange-short-filled",
+        "filled_quantity": 0.04,
+    })
+    reconciler = OrderReconciler(db, broker, max_attempts=1, base_delay_seconds=0.0)
+
+    result = asyncio.run(reconciler.submit_with_retry(order_data(), broker.send, "zia_short_filled"))
+
+    assert result["status"] == "partially_filled"
+    assert result["intent"]["status"] == "partially_filled"
+
+
+def test_open_order_intent_keeps_preflight_in_attention_even_when_remote_matches(tmp_path):
+    db = make_db(tmp_path)
+    client_order_id = persist_submitted(db, "zia_open_preflight")
+    remote = {
+        "client_order_id": client_order_id,
+        "order_id": "exchange-open",
+        "symbol": "BTC/USDT",
+        "status": "open",
+        "filled_quantity": 0.0,
+    }
+    broker = FakeBroker(remote_order=remote, open_orders=[remote])
+    reconciler = OrderReconciler(db, broker)
+
+    result = asyncio.run(reconciler.reconcile())
+
+    assert result["status"] == "attention"
+    assert result["unresolved_order_intents"] == [client_order_id]
+
+
+def test_terminal_canceled_intent_is_not_reused_as_success(tmp_path):
+    db = make_db(tmp_path)
+    client_order_id = "zia_canceled_no_replay"
+    db.reserve_order_intent("default_account", client_order_id, order_data())
+    db.update_order_intent(client_order_id, status="canceled")
+    broker = FakeBroker()
+    reconciler = OrderReconciler(db, broker, max_attempts=1, base_delay_seconds=0.0)
+
+    result = asyncio.run(reconciler.submit_with_retry(order_data(), broker.send, client_order_id))
+
+    assert result["status"] == "canceled"
+    assert broker.send_calls == []
+
+
+def test_unknown_adapter_response_suspends_retry_until_reconciliation(tmp_path):
+    db = make_db(tmp_path)
+    broker = FakeBroker(send_result={"status": "unknown", "order_id": "exchange-unknown"})
+    reconciler = OrderReconciler(db, broker, max_attempts=3, base_delay_seconds=0.0)
+
+    result = asyncio.run(reconciler.submit_with_retry(order_data(), broker.send, "zia_unknown_status"))
+
+    assert result["status"] == "recovery_pending"
+    assert result["intent"]["status"] == "submitted"
+    assert len(broker.send_calls) == 1
+    assert broker.lookup_calls == [("zia_unknown_status", "BTC/USDT")]
+
+
+def test_remote_canceled_partial_is_not_a_terminal_clean_fill():
+    assert OrderReconciler._remote_status({
+        "status": "canceled",
+        "filled_quantity": 0.04,
+        "quantity": 0.1,
+    }) == "partially_filled"
+    assert OrderReconciler._remote_status({
+        "status": "filled",
+        "filled_quantity": 0.0,
+    }) == "unknown"
+    assert OrderReconciler._remote_status({
+        "status": "filled",
+        "filled_quantity": 0.04,
+        "quantity": 0.1,
+    }) == "partially_filled"

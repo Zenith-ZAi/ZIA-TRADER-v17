@@ -27,11 +27,11 @@ class Settings(BaseSettings):
     SHADOW_MODE_ENABLED: bool = os.getenv("SHADOW_MODE_ENABLED", "true").lower() == "true"
     LIVE_TRADING_ENABLED: bool = os.getenv("LIVE_TRADING_ENABLED", "false").lower() == "true"
     LIVE_MODE: bool = os.getenv("LIVE_MODE", "false").lower() == "true"
-    LIVE_KILL_SWITCH: bool = os.getenv("LIVE_KILL_SWITCH", "false").lower() == "true"
+    LIVE_KILL_SWITCH: bool = os.getenv("LIVE_KILL_SWITCH", "true").lower() == "true"
     NEURAL_MODELS_ENABLED: bool = os.getenv("NEURAL_MODELS_ENABLED", "false").lower() == "true"
-    DEMO_AUTH_ENABLED: bool = os.getenv("DEMO_AUTH_ENABLED", "true").lower() == "true"
-    DEMO_USER_PASSWORD: str = os.getenv("DEMO_USER_PASSWORD", "password")
-    DEMO_ADMIN_PASSWORD: str = os.getenv("DEMO_ADMIN_PASSWORD", "admin")
+    DEMO_AUTH_ENABLED: bool = os.getenv("DEMO_AUTH_ENABLED", "false").lower() == "true"
+    DEMO_USER_PASSWORD: str = os.getenv("DEMO_USER_PASSWORD", "")
+    DEMO_ADMIN_PASSWORD: str = os.getenv("DEMO_ADMIN_PASSWORD", "")
     AUTH_MODE: str = os.getenv("AUTH_MODE", "demo")
     AUTH_USERNAME: str = os.getenv("AUTH_USERNAME", "")
     AUTH_PASSWORD: str = os.getenv("AUTH_PASSWORD", "")

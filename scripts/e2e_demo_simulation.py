@@ -161,8 +161,9 @@ async def run_simulation(total_orders: int, seed: int, database_url: str) -> dic
 
     reconciliation = await reconciler.reconcile()
     consistent = not reconciliation.get("untracked_remote_client_order_ids")
+    healthy = consistent and reconciliation.get("status") == "ok"
     return {
-        "status": "passed" if consistent else "attention",
+        "status": "passed" if healthy else "attention",
         "orders_requested": int(total_orders),
         "unique_client_order_ids": len(broker.orders),
         "result_counts": dict(results),
@@ -174,7 +175,13 @@ async def run_simulation(total_orders: int, seed: int, database_url: str) -> dic
         "native_oco_protections": native_protection_count,
         "reconciliation": reconciliation,
         "consistent": consistent,
-        "live_trading_enabled": False,
+        "engine_preflight": "ready" if healthy else "blocked",
+        "live_trading_enabled": bool(
+            settings.LIVE_TRADING_ENABLED
+            or settings.LIVE_MODE
+            or settings.AUTONOMOUS_TRADING_ENABLED
+        ),
+        "live_mode": bool(settings.LIVE_MODE),
         "orders_sent_to_real_broker": 0,
     }
 

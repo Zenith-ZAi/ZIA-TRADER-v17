@@ -103,7 +103,7 @@ class OrderReconciler:
 
     @staticmethod
     def _remote_status(remote: Dict[str, Any]) -> str:
-        status = str(remote.get("status") or remote.get("exchange_status") or "").strip().lower()
+        status = str(remote.get("exchange_status") or remote.get("status") or "").strip().lower()
         aliases = {
             "new": "open",
             "pending_new": "pending",
@@ -111,11 +111,30 @@ class OrderReconciler:
             "partially-filled": "partially_filled",
             "partiallyfilled": "partially_filled",
             "cancelled": "canceled",
+            "expired_in_match": "expired",
         }
-        if status == "success":
-            filled = float(remote.get("filled_quantity") or remote.get("executed_qty") or 0.0)
-            return "filled" if filled > 0 else "open"
         normalized = aliases.get(status, status)
+        raw = remote.get("raw") if isinstance(remote.get("raw"), dict) else {}
+        try:
+            filled = float(remote.get("filled_quantity") or remote.get("executed_qty") or 0.0)
+        except (TypeError, ValueError):
+            return "unknown"
+        requested_value = remote.get("requested_quantity") or remote.get("quantity") or raw.get("origQty") or raw.get("orig_qty")
+        try:
+            requested = float(requested_value) if requested_value is not None else 0.0
+        except (TypeError, ValueError):
+            requested = 0.0
+        tolerance = max(abs(requested) * 1e-9, 1e-12)
+        if normalized in {"success", "filled"}:
+            if filled <= 0:
+                return "open" if normalized == "success" else "unknown"
+            if requested > 0 and filled + tolerance < requested:
+                return "partially_filled"
+            return "filled"
+        if normalized in {"canceled", "expired", "rejected"} and filled > 0:
+            if requested > 0 and filled + tolerance >= requested:
+                return "filled"
+            return "partially_filled"
         known_statuses = {"submitted", "pending", "open", "partially_filled", "filled", *OrderReconciler.TERMINAL_STATUSES}
         return normalized if normalized in known_statuses else "unknown"
 
@@ -165,8 +184,15 @@ class OrderReconciler:
                     "intent": existing,
                 }
             return {**remote, "status": "idempotent_recovered", "client_order_id": client_id, "intent": intent}
-        if existing_status in {"filled", *self.TERMINAL_STATUSES}:
+        if existing_status == "filled":
             return {"status": "idempotent_reuse", "client_order_id": client_id, "intent": existing}
+        if existing_status in self.TERMINAL_STATUSES:
+            return {
+                "status": existing_status,
+                "client_order_id": client_id,
+                "reason": "intenção terminal sem fill confirmado; reenvio bloqueado",
+                "intent": existing,
+            }
 
         last_error = "falha desconhecida"
         for attempt in range(1, self.max_attempts + 1):
@@ -175,17 +201,72 @@ class OrderReconciler:
                 result = await send({**prepared, "client_order_id": client_id})
                 result = dict(result or {})
                 status = str(result.get("status", "error")).lower()
-                if status in {"success", "filled", "partially_filled", "pending", "open"}:
+                if status in {"success", "filled", "partially_filled", "pending", "open", "canceled", "cancelled", "rejected", "expired", "failed"}:
                     exchange_id = result.get("order_id") or result.get("exchange_order_id")
+                    intent_status = status
+                    returned_status = status
+                    if status == "success":
+                        try:
+                            filled = float(result.get("filled_quantity") or result.get("executed_qty") or 0.0)
+                            requested = float(order_data.get("quantity") or 0.0)
+                        except (TypeError, ValueError):
+                            filled = requested = 0.0
+                        tolerance = max(abs(requested) * 1e-9, 1e-12)
+                        if filled <= 0:
+                            intent_status = returned_status = "pending"
+                        elif requested > 0 and filled + tolerance < requested:
+                            intent_status = returned_status = "partially_filled"
+                        else:
+                            intent_status = "filled"
+                    elif status == "filled":
+                        try:
+                            filled = float(result.get("filled_quantity") or result.get("executed_qty") or 0.0)
+                            requested = float(order_data.get("quantity") or 0.0)
+                        except (TypeError, ValueError):
+                            filled = requested = 0.0
+                        tolerance = max(abs(requested) * 1e-9, 1e-12)
+                        if filled <= 0:
+                            intent_status = returned_status = "pending"
+                        elif requested > 0 and filled + tolerance < requested:
+                            intent_status = returned_status = "partially_filled"
+                    elif status in {"canceled", "cancelled", "rejected", "expired", "failed"}:
+                        try:
+                            filled = float(result.get("filled_quantity") or result.get("executed_qty") or 0.0)
+                        except (TypeError, ValueError):
+                            filled = 0.0
+                        if filled > 0:
+                            intent_status = returned_status = "partially_filled"
                     intent = self.db_manager.update_order_intent(
                         client_id,
-                        status="filled" if status == "success" and result.get("filled_quantity") else status,
+                        status=intent_status,
                         exchange_order_id=str(exchange_id) if exchange_id is not None else None,
                         attempts=attempt,
                         payload_json=result,
                     )
-                    await self._cache_intent(intent or {"client_order_id": client_id, "status": status, **result})
-                    return {**result, "client_order_id": client_id, "intent": intent}
+                    await self._cache_intent(intent or {"client_order_id": client_id, "status": intent_status, **result})
+                    return {**result, "status": returned_status, "client_order_id": client_id, "intent": intent}
+                if status == "unknown":
+                    remote = await self._remote_intent(client_id, str(prepared.get("symbol") or ""))
+                    if remote is not None:
+                        intent = await self._persist_remote_intent(client_id, remote, attempt)
+                        if intent is not None:
+                            return {**remote, "status": "idempotent_recovered", "client_order_id": client_id, "intent": intent}
+                    last_error = str(result.get("reason") or "adapter retornou status desconhecido")
+                    intent = self.db_manager.update_order_intent(
+                        client_id,
+                        status="submitted",
+                        attempts=attempt,
+                        last_error=last_error,
+                        payload_json=result,
+                    )
+                    await self._cache_intent(intent or {"client_order_id": client_id, "status": "submitted", "last_error": last_error})
+                    return {
+                        "status": "recovery_pending",
+                        "client_order_id": client_id,
+                        "reason": "status do adapter desconhecido; retry suspenso até reconciliação idempotente",
+                        "attempts": attempt,
+                        "intent": intent,
+                    }
                 last_error = str(result.get("reason") or result.get("error") or "adapter rejeitou a ordem")
             except Exception as exc:
                 last_error = str(exc)
@@ -261,6 +342,7 @@ class OrderReconciler:
                 })
             open_statuses = {"reserved", "submitted", "pending", "open", "partially_filled"}
             local_intents = [item for item in local_intents if str(item.get("status") or "").lower() in open_statuses]
+            unresolved_intents = sorted(str(item.get("client_order_id")) for item in local_intents if item.get("client_order_id"))
             local_positions = self.db_manager.get_open_runtime_positions(self.account_id)
             remote_ids = {str(item.get("client_order_id")) for item in remote_orders if item.get("client_order_id")}
             local_ids = {str(item.get("client_order_id")) for item in local_intents if item.get("client_order_id")}
@@ -273,12 +355,14 @@ class OrderReconciler:
                 "local_intents_without_remote_order": sorted(local_ids - remote_ids),
                 "recovered_order_intents": recovered_intents,
                 "order_intents_recovery_pending": sorted(recovery_pending),
+                "unresolved_order_intents": unresolved_intents,
                 "local_positions": [self._position_dict(row) for row in local_positions],
             }
             status = "ok" if not (
                 payload["untracked_remote_client_order_ids"]
                 or payload["local_intents_without_remote_order"]
                 or payload["order_intents_recovery_pending"]
+                or payload["unresolved_order_intents"]
             ) else "attention"
             if status != "ok":
                 RECONCILIATION_DIVERGENCE.inc()
