@@ -171,3 +171,10 @@ A auditoria partiu de `master` SHA `cfcec0e3f62dfd82f4bbbb0301b3b1616f38c115`, j
 **Não resolvido:** auditoria 9.3 continua estática e sem medição; persistem acessos ORM síncronos em corrotinas. Não há ledgers verificáveis `equity_ledger_v1`/`closed_execution_ledger_v1`, dataset de mercado licenciado/hash/OOS ou modelo aprovado. Não houve VPS/staging, Docker Compose up, TLS/firewall, backup/restore, Demo/Testnet ou soak. Não foram acessadas credenciais de exchange, endpoint transacional, carteira ou capital; nenhuma ordem real foi enviada. Mantêm-se as flags reais e de autonomia desligadas.
 
 Relatório completo: `docs/reports/audit_2026-11-02.md`. Diagrama fonte/renderizado: `docs/reports/zia_logic_flow_2026-11-02.mmd` e `docs/reports/zia_logic_flow_2026-11-02.png`.
+
+
+## Fechamento e sincronização do PR #26 — 2026-11-02
+
+- PR #26 ([Fail closed on incomplete order fills and harden auth defaults](https://github.com/Zenith-ZAi/ZIA-TRADER-v17/pull/26)) foi squash-merged em 2026-11-02 18:09:03 UTC. Commit resultante: `4c260bf4c74227dbe5ad6e3825c57b3fd01262db`; `origin/master` foi sincronizado nesse SHA. O PR foi fechado como merged e não havia PR aberta no snapshot imediatamente posterior.
+- CI do PR: jobs obrigatórios `test` e `container` concluíram `SUCCESS`; CodeRabbit ficou `SKIPPED`. A suíte local da mesma revisão: 235 passed, 3 skipped, 1 warning; três skips locais dependem de PostgreSQL via `TEST_DATABASE_URL`.
+- O merge integra correções de fill/reconciliação, defaults seguros de autenticação/kill switch, regressões e a auditoria/diagrama de novembro. A integração e CI não fecham os blockers de ledger financeiro, dataset/OOS, persistência async 9.3 ou staging VPS. Todas as flags live e de autonomia permanecem desligadas.

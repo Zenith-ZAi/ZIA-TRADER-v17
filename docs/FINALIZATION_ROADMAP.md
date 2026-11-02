@@ -76,3 +76,8 @@ Validação local atual: **235 passed, 3 skipped, 1 warning**; `compileall`, `gi
 A atualização não conclui a Fase 9.3: permanecem 59 chamadas ORM síncronas reconhecíveis em corrotinas segundo o inventário estático anterior, sem benchmark de latência e sem migração aplicada. As Fases 8B (ledger), 8C (dataset/OOS), 8D (VPS staging), 9.4 (feed read-only homologado), 9.5 (Demo/Testnet) e 8F (soak/aceite) continuam abertas. Não recalcular a pontuação de prontidão sem fechar evidência operacional. `LIVE_TRADING_ENABLED=false` e todas as flags de autonomia/manual continuam OFF.
 
 Relatório e fluxo lógico: `docs/reports/audit_2026-11-02.md` e `docs/reports/zia_logic_flow_2026-11-02.mmd`.
+
+
+### Evidência de integração — PR #26 (2026-11-02)
+
+O PR #26 foi squash-merged após `test` e `container` passarem no CI; CodeRabbit foi `SKIPPED`. SHA de integração: `4c260bf4c74227dbe5ad6e3825c57b3fd01262db` (`master` sincronizado). A suíte local correspondente foi 235 passed, 3 skipped, 1 warning. Este é fechamento de código/documentação, não aceite de deployment: ledger 8B, dados/OOS 8C, persistência async 9.3, staging VPS 8D e soak continuam pendentes; trading live/autônomo permanece bloqueado.

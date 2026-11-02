@@ -57,3 +57,8 @@ A correção de execução impede que zero-fill ou fill parcial sejam registrado
 `pip-audit` não reportou vulnerabilidades conhecidas no venv auditado e o scanner AST heurístico não encontrou padrões suportados. Nenhum dos resultados substitui SAST/DAST, revisão humana, auditoria de imagem/SBOM/licenças ou teste de infraestrutura. O inventário de versões apontou 77 pacotes com versões mais novas; não foi feito upgrade global por incluir transições major/API. Docker, Compose e Podman continuaram indisponíveis; **não** houve `docker compose up`, teste de TLS/firewall, persistência PostgreSQL/Redis em VPS, backup/restore, restart, soak ou conexão a venue.
 
 O resultado permanece **NÃO APROVADO para deployment operacional ou negociação real/autônoma**. Bloqueadores: `equity_ledger_v1` e `closed_execution_ledger_v1`, dataset/licença/OOS, migração e métricas da persistência 9.3 e validação end-to-end em staging isolado. Relatório completo: `docs/reports/audit_2026-11-02.md`.
+
+
+## Evidência pós-merge — PR #26 (2026-11-02)
+
+O PR #26 foi integrado por squash em `4c260bf4c74227dbe5ad6e3825c57b3fd01262db`; CI `test` e `container` passaram, CodeRabbit foi pulado. Isso confirma a suíte automatizada e o smoke/build do workflow, mas não executa `docker compose up` no VPS do operador, TLS/firewall, persistência/restore, broker Demo/Testnet ou soak. Portanto o estado permanece **não aprovado para deployment operacional ou negociação live/autônoma**; os gates financeiros e de dados descritos acima continuam bloqueadores.
