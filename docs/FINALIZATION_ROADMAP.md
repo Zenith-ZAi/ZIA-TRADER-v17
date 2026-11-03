@@ -1,6 +1,6 @@
 # Plano de finalização — ZIA-TRADER v17, Fase 9 em andamento
 
-**Atualizado:** 2026-11-02. **Base auditada:** `master` pós-PR #25, SHA `cfcec0e3f62dfd82f4bbbb0301b3b1616f38c115`; este adendo registra a revisão na branch `fix/audit-nov-2026`. O objetivo segue sendo **pré-produção supervisionada em VPS**, não prometer capital real ou código sem defeitos.
+**Atualizado:** 2026-11-03. **Base desta subfase:** `master` pós-PR #27, SHA `c875adb6a94043bb314a250fc47e6fab51b81fc4`; implementação em `feat/market-intelligence-trend-alignment`. O objetivo segue sendo **pré-produção supervisionada em VPS**, não prometer capital real ou código sem defeitos.
 
 ## Onde estamos: pontuação de engenharia, não métrica estatística
 
@@ -81,3 +81,14 @@ Relatório e fluxo lógico: `docs/reports/audit_2026-11-02.md` e `docs/reports/z
 ### Evidência de integração — PR #26 (2026-11-02)
 
 O PR #26 foi squash-merged após `test` e `container` passarem no CI; CodeRabbit foi `SKIPPED`. SHA de integração: `4c260bf4c74227dbe5ad6e3825c57b3fd01262db` (`master` sincronizado). A suíte local correspondente foi 235 passed, 3 skipped, 1 warning. Este é fechamento de código/documentação, não aceite de deployment: ledger 8B, dados/OOS 8C, persistência async 9.3, staging VPS 8D e soak continuam pendentes; trading live/autônomo permanece bloqueado.
+
+
+## Expansão incremental de inteligência — Fase 10.1 (2026-11-03)
+
+Esta primeira subfase implementa somente um veto adicional de alinhamento de tendência, conforme a proposta `novahabilidades.txt`; não declara a nova capacidade de inteligência de mercado completa. O `TrendAlignmentFilter` reutiliza o `MarketRegimeDetector`, o detector causal de reversão, o fluxo de livro já disponível, a avaliação de microestrutura/custos e os gates existentes. Em tendência forte, uma entrada na mesma direção passa apenas por este filtro; uma entrada oposta exige reversão detectada `from`/`to`, confiança mínima nunca inferior a 0,70, order flow completo e concordante, microestrutura aprovada e circuito de risco não disparado. Regime `high_volatility`, `unknown`, `uncertain`, `news_shock` e `liquidity_crisis` bloqueiam novas entradas. Falha gera `HOLD`/confiança zero no engine; `OrderManager` rejeita ordens IA sem validação explícita do gate. Esse resultado não substitui autorização final, ledger, reconciliação ou RiskAI.
+
+Não foram alterados pesos de modelos, fórmulas, sizing, critérios existentes de risco, dependências, credenciais ou flags. Não se envia ordem pela nova camada; entradas reais/autônomas continuam desativadas. Validação local final: **246 passed, 3 skipped, 1 warning**; `compileall`, `uv pip check` e `git diff --check` passaram; a triagem AST não detectou padrões suportados. O diagrama foi renderizado e inspecionado. CI e integração ainda dependem do PR desta branch.
+
+Conectores e coleta: o agente desta sessão tem acesso ao MCP CoinGecko e Supabase; Alpha Vantage aparece configurado, mas sua descoberta de ferramentas falhou por autenticação nesta sessão. Isso não expõe MCP ao processo Python. A aplicação já possui RSS/GDELT, CoinGecko Trending e provedores opcionais por API key; `scripts/ingest_news.py` é um CLI de execução pontual que persiste artigos/tendências quando invocado; o collector VPS do Binance público grava snapshots em arquivos a cada 60 s quando o profile `collector` é ativado. ScheduleTask/Triggers do Manus não foram criados e não gravam por si só no Postgres do Trader. Para alimentação recorrente do banco, a rota adequada é um worker/CLI próprio, com credenciais de leitura mínimas armazenadas como secrets do deployment, validação de origem/timestamp/licença, deduplicação/idempotência e persistência auditável. Ver relatório `docs/reports/phase10.1_market_intelligence_trend_alignment_2026-11-03.md` e fontes `docs/reports/market_intelligence_source_notes_2026-11-02.md`.
+
+Permanecem para etapas futuras: `NewsIntelligenceEngine`/`EventImpactAnalyzer` com novidade, confiabilidade/proveniência, impacto de evento e surprise; validação licenciada e OOS; indicadores adicionais de fluxo como volume agressor/CVD/open interest; estratégias adaptativas e avaliação de risco/execução sem duplicar os componentes atuais; replay histórico, integração e stress. Nenhuma destas funções foi marcada como concluída nesta subfase.

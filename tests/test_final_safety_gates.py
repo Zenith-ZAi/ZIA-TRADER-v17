@@ -231,6 +231,24 @@ def test_autonomous_order_requires_internal_validated_signal(tmp_path):
     assert exchange.orders == []
 
 
+def test_autonomous_order_requires_trend_alignment_gate(tmp_path):
+    _, _, exchange, manager = make_order_manager(tmp_path)
+    order = {
+        "symbol": "BTC/USDT",
+        "action": "buy",
+        "quantity": 0.01,
+        "price": 100.0,
+        "confidence": 0.95,
+        "signal_validated": True,
+    }
+
+    result = asyncio.run(manager.submit(order, source="ai"))
+
+    assert result["status"] == "rejected"
+    assert "TrendAlignmentFilter" in result["reason"]
+    assert exchange.orders == []
+
+
 def test_autonomous_order_uses_reconciliation_gate_and_shared_executor(tmp_path):
     _, _, exchange, manager = make_order_manager(tmp_path)
     exchange.open_orders = [{"client_order_id": "untracked-order", "order_id": "remote-1"}]
@@ -243,7 +261,9 @@ def test_autonomous_order_uses_reconciliation_gate_and_shared_executor(tmp_path)
         "signal_validated": True,
     }
 
-    result = asyncio.run(manager.submit(order, source="ai"))
+    result = asyncio.run(
+        manager.submit(order, source="ai", market_context={"trend_alignment": {"passed": True}})
+    )
 
     assert result["status"] == "rejected"
     assert "reconciliação" in result["reason"]
@@ -283,7 +303,9 @@ def test_authorized_autonomous_entry_and_exit_are_centralized(tmp_path):
         "confidence": 0.95,
         "signal_validated": True,
     }
-    entered = asyncio.run(manager.submit(order, source="ai"))
+    entered = asyncio.run(
+        manager.submit(order, source="ai", market_context={"trend_alignment": {"passed": True}})
+    )
     assert entered["status"] == "success"
     assert len(exchange.orders) == 1
     assert len(db.get_open_runtime_positions("default_account")) == 1

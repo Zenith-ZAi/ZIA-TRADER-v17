@@ -37,6 +37,7 @@ from execution.cost_aware_executor import CostAwareExecutor
 from core.pre_market_gate import PreMarketGate
 from core.data_feeds import FeedUnavailable, MultiTimeframeFeed
 from core.regime_detector import MarketRegimeDetector
+from core.trend_alignment import TrendAlignmentFilter
 from core.model_voting import aggregate_model_votes
 from learning.model_registry import ModelRegistryStore
 from core.dataset_integrity import sha256_file
@@ -87,6 +88,9 @@ class RoboTraderUnified:
         self.pre_market_gate = PreMarketGate(self.settings)
         self.data_feed = MultiTimeframeFeed(self.exchange_connector, self.news_processor, self.settings)
         self.regime_detector = MarketRegimeDetector(lookback=20)
+        self.trend_alignment_filter = TrendAlignmentFilter(
+            min_reversal_confidence=max(0.70, float(self.settings.MIN_CONFIDENCE_THRESHOLD))
+        )
         
         # Inicialização de modelos com tratamento de erro
         try:
@@ -518,6 +522,25 @@ class RoboTraderUnified:
                         microstructure["allowed"] = False
                         microstructure["reasons"].append(cost_estimate["reason"])
                     microstructure["cost_aware"] = cost_estimate
+                    trend_alignment = self.trend_alignment_filter.evaluate(
+                        candidate_action=analysis["prediction"],
+                        regime_info=regime_info,
+                        reversal_signal=reversal_signal,
+                        order_flow=snapshot.order_flow,
+                        microstructure_allowed=bool(microstructure.get("allowed")),
+                        risk_allowed=not bool(circuit_breaker.get("tripped", True)),
+                    )
+                    if analysis["prediction"] in {"buy", "sell"} and not trend_alignment["passed"]:
+                        final_action = "hold"
+                        final_confidence = 0.0
+                        final_prediction = {"prediction": "hold", "confidence": 0.0}
+                        analysis = {**analysis, **final_prediction}
+                        AI_PREDICTION_CONFIDENCE.set(0.0)
+                        logger.warning(
+                            "[%s] Entrada bloqueada pelo TrendAlignmentFilter: %s",
+                            symbol,
+                            "; ".join(trend_alignment["reasons"]),
+                        )
                     live_position = await self.redis_cache.get_state(f"position_{symbol}")
                     exit_decision = evaluate_position_exit(
                         live_position,
@@ -551,6 +574,7 @@ class RoboTraderUnified:
                         "news_gate": news_gate,
                         "multi_timeframe": multi_timeframe,
                         "microstructure": microstructure,
+                        "trend_alignment": trend_alignment,
                         "volume_analysis": volume_analysis,
                         "pre_market_gate": pre_market,
                         "order_flow": snapshot.order_flow,
@@ -596,6 +620,7 @@ class RoboTraderUnified:
                                 "event_guard": event_status,
                                 "news_gate": news_gate,
                                 "multi_timeframe": multi_timeframe,
+                                "trend_alignment": trend_alignment,
                                 "circuit_breaker": circuit_breaker,
                                 "microstructure": microstructure,
                                 "emergency_exit": emergency_exit,
@@ -624,6 +649,7 @@ class RoboTraderUnified:
                             "event_guard": event_status,
                             "news_gate": news_gate,
                             "multi_timeframe": multi_timeframe,
+                            "trend_alignment": trend_alignment,
                             "circuit_breaker": circuit_breaker,
                             "microstructure": microstructure,
                             "emergency_exit": emergency_exit,
@@ -673,6 +699,7 @@ class RoboTraderUnified:
                         and news_gate["entry_allowed"]
                         and multi_timeframe_ok
                         and microstructure["allowed"]
+                        and trend_alignment["passed"]
                     )
                     if analysis["prediction"] != "hold" and self.settings.AUTONOMOUS_TRADING_ENABLED and entry_allowed and spot_direction_allowed and safety_entry_allowed:
                         order_data = {

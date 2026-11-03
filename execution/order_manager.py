@@ -156,6 +156,14 @@ class OrderManager:
         signal_validated = normalized.pop("signal_validated", False)
         if source == "ai" and signal_validated is not True:
             return {"status": "rejected", "source": source, "reason": "decisão de IA sem autorização de sinal validada pelo motor"}
+        if source == "ai":
+            trend_alignment = (market_context or {}).get("trend_alignment")
+            if not isinstance(trend_alignment, dict) or trend_alignment.get("passed") is not True:
+                return {
+                    "status": "rejected",
+                    "source": source,
+                    "reason": "TrendAlignmentFilter ausente ou reprovado; entrada IA bloqueada",
+                }
         if not normalized.get("price"):
             try:
                 market = await self.market_connector.get_market_data(normalized["symbol"])
