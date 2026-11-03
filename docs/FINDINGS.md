@@ -1,6 +1,6 @@
 # Findings — ZIA-TRADER v17
 
-Atualizado em 2026-11-02 na branch `fix/audit-nov-2026`; as evidências de CI anteriores permanecem datadas em suas entradas. Este registro contém gaps verificados, correções por fase e limitações ainda abertas. Não é uma declaração de ausência de outros defeitos.
+Atualizado em 2026-11-03 na branch `feat/market-intelligence-trend-alignment`, baseada no `master` pós-PR #27 (`c875adb6a94043bb314a250fc47e6fab51b81fc4`); as evidências de CI anteriores permanecem datadas em suas entradas. Este registro contém gaps verificados, correções por fase e limitações ainda abertas. Não é uma declaração de ausência de outros defeitos.
 
 | Arquivo/linha | Evidência observada | Correção sugerida (aguarda revisão/aprovação) |
 | --- | --- | --- |
@@ -178,3 +178,18 @@ Relatório completo: `docs/reports/audit_2026-11-02.md`. Diagrama fonte/renderiz
 - PR #26 ([Fail closed on incomplete order fills and harden auth defaults](https://github.com/Zenith-ZAi/ZIA-TRADER-v17/pull/26)) foi squash-merged em 2026-11-02 18:09:03 UTC. Commit resultante: `4c260bf4c74227dbe5ad6e3825c57b3fd01262db`; `origin/master` foi sincronizado nesse SHA. O PR foi fechado como merged e não havia PR aberta no snapshot imediatamente posterior.
 - CI do PR: jobs obrigatórios `test` e `container` concluíram `SUCCESS`; CodeRabbit ficou `SKIPPED`. A suíte local da mesma revisão: 235 passed, 3 skipped, 1 warning; três skips locais dependem de PostgreSQL via `TEST_DATABASE_URL`.
 - O merge integra correções de fill/reconciliação, defaults seguros de autenticação/kill switch, regressões e a auditoria/diagrama de novembro. A integração e CI não fecham os blockers de ledger financeiro, dataset/OOS, persistência async 9.3 ou staging VPS. Todas as flags live e de autonomia permanecem desligadas.
+
+
+## Fase 10.1 — veto independente de alinhamento de tendência (2026-11-03)
+
+A leitura do repositório e do anexo identificou que já existem processamento de RSS/GDELT e provedores opcionais, detector de regime, sinais técnicos/reversão, análise de imbalance de livro, estimativa de spread/slippage/custo, `RiskAI` e `OrderManager`. A lacuna escolhida para o primeiro incremento foi um veto explícito contra entradas desalinhadas com tendência forte, sem duplicar esses módulos.
+
+Foi criado `core/trend_alignment.py`. `RoboTraderUnified` avalia o candidato depois dos gates de microestrutura/custo e antes da submissão; regime incerto/desconhecido ou alta volatilidade causa veto; reversão contra tendência requer sinal `from`/`to`, confiança mínima de 0,70, fluxo completo na mesma direção, microestrutura liberada e circuito de risco não disparado. Um veto converte candidato em `HOLD` com confiança zero e grava o diagnóstico no contexto, observação shadow e snapshot. `OrderManager.submit(source="ai")` também rejeita a entrada se o contexto não trouxer `trend_alignment.passed is True`; `submit_exit` segue independente para não impedir fechamentos.
+
+Regressões em `tests/test_trend_alignment.py` e `tests/test_final_safety_gates.py` verificam alinhamento, reversão, falta de fluxo/confiança, microestrutura/risco reprovados, regimes bloqueados, valores não finitos e tentativa de bypass do OrderManager. Suíte integral local final: **246 passed, 3 skipped, 1 warning**. Os três skips requerem PostgreSQL por `TEST_DATABASE_URL`; o warning é `PendingDeprecationWarning` do parser de formulários Starlette. `compileall`, scanner AST heurístico, `uv pip check` (117 pacotes), `git diff --check` e renderização do diagrama passaram. O scanner não substitui SAST/DAST. CI remoto fica pendente até execução do PR.
+
+Nenhum peso de modelo, regra existente de sizing, fórmula de sinal, chave, dependência, ordem ou flag real foi alterado/ativado. Não há evidência que identifique participantes institucionais: o fluxo reutilizado é proxy do livro público, não atribuição de identidade.
+
+Conectores: MCP CoinGecko e Supabase estão disponíveis ao agente da sessão. A ferramenta MCP Alpha Vantage falha na inicialização de autenticação no snapshot consultado; não se devem copiar tokens de erro para o código. As chaves diretas Alpha Vantage/CoinGecko/Finnhub/Marketaux não estão no ambiente corrente. O runtime Python só pode usar provedores por conectores HTTP/API configurados nele; credenciais MCP não são herdadas automaticamente. O collector VPS do Binance público grava snapshots em arquivo no volume, não os insere no banco. Nenhum ScheduleTask/Trigger foi criado. Fontes e caveats: `docs/reports/market_intelligence_source_notes_2026-11-02.md`.
+
+Limites: a camada de inteligência do anexo ainda não está completa. Faltam proveniência/licença de dataset, OOS, novidade/deduplicação robusta de notícias e event surprise, validação cruzada de eventos, novos sinais de fluxo com fontes verificadas e stress/replay Demo. Fases 8B/8C/8D/9.3+ permanecem abertas; live e autonomia continuam OFF.
