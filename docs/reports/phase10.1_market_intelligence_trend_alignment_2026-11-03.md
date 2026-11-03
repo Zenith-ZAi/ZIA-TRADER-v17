@@ -37,7 +37,7 @@ As capacidades e limitações de APIs estão registradas em [fontes consultadas]
 - Primeira rodada focada após integração: `test_trend_alignment.py` e `test_final_safety_gates.py`: **18 passed, 1 warning**. Esse resultado antecede o teste adicional que fixa o limite mínimo de 0,70.
 - Suíte integral final após o novo teste de payload inválido: **246 passed, 3 skipped, 1 warning**. Os skips são `test_database_migrations.py`, `test_model_registry.py` e `test_postgres_backup_restore.py`, todos exigindo `TEST_DATABASE_URL`; o warning é `PendingDeprecationWarning` de Starlette relacionado a `python_multipart`.
 - `compileall`, scanner AST integrado (nenhum padrão suportado detectado), `uv pip check` (117 pacotes compatíveis) e `git diff --check` passaram. Scanner AST é apenas triagem, não SAST/DAST.
-- O diagrama Mermaid atualizado foi renderizado para PNG **3120 × 7616** e inspecionado; o gate aparece antes de risco/submissão. CI remoto e integração ainda dependem do PR.
+- O diagrama Mermaid atualizado foi renderizado para PNG **3120 × 7616** e inspecionado; o gate aparece antes de risco/submissão. PR [#28](https://github.com/Zenith-ZAi/ZIA-TRADER-v17/pull/28) squash-merged em 2026-11-03; checks `test` e `container` em `SUCCESS`, CodeRabbit `SKIPPED`. SHA sincronizado de `master`: `60e92a551f08dca6034ebb48059d7b2418186402`.
 - Configuração efetiva verificada via `Settings(_env_file=None)`: `LIVE_TRADING_ENABLED=false`, `LIVE_MODE=false`, `LIVE_KILL_SWITCH=true`, flags de autonomia/manual/autostart/neural e Ensemble de backtest `false`; shadow `true`. Nenhuma chave de provedor está presente no ambiente corrente.
 
 ## Limites remanescentes
