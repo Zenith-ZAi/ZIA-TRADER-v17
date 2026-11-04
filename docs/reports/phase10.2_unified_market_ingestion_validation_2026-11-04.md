@@ -18,6 +18,8 @@ Também foram detectados dois heads Alembic: `b7d2d043ee8a` e `4f9a2c7d1b63`. A 
 
 O teste de downgrade antigo pressupunha reversão mesmo após inserir candles do mesmo instante para provedores diferentes. A migration já bloqueava essa reversão para não perder a identidade de origem. O teste foi corrigido para verificar primeiro esse bloqueio de segurança; após apagar deliberadamente os fixtures, ele continua exercitando downgrade até `base` e upgrade novamente.
 
+O primeiro CI do PR encontrou uma ocorrência adicional da chave antiga em `tests/test_postgres_backup_restore.py`: o fixture de backup especificava `ON CONFLICT (symbol, timeframe, timestamp)`, que já não identifica a chave única depois da migração. O fixture foi atualizado para fornecer `source`, `asset_class` e `volume_status` e usar a chave composta nova. Os outros testes do CI passaram; a nova execução de CI ainda está pendente.
+
 ## Evidências de validação
 
 - Sincronização do ambiente de teste usando `requirements.lock` e backend CPU do PyTorch: 117 pacotes; `uv pip check` sem incompatibilidades.
