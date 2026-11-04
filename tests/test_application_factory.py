@@ -28,6 +28,7 @@ EXPECTED_ROUTES = {
     ("GET", "/dashboard/status"),
     ("GET", "/core/analyze"),
     ("POST", "/core/sync"),
+    ("POST", "/market-data/collect"),
     ("GET", "/api/optimize_sharpe"),
     ("POST", "/runtime/reload"),
     ("WEBSOCKET", "/ws/dashboard"),
@@ -269,3 +270,53 @@ def test_unsafe_production_configuration_fails_before_runtime_builder():
         with TestClient(app):
             pass
     assert builder_calls == []
+
+
+def test_market_data_collection_route_requires_admin():
+    app = create_app(Settings(MARKET_DATA_INGESTION_ENABLED=True))
+    response = TestClient(app).post(
+        "/market-data/collect",
+        json={"asset_class": "crypto", "symbols": ["BTC/USDT"], "providers": ["binance_public"]},
+    )
+    assert response.status_code == 401
+
+
+def test_market_data_collection_route_validates_payload_and_keeps_gate_fail_closed():
+    from api.dependencies import get_admin_user, get_app_settings, get_trading_manager
+
+    settings = Settings(MARKET_DATA_INGESTION_ENABLED=True)
+    received: list[dict[str, object]] = []
+
+    class FakeCommandManager:
+        async def collect_market_data(self, **request):
+            received.append(request)
+            return {"status": "attention", "orders_sent": 0}
+
+    manager = SimpleNamespace(command_manager=FakeCommandManager())
+    app = create_app(settings)
+    app.dependency_overrides[get_admin_user] = lambda: {"username": "admin", "roles": ["admin"]}
+    app.dependency_overrides[get_app_settings] = lambda: settings
+    app.dependency_overrides[get_trading_manager] = lambda: manager
+    client = TestClient(app)
+    payload = {
+        "asset_class": "crypto",
+        "symbols": ["btcusdt"],
+        "providers": ["binance_public"],
+        "timeframe": "1d",
+        "limit": 25,
+    }
+
+    response = client.post("/market-data/collect", json=payload)
+    assert response.status_code == 200
+    assert response.json()["orders_sent"] == 0
+    assert received == [{**payload, "symbols": ["btcusdt"], "dry_run": True}]
+
+    rejected = client.post("/market-data/collect", json={**payload, "api_key": "must-not-be-accepted"})
+    assert rejected.status_code == 422
+    assert len(received) == 1
+
+    settings.MARKET_DATA_INGESTION_ENABLED = False
+    disabled = client.post("/market-data/collect", json=payload)
+    assert disabled.status_code == 503
+    assert disabled.json()["detail"]["code"] == "market_data_ingestion_disabled"
+    assert len(received) == 1

@@ -6,10 +6,10 @@ import math
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict
 
-from database import Base, AccountState, Position, RuntimePositionState, DailyPNL, WeeklyPNL, MonthlyPNL, Drawdown, OrderHistory, ExecutionHistory, Trade, WhaleActivity, NewsArticle, TrendSnapshot, AIObservation, MarketPattern, SystemLog, OrderIntent, ReconciliationSnapshot, ProtectionOrder, KillSwitchEvent, BacktestRun, DecisionSnapshot, DataGap, OrderBookSnapshot, MarketType, OrderStatus, utc_now
+from database import Base, AccountState, Position, RuntimePositionState, DailyPNL, WeeklyPNL, MonthlyPNL, Drawdown, OrderHistory, ExecutionHistory, Trade, WhaleActivity, NewsArticle, TrendSnapshot, AIObservation, MarketPattern, SystemLog, OrderIntent, ReconciliationSnapshot, ProtectionOrder, KillSwitchEvent, BacktestRun, DecisionSnapshot, DataGap, OrderBookSnapshot, MarketCandle, MarketType, OrderStatus, utc_now
 
 class DatabaseManager:
     def __init__(self, database_url: str):
@@ -541,6 +541,67 @@ class DatabaseManager:
                 }
                 for row in rows
             ]
+        finally:
+            db.close()
+
+    def upsert_market_candles(self, candles: List[Dict[str, object]]) -> int:
+        """Persist normalized candles idempotently, isolated to this call's Session."""
+        if not candles:
+            return 0
+
+        rows = []
+        for item in candles:
+            timestamp = item.get("timestamp")
+            if isinstance(timestamp, str):
+                timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            if not isinstance(timestamp, datetime):
+                raise ValueError("candle timestamp must be a datetime or ISO-8601 string")
+            timestamp = timestamp.replace(tzinfo=timezone.utc) if timestamp.tzinfo is None else timestamp.astimezone(timezone.utc)
+            row = {
+                "source": str(item["source"]).strip().lower(),
+                "asset_class": str(item["asset_class"]).strip().lower(),
+                "symbol": str(item["symbol"]).strip().upper(),
+                "timeframe": str(item["timeframe"]).strip().lower(),
+                "timestamp": timestamp.replace(tzinfo=None),
+                "open": float(item["open"]),
+                "high": float(item["high"]),
+                "low": float(item["low"]),
+                "close": float(item["close"]),
+                "volume": float(item["volume"]),
+                "volume_status": str(item.get("volume_status", "reported")),
+                "created_at": utc_now(),
+            }
+            if not row["source"] or not row["asset_class"] or not row["symbol"] or not row["timeframe"]:
+                raise ValueError("candle source, asset_class, symbol and timeframe are required")
+            if any(not math.isfinite(row[key]) for key in ("open", "high", "low", "close", "volume")):
+                raise ValueError("candle values must be finite")
+            if min(row["open"], row["high"], row["low"], row["close"]) <= 0 or row["volume"] < 0:
+                raise ValueError("candle prices must be positive and volume non-negative")
+            if row["low"] > min(row["open"], row["close"]) or row["high"] < max(row["open"], row["close"]) or row["low"] > row["high"]:
+                raise ValueError("candle OHLC bounds are inconsistent")
+            rows.append(row)
+
+        if self.engine.dialect.name == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert as dialect_insert
+        elif self.engine.dialect.name == "sqlite":
+            from sqlalchemy.dialects.sqlite import insert as dialect_insert
+        else:
+            raise RuntimeError(f"Unsupported candle upsert dialect: {self.engine.dialect.name}")
+
+        key_columns = [MarketCandle.source, MarketCandle.asset_class, MarketCandle.symbol, MarketCandle.timeframe, MarketCandle.timestamp]
+        mutable_columns = ("open", "high", "low", "close", "volume", "volume_status")
+        db = self.SessionLocal()
+        try:
+            for offset in range(0, len(rows), 50):
+                chunk = rows[offset : offset + 50]
+                statement = dialect_insert(MarketCandle).values(chunk)
+                updates = {name: getattr(statement.excluded, name) for name in mutable_columns}
+                db.execute(statement.on_conflict_do_update(index_elements=key_columns, set_=updates))
+            db.commit()
+            return len(rows)
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
 

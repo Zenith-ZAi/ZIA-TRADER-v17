@@ -145,6 +145,9 @@ class Settings(BaseSettings):
     MARKET_ADAPTER: str = os.getenv("MARKET_ADAPTER", "binance")
     MARKET_TYPE: str = os.getenv("MARKET_TYPE", "spot")
     CCXT_EXCHANGE_ID: str = os.getenv("CCXT_EXCHANGE_ID", "binance")
+    MARKET_DATA_INGESTION_ENABLED: bool = os.getenv("MARKET_DATA_INGESTION_ENABLED", "false").lower() == "true"
+    MARKET_DATA_BINANCE_PUBLIC_ENABLED: bool = os.getenv("MARKET_DATA_BINANCE_PUBLIC_ENABLED", "false").lower() == "true"
+    MARKET_DATA_ALPHA_VANTAGE_ENABLED: bool = os.getenv("MARKET_DATA_ALPHA_VANTAGE_ENABLED", "false").lower() == "true"
     YAHOO_FINANCE_BASE_URL: str = os.getenv("YAHOO_FINANCE_BASE_URL", "https://query1.finance.yahoo.com/v8/finance/chart")
     FOREX_MODE: str = os.getenv("FOREX_MODE", "paper")
     FOREX_PAPER_SPREAD: float = float(os.getenv("FOREX_PAPER_SPREAD", "0.0001"))

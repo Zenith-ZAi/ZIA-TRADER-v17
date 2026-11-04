@@ -3,14 +3,37 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Body, Depends, HTTPException
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from api.dependencies import get_app_settings, get_trader_user, get_trading_manager
+from api.dependencies import get_admin_user, get_app_settings, get_trader_user, get_trading_manager
+from core.market_data_collector import MarketDataCollectionError, ProviderCollectionError
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+class MarketDataCollectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    asset_class: Literal["crypto", "equity", "forex"]
+    symbols: list[str] = Field(min_length=1, max_length=10)
+    providers: list[Literal["binance_public", "alpha_vantage", "coingecko", "yahoo_chart"]] = Field(
+        min_length=1, max_length=3
+    )
+    timeframe: str = Field(default="1d", pattern="^(1m|5m|15m|30m|1h|4h|1d)$")
+    limit: int = Field(default=100, ge=1, le=1000)
+    dry_run: bool = True
+
+    @field_validator("symbols")
+    @classmethod
+    def symbols_must_be_nonblank(cls, value: list[str]) -> list[str]:
+        normalized = [symbol.strip() for symbol in value]
+        if any(not symbol for symbol in normalized):
+            raise ValueError("symbols cannot contain blank values")
+        return normalized
 
 
 @router.get("/market")
@@ -64,6 +87,28 @@ async def sync_core_data(
     except Exception as exc:
         logger.warning("Falha na sincronização do core: %s", exc)
         raise HTTPException(status_code=503, detail="sincronização indisponível no momento") from exc
+
+
+@router.post("/market-data/collect")
+async def collect_market_data(
+    request: MarketDataCollectionRequest,
+    current_user: dict[str, Any] = Depends(get_admin_user),
+    manager: Any = Depends(get_trading_manager),
+    settings: Any = Depends(get_app_settings),
+) -> dict[str, Any]:
+    """Collect licensed/read-only OHLCV sources; never updates the live trading feed."""
+    if not settings.MARKET_DATA_INGESTION_ENABLED:
+        raise HTTPException(status_code=503, detail={"code": "market_data_ingestion_disabled"})
+    try:
+        return await manager.command_manager.collect_market_data(**request.model_dump())
+    except MarketDataCollectionError as exc:
+        raise HTTPException(status_code=400, detail={"code": str(exc)}) from exc
+    except ProviderCollectionError as exc:
+        raise HTTPException(status_code=503, detail={"code": exc.code}) from exc
+    except Exception as exc:
+        # Do not log arbitrary provider exceptions: query URLs can contain API keys.
+        logger.error("Market-data collection failed (%s)", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="coleta indisponível no momento") from exc
 
 
 @router.get("/api/optimize_sharpe")
