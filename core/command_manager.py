@@ -10,6 +10,7 @@ import pandas as pd
 from config.settings import Settings
 from core.data_feeds import MultiTimeframeFeed
 from core.learning_layer import SignalLearningLayer
+from core.market_data_collector import UnifiedMarketDataCollector
 from core.market_signals import calculate_market_signal
 
 
@@ -69,6 +70,14 @@ class CoreCommandManager:
             "snapshots": [snapshot.to_dict() for snapshot in result["snapshots"]],
             "successful": len(result["snapshots"]),
         }
+
+    async def collect_market_data(self, **request: Any) -> dict[str, Any]:
+        """Collect and optionally persist vendor candles outside the trading feed."""
+        collector = UnifiedMarketDataCollector(self.settings, self.db_manager)
+        try:
+            return await collector.collect(**request)
+        finally:
+            await collector.aclose()
 
     async def analyze_symbol(
         self,

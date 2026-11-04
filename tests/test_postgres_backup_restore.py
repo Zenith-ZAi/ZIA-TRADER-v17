@@ -58,10 +58,17 @@ def test_pg_dump_restore_matches_table_counts_and_checksums(tmp_path: Path):
             with connection.cursor() as cursor:
                 cursor.execute(
                     "INSERT INTO market_candles "
-                    "(symbol, timeframe, timestamp, open, high, low, close, volume, source, created_at) "
-                    "VALUES (%s, %s, %s, 1, 2, 0.5, 1.5, 10, 'backup-test', %s) "
-                    "ON CONFLICT (symbol, timeframe, timestamp) DO NOTHING",
-                    ("BACKUP-TEST", "1m", "2026-10-04 00:00:00", "2026-10-04 00:00:00"),
+                    "(source, asset_class, symbol, timeframe, timestamp, open, high, low, close, volume, volume_status, created_at) "
+                    "VALUES (%s, %s, %s, %s, %s, 1, 2, 0.5, 1.5, 10, 'reported', %s) "
+                    "ON CONFLICT (source, asset_class, symbol, timeframe, timestamp) DO NOTHING",
+                    (
+                        "backup-test",
+                        "crypto",
+                        "BACKUP-TEST",
+                        "1m",
+                        "2026-10-04 00:00:00",
+                        "2026-10-04 00:00:00",
+                    ),
                 )
 
         subprocess.run(

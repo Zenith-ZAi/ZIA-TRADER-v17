@@ -357,7 +357,7 @@ class DecisionSnapshot(Base):
 
 
 class MarketCandle(Base):
-    """Candle OHLCV imutável; a chave composta impede duplicatas por origem temporal."""
+    """OHLCV keyed by provider and market identity; reimports are idempotent."""
     __tablename__ = "market_candles"
     __table_args__ = (
         Index("ix_market_candles_symbol_timeframe_timestamp", "symbol", "timeframe", "timestamp"),
@@ -365,12 +365,14 @@ class MarketCandle(Base):
     symbol = Column(String(64), primary_key=True, nullable=False)
     timeframe = Column(String(16), primary_key=True, nullable=False)
     timestamp = Column(DateTime, primary_key=True, nullable=False)
+    source = Column(String(64), primary_key=True, nullable=False, default="unknown")
+    asset_class = Column(String(16), primary_key=True, nullable=False, default="unknown", server_default="unknown")
     open = Column(Float, nullable=False)
     high = Column(Float, nullable=False)
     low = Column(Float, nullable=False)
     close = Column(Float, nullable=False)
     volume = Column(Float, nullable=False)
-    source = Column(String(64), nullable=False, default="unknown")
+    volume_status = Column(String(24), nullable=False, default="reported", server_default="reported")
     created_at = Column(DateTime, nullable=False, default=utc_now)
 
 

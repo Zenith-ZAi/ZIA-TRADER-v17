@@ -34,22 +34,28 @@ def _exercise_migrations(database_url: str, monkeypatch) -> None:
         assert "ix_decision_snapshots_symbol_timeframe_observed_at" in {
             index["name"] for index in inspector.get_indexes("decision_snapshots")
         }
-        assert {"symbol", "timeframe", "timestamp"} == set(
+        assert {"symbol", "timeframe", "timestamp", "source", "asset_class"} == set(
             inspector.get_pk_constraint("market_candles")["constrained_columns"]
         )
         candle = (
             "INSERT INTO market_candles "
-            "(symbol, timeframe, timestamp, open, high, low, close, volume, source, created_at) "
-            "VALUES ('BTC/USDT', '1h', '2026-01-01 00:00:00', 1, 2, 0.5, 1.5, 10, 'test', '2026-01-01 00:00:00')"
+            "(symbol, timeframe, timestamp, open, high, low, close, volume, source, asset_class, volume_status, created_at) "
+            "VALUES ('BTC/USDT', '1h', '2026-01-01 00:00:00', 1, 2, 0.5, 1.5, 10, 'test', 'crypto', 'reported', '2026-01-01 00:00:00')"
         )
         with engine.begin() as connection:
             connection.execute(text(candle))
+            connection.execute(text(candle.replace("'test'", "'other_provider'")))
         with pytest.raises(IntegrityError):
             with engine.begin() as connection:
                 connection.execute(text(candle))
 
         # Autogenerate não deve encontrar divergência entre metadata e schema migrado.
         command.check(cfg)
+        with pytest.raises(RuntimeError, match="Downgrade blocked: candles from multiple providers"):
+            command.downgrade(cfg, "base")
+        # A guarda acima protege dados válidos; remover o fixture permite testar o ciclo completo.
+        with engine.begin() as connection:
+            connection.execute(text("DELETE FROM market_candles"))
         command.downgrade(cfg, "base")
         assert not (set(inspect(engine).get_table_names()) - {"sqlite_sequence", "alembic_version"})
         command.upgrade(cfg, "head")
