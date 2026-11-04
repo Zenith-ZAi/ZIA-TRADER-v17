@@ -18,7 +18,7 @@ Também foram detectados dois heads Alembic: `b7d2d043ee8a` e `4f9a2c7d1b63`. A 
 
 O teste de downgrade antigo pressupunha reversão mesmo após inserir candles do mesmo instante para provedores diferentes. A migration já bloqueava essa reversão para não perder a identidade de origem. O teste foi corrigido para verificar primeiro esse bloqueio de segurança; após apagar deliberadamente os fixtures, ele continua exercitando downgrade até `base` e upgrade novamente.
 
-O primeiro CI do PR encontrou uma ocorrência adicional da chave antiga em `tests/test_postgres_backup_restore.py`: o fixture de backup especificava `ON CONFLICT (symbol, timeframe, timestamp)`, que já não identifica a chave única depois da migração. O fixture foi atualizado para fornecer `source`, `asset_class` e `volume_status` e usar a chave composta nova. A correção foi enviada no commit `e1a105c16ffcbf302265695369c0fdb51216aff5`. No segundo run, `41828549273`, o job PostgreSQL/test passou com **259 passed, 1 warning**, e o job `container` também passou. CodeRabbit ficou `SKIPPED`; não há revisão humana registrada.
+O primeiro CI do PR encontrou uma ocorrência adicional da chave antiga em `tests/test_postgres_backup_restore.py`: o fixture de backup especificava `ON CONFLICT (symbol, timeframe, timestamp)`, que já não identifica a chave única depois da migração. O fixture foi atualizado para fornecer `source`, `asset_class` e `volume_status` e usar a chave composta nova. A correção foi enviada no commit `e1a105c16ffcbf302265695369c0fdb51216aff5`. No run `41828549273`, o job PostgreSQL/test passou com **259 passed, 1 warning**, e o job `container` também passou. Após a atualização documental, o run `41829059384` do SHA `e4ab9d75569b229ecc5be6cd3b77fc55161800c2` também passou em `test` e `container`. CodeRabbit ficou `SKIPPED`; não há revisão humana registrada.
 
 ## Evidências de validação
 
@@ -33,7 +33,7 @@ O primeiro CI do PR encontrou uma ocorrência adicional da chave antiga em `test
 
 ## Limites ainda abertos
 
-A suíte PostgreSQL não foi executada nesta sandbox por ausência de `TEST_DATABASE_URL`; a cobertura correspondente continua dependente do CI com serviço PostgreSQL. O smoke test foi somente dry-run: não prova persistência em PostgreSQL/TimescaleDB, volume de produção, disponibilidade contínua, rate-limit prolongado, licenciamento de todos os instrumentos nem homologação de Alpha Vantage. Não houve Docker Compose, staging/VPS, soak, CI desta branch ou merge.
+A suíte PostgreSQL não foi executada nesta sandbox por ausência de `TEST_DATABASE_URL`; o CI com serviço PostgreSQL passou e cobriu esses testes. O smoke test foi somente dry-run: não prova persistência operacional em PostgreSQL/TimescaleDB, volume de produção, disponibilidade contínua, rate-limit prolongado, licenciamento de todos os instrumentos nem homologação de Alpha Vantage. Não houve Docker Compose, staging/VPS, soak ou merge.
 
 Antes de usar `dry_run=false`, o operador ainda deve aprovar a fonte/licença para o escopo de dados e realizar a validação de persistência em ambiente isolado. As fases de ledger financeiro (`equity_ledger_v1` e `closed_execution_ledger_v1`), dataset licenciado/OOS e homologação operacional continuam bloqueadoras independentes.
 
