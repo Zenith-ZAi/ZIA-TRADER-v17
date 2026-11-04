@@ -18,7 +18,7 @@ Também foram detectados dois heads Alembic: `b7d2d043ee8a` e `4f9a2c7d1b63`. A 
 
 O teste de downgrade antigo pressupunha reversão mesmo após inserir candles do mesmo instante para provedores diferentes. A migration já bloqueava essa reversão para não perder a identidade de origem. O teste foi corrigido para verificar primeiro esse bloqueio de segurança; após apagar deliberadamente os fixtures, ele continua exercitando downgrade até `base` e upgrade novamente.
 
-O primeiro CI do PR encontrou uma ocorrência adicional da chave antiga em `tests/test_postgres_backup_restore.py`: o fixture de backup especificava `ON CONFLICT (symbol, timeframe, timestamp)`, que já não identifica a chave única depois da migração. O fixture foi atualizado para fornecer `source`, `asset_class` e `volume_status` e usar a chave composta nova. Os outros testes do CI passaram; a nova execução de CI ainda está pendente.
+O primeiro CI do PR encontrou uma ocorrência adicional da chave antiga em `tests/test_postgres_backup_restore.py`: o fixture de backup especificava `ON CONFLICT (symbol, timeframe, timestamp)`, que já não identifica a chave única depois da migração. O fixture foi atualizado para fornecer `source`, `asset_class` e `volume_status` e usar a chave composta nova. A correção foi enviada no commit `e1a105c16ffcbf302265695369c0fdb51216aff5`. No segundo run, `41828549273`, o job PostgreSQL/test passou com **259 passed, 1 warning**, e o job `container` também passou. CodeRabbit ficou `SKIPPED`; não há revisão humana registrada.
 
 ## Evidências de validação
 
@@ -27,6 +27,7 @@ O primeiro CI do PR encontrou uma ocorrência adicional da chave antiga em `test
 - Testes direcionados após as correções: **26 passed, 1 skipped, 1 warning** para API, migrações, preflight VPS e coletor. O skip depende de `TEST_DATABASE_URL` para PostgreSQL.
 - Persistência SQLite real confirmou que a reimportação corrige o mesmo candle sem duplicá-lo e mantém candles de `binance_public` e `alpha_vantage` separados pela chave composta.
 - `compileall`, `git diff --check` e verificação do ambiente (`uv pip check`) terminaram sem erro. A triagem AST heurística do repositório não encontrou padrões suportados; ela não substitui SAST/DAST ou revisão independente. Alembic reporta apenas `4f9a2c7d1b63` como head.
+- O PR [#30](https://github.com/Zenith-ZAi/ZIA-TRADER-v17/pull/30) está aberto contra `master`, sem conflito reportado e mergeable; seus checks `test`/`container` estão verdes. O merge aguarda revisão/decisão humana.
 - Defaults verificados com `.env` desabilitado: `LIVE_TRADING_ENABLED=false`, `LIVE_MODE=false`, `LIVE_KILL_SWITCH=true`, `AUTO_START_ENGINES=false`, autonomia/manual real desligados e todos os gates de ingestão desligados.
 - Smoke test HTTP read-only pelo caminho concreto `FastAPI → CoreCommandManager → UnifiedMarketDataCollector → Binance Public`: HTTP 200, `status=completed`, `mode=dry_run`, 4 candles fechados normalizados de um pedido de até 5 barras de 1 minuto, `persisted_rows=0`, `orders_sent=0`, `trading_feed_updated=false` e `model_weights_changed=false`. O candle ainda aberto foi descartado pelo filtro temporal. Não foram usadas credenciais privadas.
 
