@@ -51,7 +51,11 @@ def test_runtime_builds_schema_off_event_loop_and_closes_resources():
 
     class FakeDatabase:
         def __init__(self, _url):
+            self.ledger_capture_enabled = None
             self.engine = SimpleNamespace(dispose=lambda: events.append(("dispose", None)))
+
+        def set_equity_ledger_capture_enabled(self, enabled):
+            self.ledger_capture_enabled = enabled
 
         def create_tables(self):
             events.append(("migrate", threading.get_ident()))
@@ -67,7 +71,7 @@ def test_runtime_builds_schema_off_event_loop_and_closes_resources():
         async def stop_all(self):
             events.append(("stop_all", None))
 
-    settings = SimpleNamespace(DATABASE_URL="postgresql://test.invalid/db")
+    settings = SimpleNamespace(DATABASE_URL="postgresql://test.invalid/db", EQUITY_LEDGER_CAPTURE_ENABLED=True)
     runtime = asyncio.run(
         build_application_runtime(
             settings,
@@ -77,6 +81,7 @@ def test_runtime_builds_schema_off_event_loop_and_closes_resources():
     )
 
     assert [event[0] for event in events] == ["migrate", "manager", "connect"]
+    assert runtime.db_manager.ledger_capture_enabled is True
     assert events[0][1] != caller_thread
     asyncio.run(runtime.close())
     asyncio.run(runtime.close())
@@ -119,3 +124,31 @@ def test_failed_exchange_connect_cleans_manager_and_database():
         )
 
     assert events == ["migrate", "connect_failed", "stop_all", "dispose"]
+
+
+def test_enabled_ledger_capture_without_database_contract_fails_closed_and_disposes():
+    from api.application_runtime import build_application_runtime
+
+    events: list[str] = []
+
+    class LegacyDatabase:
+        def __init__(self, _url):
+            self.engine = SimpleNamespace(dispose=lambda: events.append("dispose"))
+
+        def create_tables(self):
+            events.append("migrate")
+
+    settings = SimpleNamespace(
+        DATABASE_URL="postgresql://test.invalid/db",
+        EQUITY_LEDGER_CAPTURE_ENABLED=True,
+    )
+    with pytest.raises(RuntimeError, match="não implementa o contrato de captura"):
+        asyncio.run(
+            build_application_runtime(
+                settings,
+                database_factory=LegacyDatabase,
+                manager_factory=lambda *_: pytest.fail("TradingManager não deve ser criado"),
+            )
+        )
+
+    assert events == ["dispose"]

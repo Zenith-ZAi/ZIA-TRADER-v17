@@ -50,6 +50,14 @@ async def build_application_runtime(
     db_manager = db_factory(settings.DATABASE_URL)
     trading_manager = None
     try:
+        ledger_capture_enabled = getattr(settings, "EQUITY_LEDGER_CAPTURE_ENABLED", False)
+        configure_ledger_capture = getattr(db_manager, "set_equity_ledger_capture_enabled", None)
+        if ledger_capture_enabled and not callable(configure_ledger_capture):
+            raise RuntimeError(
+                "EQUITY_LEDGER_CAPTURE_ENABLED=true, mas DatabaseManager não implementa o contrato de captura"
+            )
+        if callable(configure_ledger_capture):
+            configure_ledger_capture(ledger_capture_enabled)
         await asyncio.to_thread(db_manager.create_tables)
         trading_manager = trading_factory(settings, db_manager)
         await trading_manager.exchange_connector.connect()

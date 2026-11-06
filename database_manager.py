@@ -1,19 +1,81 @@
-import os
-
-from sqlalchemy.orm import Session
 import hashlib
+import json
 import math
-
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+import os
+import re
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional, Dict
+from decimal import Decimal, InvalidOperation
+from typing import Dict, List, Optional
 
-from database import Base, AccountState, Position, RuntimePositionState, DailyPNL, WeeklyPNL, MonthlyPNL, Drawdown, OrderHistory, ExecutionHistory, Trade, WhaleActivity, NewsArticle, TrendSnapshot, AIObservation, MarketPattern, SystemLog, OrderIntent, ReconciliationSnapshot, ProtectionOrder, KillSwitchEvent, BacktestRun, DecisionSnapshot, DataGap, OrderBookSnapshot, MarketCandle, MarketType, OrderStatus, utc_now
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import Session, sessionmaker
+
+from database import (
+    AIObservation,
+    AccountState,
+    BacktestRun,
+    Base,
+    DailyPNL,
+    DataGap,
+    DecisionSnapshot,
+    Drawdown,
+    EquityLedgerEvent,
+    ExecutionHistory,
+    KillSwitchEvent,
+    MarketCandle,
+    MarketPattern,
+    MarketType,
+    MonthlyPNL,
+    NewsArticle,
+    OrderBookSnapshot,
+    OrderHistory,
+    OrderIntent,
+    OrderStatus,
+    Position,
+    ProtectionOrder,
+    ReconciliationSnapshot,
+    RuntimePositionState,
+    SystemLog,
+    Trade,
+    TrendSnapshot,
+    WeeklyPNL,
+    WhaleActivity,
+    utc_now,
+)
+
+
+class EquityLedgerError(RuntimeError):
+    """Erro base para a captura audit-only do ledger."""
+
+
+class EquityLedgerCaptureDisabled(EquityLedgerError):
+    """A captura de eventos financeiros permanece opt-in."""
+
+
+class EquityLedgerValidationError(ValueError):
+    """O evento não atende ao contrato canônico do ledger v1."""
+
+
+class EquityLedgerIdempotencyConflict(EquityLedgerError):
+    """Uma chave de origem foi reutilizada com conteúdo financeiro diferente."""
+
+
+_EQUITY_LEDGER_EVENT_TYPES = {
+    "balance_snapshot",
+    "trade_fill",
+    "fee",
+    "funding",
+    "cashflow",
+    "reconciliation_adjustment",
+}
+_EQUITY_LEDGER_BALANCE_COMPONENTS = {"free", "locked", "total", "available", "equity", "margin"}
 
 class DatabaseManager:
-    def __init__(self, database_url: str):
+    def __init__(self, database_url: str, *, equity_ledger_capture_enabled: bool = False):
+        if not isinstance(equity_ledger_capture_enabled, bool):
+            raise TypeError("equity_ledger_capture_enabled precisa ser bool")
         self.database_url = database_url
+        self.equity_ledger_capture_enabled = equity_ledger_capture_enabled
         engine_options = {"pool_pre_ping": True, "pool_recycle": 1800}
         if "sqlite" in database_url:
             engine_options["connect_args"] = {"check_same_thread": False}
@@ -25,7 +87,28 @@ class DatabaseManager:
                 pool_recycle=max(60, int(os.getenv("DB_POOL_RECYCLE_SECONDS", "1800"))),
             )
         self.engine = create_engine(database_url, **engine_options)
+        if self.engine.dialect.name == "sqlite":
+            @event.listens_for(self.engine, "connect")
+            def _enable_sqlite_recursive_triggers(dbapi_connection, _connection_record):
+                cursor = dbapi_connection.cursor()
+                try:
+                    cursor.execute("PRAGMA recursive_triggers = ON")
+                finally:
+                    cursor.close()
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
+
+    def set_equity_ledger_capture_enabled(self, enabled: bool) -> None:
+        """Apply the independent audit capture gate before optional ledger writes."""
+        if not isinstance(enabled, bool):
+            raise TypeError("EQUITY_LEDGER_CAPTURE_ENABLED precisa ser bool")
+        self.equity_ledger_capture_enabled = enabled
+
+    @staticmethod
+    def _ledger_datetime_utc(value: datetime) -> datetime:
+        """SQLite drops timezone metadata; ledger datetimes are written as UTC."""
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
 
     def create_tables(self):
         if self.engine.dialect.name == "sqlite":
@@ -33,6 +116,17 @@ class DatabaseManager:
                 raise RuntimeError("SQLite/create_all não é permitido em produção; configure PostgreSQL e execute Alembic")
             # Compatibilidade histórica de desenvolvimento e testes locais.
             Base.metadata.create_all(self.engine)
+            with self.engine.begin() as connection:
+                connection.exec_driver_sql(
+                    "CREATE TRIGGER IF NOT EXISTS trg_equity_ledger_v1_no_update "
+                    "BEFORE UPDATE ON equity_ledger_v1 BEGIN "
+                    "SELECT RAISE(ABORT, 'equity_ledger_v1 is append-only'); END"
+                )
+                connection.exec_driver_sql(
+                    "CREATE TRIGGER IF NOT EXISTS trg_equity_ledger_v1_no_delete "
+                    "BEFORE DELETE ON equity_ledger_v1 BEGIN "
+                    "SELECT RAISE(ABORT, 'equity_ledger_v1 is append-only'); END"
+                )
             return
         if self.engine.dialect.name != "postgresql":
             raise RuntimeError(f"Dialeto de banco não suportado para migrações: {self.engine.dialect.name}")
@@ -238,6 +332,215 @@ class DatabaseManager:
         chamadores como se fossem histórico verificado.
         """
         return None
+
+    def append_equity_ledger_event(
+        self,
+        *,
+        account_id: str,
+        source: str,
+        source_event_id: str,
+        line_no: int,
+        event_type: str,
+        asset: str,
+        amount: Decimal | str,
+        occurred_at: datetime,
+        balance_component: Optional[str] = None,
+        reference_type: Optional[str] = None,
+        reference_id: Optional[str] = None,
+    ) -> Dict[str, object]:
+        """Append source-reported evidence only; this method never verifies or computes equity.
+
+        Balance snapshots are observations (including valid zero values); all other
+        event kinds are signed asset deltas. The source must provide a stable event
+        ID and an aware timestamp. Raw provider payloads/credentials are not stored.
+        """
+        if not self.equity_ledger_capture_enabled:
+            raise EquityLedgerCaptureDisabled("EQUITY_LEDGER_CAPTURE_ENABLED=false")
+
+        if not all(isinstance(value, str) for value in (account_id, source, source_event_id, event_type, asset)):
+            raise EquityLedgerValidationError("identificadores do evento devem ser strings")
+        account = account_id.strip()
+        provider = source.strip().lower()
+        event_id = source_event_id.strip()
+        kind = event_type.strip().lower()
+        asset_code = asset.strip().upper()
+        if not account or len(account) > 128:
+            raise EquityLedgerValidationError("account_id ausente ou excede 128 caracteres")
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,63}", provider):
+            raise EquityLedgerValidationError("source deve ser um identificador canônico em minúsculas")
+        if not event_id or len(event_id) > 160 or any(ord(char) < 32 for char in event_id):
+            raise EquityLedgerValidationError("source_event_id ausente, longo ou contém controles")
+        if kind not in _EQUITY_LEDGER_EVENT_TYPES:
+            raise EquityLedgerValidationError("event_type não suportado pelo ledger v1")
+        if not re.fullmatch(r"[A-Z0-9][A-Z0-9._-]{0,31}", asset_code):
+            raise EquityLedgerValidationError("asset deve ser um código canônico de até 32 caracteres")
+        if isinstance(line_no, bool) or not isinstance(line_no, int) or not 0 <= line_no <= 2_147_483_647:
+            raise EquityLedgerValidationError("line_no deve estar entre 0 e 2147483647")
+
+        if isinstance(amount, bool) or isinstance(amount, float) or not isinstance(amount, (Decimal, str)):
+            raise EquityLedgerValidationError("amount deve ser Decimal ou string decimal; float não é aceito")
+        try:
+            exact_amount = amount if isinstance(amount, Decimal) else Decimal(amount.strip())
+        except (InvalidOperation, AttributeError) as exc:
+            raise EquityLedgerValidationError("amount não é decimal válido") from exc
+        if not exact_amount.is_finite() or abs(exact_amount) >= Decimal("1e20"):
+            raise EquityLedgerValidationError("amount fora do intervalo NUMERIC(38,18)")
+        canonical_amount = format(exact_amount, "f")
+        if "." in canonical_amount:
+            canonical_amount = canonical_amount.rstrip("0").rstrip(".")
+        if canonical_amount in {"", "-0", "+0"}:
+            canonical_amount = "0"
+        scale = len(canonical_amount.partition(".")[2])
+        if scale > 18:
+            raise EquityLedgerValidationError("amount excede escala de 18 casas decimais")
+
+        if not isinstance(occurred_at, datetime) or occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
+            raise EquityLedgerValidationError("occurred_at precisa incluir timezone explícito")
+        occurred_utc = occurred_at.astimezone(timezone.utc)
+        is_snapshot = kind == "balance_snapshot"
+        if balance_component is not None and not isinstance(balance_component, str):
+            raise EquityLedgerValidationError("balance_component deve ser string")
+        component = balance_component.strip().lower() if balance_component is not None else None
+        component = component or None
+        if is_snapshot:
+            if component not in _EQUITY_LEDGER_BALANCE_COMPONENTS:
+                raise EquityLedgerValidationError("balance_snapshot requer componente reconhecido")
+        elif component is not None or exact_amount == 0:
+            raise EquityLedgerValidationError("eventos delta exigem amount não zero e sem balance_component")
+        if (reference_type is not None and not isinstance(reference_type, str)) or (
+            reference_id is not None and not isinstance(reference_id, str)
+        ):
+            raise EquityLedgerValidationError("reference_type/reference_id devem ser strings")
+        ref_type = reference_type.strip().lower() if reference_type is not None else None
+        ref_id = reference_id.strip() if reference_id is not None else None
+        ref_type = ref_type or None
+        ref_id = ref_id or None
+        if (
+            bool(ref_type) != bool(ref_id)
+            or (ref_type and not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,31}", ref_type))
+            or (ref_id and (len(ref_id) > 160 or any(ord(char) < 32 for char in ref_id)))
+        ):
+            raise EquityLedgerValidationError("reference_type/reference_id devem ser fornecidos em par válido")
+
+        amount_basis = "balance" if is_snapshot else "delta"
+        canonical_payload = {
+            "version": "equity_ledger_v1",
+            "account_id": account,
+            "source": provider,
+            "source_event_id": event_id,
+            "line_no": line_no,
+            "event_type": kind,
+            "asset": asset_code,
+            "amount": canonical_amount,
+            "amount_basis": amount_basis,
+            "balance_component": component,
+            "occurred_at": occurred_utc.isoformat(timespec="microseconds").replace("+00:00", "Z"),
+            "reference_type": ref_type,
+            "reference_id": ref_id,
+        }
+        canonical_sha256 = hashlib.sha256(
+            json.dumps(canonical_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        values = {
+            **{key: value for key, value in canonical_payload.items() if key != "version"},
+            "amount": exact_amount,
+            "occurred_at": occurred_utc,
+            "recorded_at": datetime.now(timezone.utc),
+            "canonical_sha256": canonical_sha256,
+        }
+
+        if self.engine.dialect.name == "sqlite":
+            from sqlalchemy.dialects.sqlite import insert as dialect_insert
+        elif self.engine.dialect.name == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert as dialect_insert
+        else:
+            raise RuntimeError("equity_ledger_v1 aceita somente SQLite de teste ou PostgreSQL")
+
+        db = self.SessionLocal()
+        try:
+            statement = dialect_insert(EquityLedgerEvent).values(**values).on_conflict_do_nothing(
+                index_elements=["account_id", "source", "source_event_id", "line_no"]
+            )
+            result = db.execute(statement)
+            if result.rowcount not in {0, 1}:
+                raise EquityLedgerError("resultado de escrita do ledger indeterminado; transação revertida")
+            row = (
+                db.query(EquityLedgerEvent)
+                .filter(
+                    EquityLedgerEvent.account_id == account,
+                    EquityLedgerEvent.source == provider,
+                    EquityLedgerEvent.source_event_id == event_id,
+                    EquityLedgerEvent.line_no == line_no,
+                )
+                .one_or_none()
+            )
+            if row is None:
+                raise EquityLedgerError("evento inserido/duplicado não pôde ser relido")
+            if row.canonical_sha256 != canonical_sha256:
+                raise EquityLedgerIdempotencyConflict(
+                    "chave de origem reutilizada com conteúdo diferente; evidência não sobrescrita"
+                )
+            if row.amount != exact_amount:
+                raise EquityLedgerValidationError(
+                    "o banco não preservou amount exatamente; captura revertida para evitar arredondamento"
+                )
+            status = "inserted" if result.rowcount == 1 else "duplicate"
+            result_payload = {
+                "status": status,
+                "id": row.id,
+                "account_id": row.account_id,
+                "source": row.source,
+                "source_event_id": row.source_event_id,
+                "line_no": row.line_no,
+                "canonical_sha256": row.canonical_sha256,
+            }
+            db.commit()
+            return result_payload
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def list_equity_ledger_events(self, account_id: str, *, limit: int = 100, offset: int = 0) -> List[Dict[str, object]]:
+        """Return bounded audit evidence in recording order; no balance aggregation."""
+        account = account_id.strip() if isinstance(account_id, str) else ""
+        if not account or isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+            raise ValueError("account_id obrigatório; limit deve estar entre 1 e 500")
+        if isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset <= 1_000_000:
+            raise ValueError("offset deve ser inteiro entre 0 e 1000000")
+        db = self.SessionLocal()
+        try:
+            rows = (
+                db.query(EquityLedgerEvent)
+                .filter(EquityLedgerEvent.account_id == account)
+                .order_by(EquityLedgerEvent.recorded_at.asc(), EquityLedgerEvent.id.asc())
+                .offset(offset)
+                .limit(limit)
+                .all()
+            )
+            return [
+                {
+                    "id": row.id,
+                    "account_id": row.account_id,
+                    "source": row.source,
+                    "source_event_id": row.source_event_id,
+                    "line_no": row.line_no,
+                    "event_type": row.event_type,
+                    "asset": row.asset,
+                    "amount": row.amount,
+                    "amount_basis": row.amount_basis,
+                    "balance_component": row.balance_component,
+                    "occurred_at": self._ledger_datetime_utc(row.occurred_at),
+                    "recorded_at": self._ledger_datetime_utc(row.recorded_at),
+                    "reference_type": row.reference_type,
+                    "reference_id": row.reference_id,
+                    "canonical_sha256": row.canonical_sha256,
+                }
+                for row in rows
+            ]
+        finally:
+            db.close()
 
     # News and trend persistence
     def create_news_article(self, article: Dict[str, object], symbol: Optional[str] = None) -> NewsArticle:

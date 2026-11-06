@@ -94,7 +94,14 @@ def test_initial_migration_adopts_legacy_create_all_schema(tmp_path, monkeypatch
     legacy_engine = create_engine(database_url)
     Base.metadata.create_all(legacy_engine)
     with legacy_engine.begin() as connection:
-        for table_name in ("model_metrics", "model_registry", "data_gaps", "audit_log", "market_candles"):
+        for table_name in (
+            "model_metrics",
+            "model_registry",
+            "data_gaps",
+            "audit_log",
+            "market_candles",
+            "equity_ledger_v1",
+        ):
             Base.metadata.tables[table_name].drop(connection, checkfirst=True)
         metadata_indexes = {
             index.name: index

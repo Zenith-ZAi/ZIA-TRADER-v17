@@ -1,4 +1,20 @@
-from sqlalchemy import Boolean, Column, DateTime, Enum, Float, ForeignKey, Index, Integer, JSON, String, Text, create_engine
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Column,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    JSON,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    create_engine,
+)
 from sqlalchemy.orm import DeclarativeBase
 from datetime import datetime, timezone
 import enum
@@ -130,6 +146,57 @@ class ExecutionHistory(Base):
     commission = Column(Float, default=0.0)
     timestamp = Column(DateTime, default=utc_now)
     metadata_json = Column(JSON)
+
+
+class EquityLedgerEvent(Base):
+    """Immutable, audit-only event evidence; never a risk or execution source."""
+    __tablename__ = "equity_ledger_v1"
+    __table_args__ = (
+        UniqueConstraint(
+            "account_id", "source", "source_event_id", "line_no",
+            name="uq_equity_ledger_v1_event_identity",
+        ),
+        CheckConstraint(
+            "event_type IN ('balance_snapshot', 'trade_fill', 'fee', 'funding', 'cashflow', 'reconciliation_adjustment')",
+            name="ck_equity_ledger_v1_event_type",
+        ),
+        CheckConstraint(
+            "(event_type = 'balance_snapshot' AND amount_basis = 'balance' AND balance_component IS NOT NULL) "
+            "OR (event_type <> 'balance_snapshot' AND amount_basis = 'delta' AND balance_component IS NULL AND amount <> 0)",
+            name="ck_equity_ledger_v1_amount_semantics",
+        ),
+        CheckConstraint(
+            "balance_component IS NULL OR length(trim(balance_component)) > 0",
+            name="ck_equity_ledger_v1_component_nonempty",
+        ),
+        CheckConstraint("line_no >= 0", name="ck_equity_ledger_v1_line_no"),
+        CheckConstraint(
+            "length(trim(account_id)) > 0 AND length(trim(source)) > 0 "
+            "AND length(trim(source_event_id)) > 0 AND length(trim(asset)) > 0",
+            name="ck_equity_ledger_v1_identity_nonempty",
+        ),
+        CheckConstraint(
+            "length(canonical_sha256) = 64",
+            name="ck_equity_ledger_v1_hash_length",
+        ),
+        Index("ix_equity_ledger_v1_account_occurred", "account_id", "occurred_at", "id"),
+    )
+    id = Column(Integer, primary_key=True)
+    account_id = Column(String(128), nullable=False)
+    source = Column(String(64), nullable=False)
+    source_event_id = Column(String(160), nullable=False)
+    line_no = Column(Integer, nullable=False, default=0)
+    event_type = Column(String(32), nullable=False)
+    asset = Column(String(32), nullable=False)
+    amount = Column(Numeric(38, 18), nullable=False)
+    amount_basis = Column(String(8), nullable=False)
+    balance_component = Column(String(16))
+    occurred_at = Column(DateTime(timezone=True), nullable=False)
+    recorded_at = Column(DateTime(timezone=True), nullable=False)
+    reference_type = Column(String(32))
+    reference_id = Column(String(160))
+    canonical_sha256 = Column(String(64), nullable=False)
+
 
 class Trade(Base):
     __tablename__ = 'trades'
