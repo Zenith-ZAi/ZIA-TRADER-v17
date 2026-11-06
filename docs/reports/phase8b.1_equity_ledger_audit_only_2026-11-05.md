@@ -32,7 +32,7 @@ Uma revisão independente encontrou pontos que foram corrigidos nesta branch:
 ## Verificações locais (2026-11-06)
 
 - Suíte integral: **266 passed, 4 skipped, 1 warning** em 17,81s.
-- Os quatro skips requerem `TEST_DATABASE_URL`: migration PostgreSQL, precisão/imutabilidade do ledger, registry PostgreSQL e backup/restore PostgreSQL. Assim, os testes PostgreSQL adicionados **não foram executados nesta sandbox**; precisam passar no CI com serviço PostgreSQL antes de aprovar integração.
+- Os quatro skips locais requerem `TEST_DATABASE_URL`: migration PostgreSQL, precisão/imutabilidade do ledger, registry PostgreSQL e backup/restore PostgreSQL. O CI do PR #31 executou PostgreSQL e passou em 2026-11-06: run `42245099706`, **270 passed, 1 warning**, jobs `test` e `container` verdes. Isso valida os testes do workflow, não uma implantação operacional.
 - Suíte direcionada: **26 passed, 2 skipped, 1 warning** para ledger, migrations, lifecycle e fail-closed de risco.
 - `uv pip check`: 117 pacotes, sem incompatibilidades.
 - `compileall`, `git diff --check` e Alembic (`a5c74e8d2b91` como único head): passaram.
@@ -40,7 +40,7 @@ Uma revisão independente encontrou pontos que foram corrigidos nesta branch:
 
 ## Riscos/gates ainda abertos
 
-- A branch precisa de validação PostgreSQL real no CI (incluindo NUMERIC, append-only/TRUNCATE, migration e rollback) e de revisão humana do diff final.
+- PR [#31](https://github.com/Zenith-ZAi/ZIA-TRADER-v17/pull/31) está aberto, mergeable, com checks `test`/`container` verdes no SHA `956a4100e42c29dd58ee5ad8f9a27042753bb161`; CodeRabbit foi `SKIPPED`, não há decisão/revisão humana registrada e nenhum merge foi feito. O CI cobriu a integração PostgreSQL, mas não deployment, staging ou licenças operacionais.
 - Nenhum producer/adapter autenticado homologado alimenta o ledger; dados enviados ao método são declarações do chamador. A imutabilidade do banco não garante completude, origem legítima, sequência sem lacunas ou ausência de evento tardio.
 - Ainda faltam tratamento de fills parciais/duplicados/tardios, taxas multi-moeda, funding, depósitos/saques, posições, snapshots completos, reconstrução após restart, reconciliação independente, concorrência sob carga, retenção/backup e privilégios PostgreSQL separados para aplicação/migration.
 - `closed_execution_ledger_v1` e integração com RiskAI/kelly são etapas futuras e requerem revisão de domínio, evidência read-only/Demo e contrato independente. Nenhum resultado desta subfase autoriza dimensionamento, novas entradas ou operação real.
