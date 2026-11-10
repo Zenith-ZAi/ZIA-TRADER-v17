@@ -115,17 +115,14 @@ class ExecutionEngine:
             order_data = {**order_data, "client_order_id": client_order_id}
 
         async def send(prepared: Dict[str, Any]) -> Dict[str, Any]:
-            try:
-                return await self.exchange_connector.place_order(
-                    symbol,
-                    action,
-                    "market",
-                    quantity,
-                    order_data.get("price"),
-                    client_order_id=prepared.get("client_order_id"),
-                )
-            except TypeError:
-                return await self.exchange_connector.place_order(symbol, action, "market", quantity, order_data.get("price"))
+            return await self.exchange_connector.place_order(
+                symbol,
+                action,
+                "market",
+                quantity,
+                order_data.get("price"),
+                client_order_id=prepared.get("client_order_id"),
+            )
 
         try:
             if self.reconciler is not None:

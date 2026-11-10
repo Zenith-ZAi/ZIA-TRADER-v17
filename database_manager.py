@@ -853,6 +853,7 @@ class DatabaseManager:
             return 0
 
         rows = []
+        rows_by_key = {}
         for item in candles:
             timestamp = item.get("timestamp")
             if isinstance(timestamp, str):
@@ -882,6 +883,14 @@ class DatabaseManager:
                 raise ValueError("candle prices must be positive and volume non-negative")
             if row["low"] > min(row["open"], row["close"]) or row["high"] < max(row["open"], row["close"]) or row["low"] > row["high"]:
                 raise ValueError("candle OHLC bounds are inconsistent")
+            row_key = tuple(row[key] for key in ("source", "asset_class", "symbol", "timeframe", "timestamp"))
+            previous = rows_by_key.get(row_key)
+            if previous is not None:
+                value_columns = ("open", "high", "low", "close", "volume", "volume_status")
+                if any(previous[column] != row[column] for column in value_columns):
+                    raise ValueError("duplicate candle key has conflicting values")
+                continue
+            rows_by_key[row_key] = row
             rows.append(row)
 
         if self.engine.dialect.name == "postgresql":

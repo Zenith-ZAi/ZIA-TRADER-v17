@@ -42,3 +42,12 @@ API expõe a porta do container somente em loopback; PostgreSQL e Redis não tê
 ## Conclusão
 
 Status **parcial, somente estático**. Execute o runbook em staging isolado com Docker e PostgreSQL/Redis compatíveis, faça build limpo, valide `docker compose config`, migrations, health/readiness, reinício, logs e restore. Não publique API diretamente na Internet e mantenha todas as flags de trading desligadas.
+
+## Adendo — hardening do backup Redis (2026-11-10)
+
+`scripts/vps_backup.sh` agora aguarda a conclusão bem-sucedida de `BGSAVE`, copia o `/data/dump.rdb` do container Redis, rejeita snapshot vazio e calcula SHA-256 para todos os arquivos copiados. A senha é fornecida ao `redis-cli` via `REDISCLI_AUTH`, não pelo argumento `-a`. Os testes `tests/test_vps_backup.py` usam um comando Docker fake e verificam cópia, checksum e falha fail-closed; não houve chamada a Docker real, Redis, PostgreSQL ou VPS. O restore do RDB e consistência conjunta Redis/PostgreSQL continuam pendentes. Ver `docs/reports/phase9_architecture_hardening_2026-11-10.md`.
+
+
+### Errata do follow-up independente — 2026-11-10
+
+A revisão independente inicial encontrou dois P2 (hostname TLS e timeout de comandos); o follow-up encontrou que a configuração não chegava ao container API e que checar chave privada exigiria montá-la ali. Foram corrigidos: Compose encaminha apenas as três configurações TLS não secretas; o preflight usa hostname/SNI da URL, conecta ao DNS interno `nginx:443` e verifica handshake CA/hostname sem ler/montar a chave no API. GNU `timeout` envolve cada chamada Docker; testes bloqueiam dump, snapshot e cópias. Suíte local: **310 passed, 4 skipped, 1 warning**. Revisão estática independente final sem defeitos adicionais. Primeiro CI PostgreSQL falhou porque o cliente mais novo emitia `SET transaction_timeout = 0` ao restaurar no servidor 16. Workflow fixado em Ubuntu 24.04/cliente 16 com verificação de major; novo run pendente. Certificado público real e restore em staging continuam pendentes.
