@@ -73,14 +73,14 @@ A revisão de follow-up também apontou cobertura insuficiente dos timeouts em d
 
 ## Validação
 
-Validação integral local após todas as correções: **310 passed, 4 skipped, 1 warning**. Os quatro skips dependem de `TEST_DATABASE_URL`; o warning é `PendingDeprecationWarning` de `python-multipart` via Starlette. Testes focados TLS/backup: **15 passed**. Cobertura inclui polling com duas consultas ainda em progresso, conclusão posterior, contador que não avança, falha/campos ausentes em `INFO`, timeout em cada operação Docker, checksum/RDB, domínio/SNI separado do destino TCP e contrato Compose sem chave privada no container API. Também passaram `bash -n`, `uv pip check` (117 pacotes), `compileall`, `git diff --check`, parsing YAML/contrato Compose e Alembic com uma head. CI PostgreSQL/container do branch ainda não foi executado.
+Validação integral local após todas as correções: **310 passed, 4 skipped, 1 warning**. Os quatro skips dependem de `TEST_DATABASE_URL`; o warning é `PendingDeprecationWarning` de `python-multipart` via Starlette. Testes focados TLS/backup: **15 passed**. Também passaram `bash -n`, `uv pip check` (117 pacotes), `compileall`, `git diff --check`, contrato YAML e Alembic com uma head. O primeiro CI PostgreSQL do commit `afc6721` falhou apenas em `tests/test_postgres_backup_restore.py::test_pg_dump_restore_matches_table_counts_and_checksums`: `pg_restore` saiu com código 1 e o traceback não expunha seu stderr. O teste foi ajustado para mostrar a saída do restore; novo CI pendente. O job de container foi ignorado por depender do teste.
 
 As revisões foram estáticas e não equivalem a auditoria formal, SAST/DAST ou homologação. Nenhum certificado público, handshake real, container, Redis, PostgreSQL, VPS ou exchange foi acessado. O scanner AST do repositório é heurístico.
 
 ## O que continua pendente
 
 1. A revisão estática independente final foi concluída sem achados adicionais; ainda falta revisão humana do PR. Não usar credenciais nem testar Mainnet.
-2. Executar CI PostgreSQL e build de container neste branch/SHA; os quatro skips locais não substituem teste do PostgreSQL atual.
+2. Diagnosticar e rerodar CI PostgreSQL/container: o primeiro teste falhou em `pg_restore` com stderr não exposto; a melhoria diagnóstica está na branch e aguarda novo run. Os quatro skips locais não substituem teste do PostgreSQL atual.
 3. Homologar Demo/Testnet e reconciliação de intents/fills sob timeout, cancelamento e restart. A implementação de `client_order_id` na Mainnet não prova a semântica completa de execução.
 4. Fechar `equity_ledger_v1` com produtores autenticados, fees/funding/cashflows, snapshots completos, reconciliação após restart e controles de privilégio. `get_verified_risk_periods()` e `get_verified_trade_returns()` permanecem fail-closed.
 5. Provisionar dataset licenciado e validar OOS. Fontes read-only atuais não constituem treino nem aprovação de modelo.
