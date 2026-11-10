@@ -175,7 +175,19 @@ class UnifiedMarketDataCollector:
     @staticmethod
     def _validate_base_url(url: str, allowed_host: str) -> str:
         parsed = urlsplit(str(url))
-        if parsed.scheme != "https" or parsed.hostname != allowed_host or parsed.username or parsed.password or parsed.query or parsed.fragment:
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise ProviderCollectionError("provider_endpoint_not_allowlisted") from exc
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname != allowed_host
+            or port not in (None, 443)
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+        ):
             raise ProviderCollectionError("provider_endpoint_not_allowlisted")
         return str(url).rstrip("/")
 

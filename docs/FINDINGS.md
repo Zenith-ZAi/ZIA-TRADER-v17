@@ -1,6 +1,6 @@
 # Findings — ZIA-TRADER v17
 
-Atualizado em 2026-11-03 na branch `docs/pr28-merge-evidence`, baseada no `master` pós-PR #28 (`60e92a551f08dca6034ebb48059d7b2418186402`); as evidências de CI anteriores permanecem datadas em suas entradas. Este registro contém gaps verificados, correções por fase e limitações ainda abertas. Não é uma declaração de ausência de outros defeitos.
+Atualizado em 2026-11-10 na branch `fix/phase9-nov9-fail-closed-hardening`, baseada no `master` pós-PR #31 (`ea5dae770c554aa0e759c4610c739af5a0f66a7f`); alterações correntes ainda não foram integradas. As evidências de CI anteriores permanecem datadas em suas entradas. Este registro contém gaps verificados, correções por fase e limitações ainda abertas. Não é uma declaração de ausência de outros defeitos.
 
 | Arquivo/linha | Evidência observada | Correção sugerida (aguarda revisão/aprovação) |
 | --- | --- | --- |
@@ -206,7 +206,7 @@ Limites: a camada de inteligência do anexo ainda não está completa. Faltam pr
 - **Gates mantidos:** `LIVE_TRADING_ENABLED=false`, `LIVE_MODE=false`, `LIVE_KILL_SWITCH=true`, `AUTO_START_ENGINES=false`; trading autônomo e manual real continuam OFF. Ledger verificável, `closed_execution_ledger_v1`, dataset licenciado/OOS e staging continuam bloqueadores.
 - Relatório detalhado: `docs/reports/phase10.2_unified_market_ingestion_validation_2026-11-04.md`.
 
-## Fase 8B.1 — fundação de evidências audit-only (2026-11-05; em revisão)
+## Fase 8B.1 — fundação de evidências audit-only (2026-11-05; integrada)
 
 - **Achado de domínio:** o estado local de conta é mutável e usa ponto flutuante; o fluxo atual não reconcilia todos os fills, saídas, comissões, funding e cashflows. `ExecutionHistory` não comprova por si só uma execução fechada econômica completa. Esses registros legados não foram promovidos nem convertidos em ledger e não se deve inicializar ausências como zero.
 - **Incremento implementado na branch `feat/audit-only-equity-ledger-8b`:** migration aditiva `a5c74e8d2b91` cria `equity_ledger_v1` com uma linha por ativo/leg, `NUMERIC(38,18)`, UTC explícito, identidade única `(account_id, source, source_event_id, line_no)`, semântica separada entre `balance_snapshot` e deltas assinados. Replays idênticos são idempotentes; chave repetida com conteúdo canônico diferente falha sem sobrescrever.
@@ -214,6 +214,22 @@ Limites: a camada de inteligência do anexo ainda não está completa. Faltam pr
 - **Fail-closed:** `EQUITY_LEDGER_CAPTURE_ENABLED=false` por padrão e propagado no lifespan. `get_verified_risk_periods` e `get_verified_trade_returns` continuam retornando `None`; RiskAI/sizing/ordens não consomem a tabela. `closed_execution_ledger_v1` não foi criado. Nenhuma flag de trading foi alterada.
 - **Revisão corretiva:** migration falha fechado diante de tabela `equity_ledger_v1` preexistente; runtime com captura habilitada e DatabaseManager sem o contrato de setter aborta startup e dispõe o engine; teste PostgreSQL agora usa transaction externa/savepoint para não deixar linha imutável em banco reutilizável e cobre TRUNCATE.
 - **Validação local:** **266 testes passaram, 4 foram ignorados por dependerem de `TEST_DATABASE_URL` e 1 warning deprecativo preexistente**; `uv pip check`, `compileall`, migration/downgrade SQLite, `INSERT OR REPLACE`, `git diff --check` e triagem AST heurística passaram. Precisão PostgreSQL `NUMERIC(38,18)`, triggers e isolamento transacional não foram executados localmente, mas passaram no CI do PR #31: run `42245099706`, **270 passed, 1 warning**, `test`/`container` verdes.
-- **PR/revisão:** [#31](https://github.com/Zenith-ZAi/ZIA-TRADER-v17/pull/31) aberto e mergeable no SHA `956a4100e42c29dd58ee5ad8f9a27042753bb161`; CodeRabbit `SKIPPED`, sem decisão/revisão humana. Nenhum merge ou deploy foi feito. SQLite permanece somente dev/teste e não é tamper-proof para conexões externas ao runtime gerenciado.
+- **PR/revisão:** [#31](https://github.com/Zenith-ZAi/ZIA-TRADER-v17/pull/31) foi squash-merged em 2026-11-06 no commit `ea5dae770c554aa0e759c4610c739af5a0f66a7f`; CI pós-merge run `42253108432` concluiu `test`/`container` com sucesso e a branch foi preservada conforme pedido. CodeRabbit `SKIPPED`, sem revisão humana registrada. Não houve deployment. SQLite permanece somente dev/teste e não é tamper-proof para conexões externas ao runtime gerenciado.
 - **Próximos gates:** adapter read-only autenticado e homologado por fonte; idempotência concorrente e late data; fee/funding/depósitos/saques; snapshots de posição/equity com unidade e completude; reconstrução/reconciliation após restart; privilégio de banco restrito; `closed_execution_ledger_v1`; revisão de domínio e integração de RiskAI somente após provas independentes. Até lá, dados não autorizam sizing ou entradas.
 - Relatório detalhado: `docs/reports/phase8b.1_equity_ledger_audit_only_2026-11-05.md`.
+
+## Revisão arquitetural e hardening fail-closed — 2026-11-10
+
+- Branch `fix/phase9-nov9-fail-closed-hardening`, baseada no `master` pós-PR #31 (`ea5dae770c554aa0e759c4610c739af5a0f66a7f`); alterações ainda não integradas.
+- Gates live são rechecados na fronteira de adapters. Binance Mainnet agora exige e propaga `client_order_id`; CCXT e MT5 continuam desabilitados para submissão sem contrato idempotente e reconciliação remota. Retentativas amplas por `TypeError` foram removidas para evitar possível duplicidade externa.
+- Cancelamento preserva `CancelledError` e libera lease; upsert composto rejeita payload conflitante; `/core/sync` impõe limites de entrada e concorrência. TLS preflight verifica CA e domínio/SNI da URL enquanto encaminha o socket a `nginx:443` via DNS Compose.
+- **Achado corrigido:** `scripts/vps_backup.sh` solicita BGSAVE, valida os campos Redis, aguarda incremento de `rdb_saves` e status `ok`, copia `/data/dump.rdb`, rejeita arquivo vazio e cria SHA-256 para os arquivos. A senha Redis passa por `REDISCLI_AUTH`, não por `-a`; GNU `timeout` limita cada chamada Docker (75 s para snapshot, 600 s nas operações gerais).
+- Testes fake executam polling que permanece em progresso, conclusão posterior, falta de incremento, falha/campos ausentes em `INFO`, comando Docker bloqueado, checksum e validação do alvo TCP/SNI. Não houve teste com Redis, PostgreSQL, Docker ou VPS reais; restore e consistência cruzada continuam pendentes.
+- Suíte integral final após as correções: **310 passed, 4 skipped, 1 warning**; skips dependem de `TEST_DATABASE_URL`. `uv pip check` (117 pacotes), `compileall`, `bash -n`, `git diff --check` e Alembic com uma head passaram. A revisão estática independente final foi concluída sem achados adicionais; revisão humana do PR e CI PostgreSQL/container ainda pendentes.
+- Live, autonomia, modo manual real e autostart permanecem desativados. O ledger audit-only não libera risco; dataset licenciado/OOS, migração async da Fase 9.3, stream read-only homologado e staging/soak continuam pendentes.
+- Relatório e diagrama: `docs/reports/phase9_architecture_hardening_2026-11-10.md`.
+
+
+### Errata pós-revisão independente — 2026-11-10
+
+A revisão independente inicial encontrou dois P2: hostname TLS incompatível com certificado público e timeout de polling que não limitava comandos Docker bloqueados; ambos foram corrigidos com SNI pelo domínio, destino TCP `nginx:443` e GNU `timeout` por operação. No follow-up foi encontrado outro P2: o `.env.vps` não propagava esses parâmetros ao container API e os checks locais exigiam acesso à chave; Compose agora encaminha só os parâmetros não secretos e o preflight valida o handshake ao Nginx sem montar chave no API. Também foi fechada a lacuna P3 de cobertura de timeout em dump PostgreSQL e cópias; testes fake cobrem todas as operações e o contrato Compose. Suíte integral final: **310 passed, 4 skipped, 1 warning**. A revisão estática de follow-up não encontrou defeitos concretos adicionais; CI PostgreSQL/container e homologação em staging continuam pendentes. Nenhum serviço, certificado ou endpoint real foi testado; live/autonomia continuam OFF.

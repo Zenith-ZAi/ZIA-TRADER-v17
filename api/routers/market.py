@@ -36,6 +36,38 @@ class MarketDataCollectionRequest(BaseModel):
         return normalized
 
 
+class CoreSyncRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    symbols: list[str] | None = None
+    limit: int = Field(default=250, ge=1, le=1000)
+    offline: bool = False
+
+    @field_validator("symbols", mode="before")
+    @classmethod
+    def validate_symbols(cls, value: Any) -> list[str] | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            value = [value]
+        if not isinstance(value, list) or not 1 <= len(value) <= 20:
+            raise ValueError("symbols must contain between 1 and 20 items")
+        normalized = []
+        seen = set()
+        for item in value:
+            if not isinstance(item, str):
+                raise ValueError("each symbol must be a string")
+            symbol = item.strip()
+            if not symbol or len(symbol) > 64:
+                raise ValueError("symbols cannot be blank or exceed 64 characters")
+            key = symbol.casefold()
+            if key in seen:
+                raise ValueError("symbols cannot contain duplicates")
+            seen.add(key)
+            normalized.append(symbol)
+        return normalized
+
+
 @router.get("/market")
 async def market_alias(
     symbol: str,
@@ -68,19 +100,17 @@ async def analyze_core_symbol(
 
 @router.post("/core/sync")
 async def sync_core_data(
-    request: dict[str, Any] = Body(default_factory=dict),
+    request: CoreSyncRequest = Body(default_factory=CoreSyncRequest),
     current_user: dict[str, Any] = Depends(get_trader_user),
     manager: Any = Depends(get_trading_manager),
     settings: Any = Depends(get_app_settings),
 ) -> dict[str, Any]:
     """Synchronize feeds and return snapshots without executing orders."""
-    raw_symbols = request.get("symbols") or settings.SYMBOLS
-    symbols = [raw_symbols] if isinstance(raw_symbols, str) else raw_symbols
     try:
         return await manager.command_manager.sync_market(
-            symbols=symbols,
-            limit=int(request.get("limit", 250)),
-            offline=bool(request.get("offline", False)),
+            symbols=request.symbols or settings.SYMBOLS,
+            limit=request.limit,
+            offline=request.offline,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

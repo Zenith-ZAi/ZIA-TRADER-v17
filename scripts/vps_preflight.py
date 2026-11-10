@@ -55,6 +55,29 @@ def _safe_endpoint(value: str) -> str:
     return value.split("://", 1)[-1]
 
 
+def _probe_tls_endpoint(tls_url: str, connect_host: str | None = None) -> tuple[bool, str]:
+    parsed = urlparse(tls_url)
+    try:
+        if parsed.scheme != "https" or not parsed.hostname:
+            raise ValueError("TLS_PREFLIGHT_URL inválida")
+        port = parsed.port or 443
+        # A conexão pode ir ao loopback, mas SNI e verificação de certificado
+        # continuam vinculados ao hostname da URL.
+        target_host = connect_host or parsed.hostname
+        if not target_host:
+            raise ValueError("TLS_PREFLIGHT_CONNECT_HOST inválido")
+        context = ssl.create_default_context()
+        # O contexto padrão valida cadeia e hostname; não relaxar essas garantias.
+        with socket.create_connection((target_host, port), timeout=3) as raw:
+            with context.wrap_socket(raw, server_hostname=parsed.hostname) as secure:
+                version = secure.version()
+                if version not in {"TLSv1.2", "TLSv1.3"}:
+                    return False, version or "versão TLS desconhecida"
+                return True, version
+    except Exception as exc:
+        return False, f"falha: {type(exc).__name__}"
+
+
 def _alembic_head_status(engine) -> tuple[bool, str]:
     config = Config(str(PROJECT_ROOT / "alembic.ini"))
     expected_heads = set(ScriptDirectory.from_config(config).get_heads())
@@ -123,29 +146,10 @@ def run_preflight(strict: bool = False) -> dict[str, Any]:
 
     add("alert_rules_file", (PROJECT_ROOT / "deploy" / "alert_rules.yml").is_file(), "regras Prometheus presentes")
     if _bool_env("REQUIRE_TLS_PROXY", False):
-        cert_dir = Path(os.getenv("TLS_CERT_DIR", str(PROJECT_ROOT / "deploy" / "tls")))
-        cert_path = cert_dir / "fullchain.pem"
-        key_path = cert_dir / "privkey.pem"
         add("nginx_config", (PROJECT_ROOT / "deploy" / "nginx.conf").is_file(), "configuração Nginx presente")
-        add("tls_certificate", cert_path.is_file(), "certificado TLS presente" if cert_path.is_file() else "gere certificado real; autoassinado só serve para teste")
-        add("tls_private_key", key_path.is_file() and key_path.stat().st_mode & 0o077 == 0, "chave TLS presente e restrita")
-        tls_url = os.getenv("TLS_PREFLIGHT_URL", "https://127.0.0.1:8443/")
-        parsed = urlparse(tls_url)
-        tls_ok = False
-        tls_detail = "endpoint TLS não testado"
-        try:
-            if parsed.scheme != "https" or not parsed.hostname:
-                raise ValueError("TLS_PREFLIGHT_URL inválida")
-            port = parsed.port or 443
-            context = ssl.create_default_context()
-            context.check_hostname = False
-            context.verify_mode = ssl.CERT_NONE
-            with socket.create_connection((parsed.hostname, port), timeout=3) as raw:
-                with context.wrap_socket(raw, server_hostname=parsed.hostname) as secure:
-                    tls_ok = secure.version() in {"TLSv1.2", "TLSv1.3"}
-                    tls_detail = secure.version() or "versão TLS desconhecida"
-        except Exception as exc:
-            tls_detail = f"falha: {type(exc).__name__}"
+        tls_url = os.getenv("TLS_PREFLIGHT_URL", "")
+        connect_host = os.getenv("TLS_PREFLIGHT_CONNECT_HOST") or None
+        tls_ok, tls_detail = _probe_tls_endpoint(tls_url, connect_host=connect_host)
         add("nginx_tls_reachable", tls_ok, tls_detail)
     if _bool_env("FIREWALL_PREFLIGHT_REQUIRED", False):
         add("firewall_tool", shutil.which("iptables") is not None, "iptables disponível; regras devem ser auditadas no VPS")

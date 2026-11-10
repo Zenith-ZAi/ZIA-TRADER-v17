@@ -771,6 +771,14 @@ class RoboTraderUnified:
                         decision_lease = None
                 await asyncio.sleep(self.settings.TRADING_LOOP_INTERVAL)
 
+            except asyncio.CancelledError:
+                if decision_lease is not None:
+                    try:
+                        await decision_lease.release()
+                    except Exception as cleanup_error:
+                        logger.error("Falha ao liberar lease durante cancelamento: %s", cleanup_error)
+                    decision_lease = None
+                raise
             except Exception as e:
                 if decision_lease is not None:
                     await decision_lease.release()

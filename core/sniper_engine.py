@@ -393,6 +393,14 @@ class SniperEngine:
                         decision_lease = None
                     
                 await asyncio.sleep(self.settings.SNIPER_CYCLE_INTERVAL_SECONDS)  # Ciclo rápido configurável
+            except asyncio.CancelledError:
+                if decision_lease is not None:
+                    try:
+                        await decision_lease.release()
+                    except Exception as cleanup_error:
+                        logger.error("Sniper: falha ao liberar lease durante cancelamento: %s", cleanup_error)
+                    decision_lease = None
+                raise
             except Exception as e:
                 if decision_lease is not None:
                     await decision_lease.release()
