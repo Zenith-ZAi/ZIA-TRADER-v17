@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     services:
       postgres:
@@ -44,7 +44,13 @@ jobs:
       - name: Check dependency compatibility
         run: uv pip check --system
       - name: Install PostgreSQL client tools
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-16
+          echo "/usr/lib/postgresql/16/bin" >> "$GITHUB_PATH"
+          PATH="/usr/lib/postgresql/16/bin:$PATH"
+          pg_dump --version | grep -Eq 'PostgreSQL\) 16([.]|$)'
+          pg_restore --version | grep -Eq 'PostgreSQL\) 16([.]|$)'
       - name: Compile
         run: python -m compileall -q .
       - name: Test

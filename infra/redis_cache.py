@@ -60,6 +60,7 @@ class RedisLease:
         self.renew_seconds = max(1, int(renew_seconds))
         self._released = False
         self._renew_task: asyncio.Task | None = None
+        self._release_task: asyncio.Task | None = None
 
     def start(self) -> "RedisLease":
         self._renew_task = asyncio.create_task(self._renew_loop())
@@ -75,14 +76,22 @@ class RedisLease:
         except asyncio.CancelledError:
             return
 
-    async def release(self) -> None:
-        if self._released:
-            return
+    async def _release_once(self) -> None:
         self._released = True
-        if self._renew_task is not None:
-            self._renew_task.cancel()
+        if self._renew_task is not None and self._renew_task is not asyncio.current_task():
+            if not self._renew_task.done():
+                self._renew_task.cancel()
             await asyncio.gather(self._renew_task, return_exceptions=True)
+        # Compare-and-delete por token torna seguro repetir a liberação, inclusive
+        # quando a renovação já marcou a lease como perdida.
         await self.cache.release_lock(self.key, self.token)
+
+    async def release(self) -> None:
+        self._released = True
+        if self._release_task is None:
+            self._release_task = asyncio.create_task(self._release_once())
+        # A limpeza continua mesmo que a task proprietária receba cancelamento.
+        await asyncio.shield(self._release_task)
 
     async def __aenter__(self) -> "RedisLease":
         return self

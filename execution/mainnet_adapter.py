@@ -5,6 +5,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from execution.binance_adapter import BinanceAdapterError, BinanceSpotAdapter
+from execution.live_authorization import live_submission_block_reason
 
 logger = logging.getLogger(__name__)
 
@@ -58,12 +59,25 @@ class BinanceMainnetAdapter(BinanceSpotAdapter):
                     results.append({"status": "error", "order_id": str(order_id), "reason": str(exc)})
         return {"status": "success" if all(item.get("status") != "error" for item in results) else "partial", "cancelled": results}
 
-    async def place_order(self, symbol: str, action: str, order_type: str, quantity: float, price: Optional[float] = None) -> Dict[str, Any]:
+    async def place_order(
+        self,
+        symbol: str,
+        action: str,
+        order_type: str,
+        quantity: float,
+        price: Optional[float] = None,
+        client_order_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        authorization_error = live_submission_block_reason(self.settings)
+        if authorization_error:
+            raise MainnetDisabledError(f"Mainnet bloqueada: {authorization_error}")
         if self.kill_switch_enabled:
             raise MainnetDisabledError("Kill switch ativo: novas entradas estão bloqueadas.")
         if not bool(getattr(self.settings, "LIVE_TRADING_ENABLED", False)) or not bool(getattr(self.settings, "LIVE_MODE", False)):
             raise MainnetDisabledError("Mainnet desabilitada durante a execução.")
-        return await super().place_order(symbol, action, order_type, quantity, price)
+        if not client_order_id:
+            raise MainnetDisabledError("Mainnet bloqueada: client_order_id idempotente é obrigatório.")
+        return await super().place_order(symbol, action, order_type, quantity, price, client_order_id=client_order_id)
 
     async def trigger_kill_switch(self, reason: str = "manual") -> Dict[str, Any]:
         self.activate_kill_switch(reason)

@@ -14,6 +14,8 @@ from typing import Any, Dict, Optional
 import pandas as pd
 
 from config.settings import Settings
+from execution.adapter_contracts import supports_client_order_id
+from execution.live_authorization import live_submission_block_reason
 from execution.exchange_connector import ExchangeConnector
 from infra.async_http import AsyncProviderHTTP
 
@@ -361,14 +363,27 @@ class CCXTAdapter:
             raise MarketConnectorError("CCXT não está conectado")
         return await self.exchange.fetch_order_book(self._ccxt_symbol(symbol), limit=limit)
 
-    async def place_order(self, symbol: str, action: str, order_type: str, quantity: float, price: Optional[float] = None) -> Dict[str, Any]:
+    async def place_order(
+        self,
+        symbol: str,
+        action: str,
+        order_type: str,
+        quantity: float,
+        price: Optional[float] = None,
+        client_order_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         if not bool(getattr(self.settings, "AUTONOMOUS_TRADING_ENABLED", False)):
             raise MarketConnectorError("CCXT live bloqueado: AUTONOMOUS_TRADING_ENABLED=false")
         if bool(getattr(self.settings, "SHADOW_MODE_ENABLED", True)):
             raise MarketConnectorError("CCXT live bloqueado durante shadow mode")
-        if not self.is_connected or self.exchange is None:
-            raise MarketConnectorError("CCXT não está conectado")
-        return await self.exchange.create_order(self._ccxt_symbol(symbol), order_type, action, float(quantity), price)
+        authorization_error = live_submission_block_reason(self.settings)
+        if authorization_error:
+            raise MarketConnectorError(f"CCXT live bloqueado: {authorization_error}")
+        # CCXT não está homologado para preservar/consultar clientOrderId por exchange.
+        # Não chamar create_order até esse contrato e a reconciliação remota existirem.
+        raise MarketConnectorError(
+            "CCXT live desabilitado: client_order_id e reconciliação remota não homologados"
+        )
 
     async def cancel_order(self, order_id: str, symbol: Optional[str] = None) -> Dict[str, Any]:
         if self.exchange is None:
@@ -445,10 +460,12 @@ class MarketConnector:
 
     async def place_order(self, symbol: str, action: str, order_type: str, quantity: float, price: Optional[float] = None, client_order_id: Optional[str] = None) -> Dict[str, Any]:
         method = self._adapter.place_order
-        try:
-            return await method(self.normalize_symbol(symbol), action, order_type, quantity, price, client_order_id=client_order_id)
-        except TypeError:
-            return await method(self.normalize_symbol(symbol), action, order_type, quantity, price)
+        normalized = self.normalize_symbol(symbol)
+        if client_order_id:
+            if not supports_client_order_id(method):
+                raise MarketConnectorError("adapter não declara suporte a client_order_id; envio bloqueado para preservar idempotência")
+            return await method(normalized, action, order_type, quantity, price, client_order_id=client_order_id)
+        return await method(normalized, action, order_type, quantity, price)
 
     async def cancel_order(self, order_id: str, symbol: Optional[str] = None) -> Dict[str, Any]:
         if symbol is None:

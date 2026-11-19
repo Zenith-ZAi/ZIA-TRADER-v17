@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 import pandas as pd
 
 from config.settings import Settings
+from execution.adapter_contracts import supports_client_order_id
 
 logger = logging.getLogger(__name__)
 
@@ -197,10 +198,12 @@ class ExchangeConnector:
         return await normalizer(symbol, quantity, price)
 
     async def place_order(self, symbol: str, action: str, order_type: str, quantity: float, price: Optional[float] = None, client_order_id: Optional[str] = None) -> Dict[str, Any]:
-        try:
-            return await self._adapter.place_order(symbol, action, order_type, quantity, price, client_order_id=client_order_id)
-        except TypeError:
-            return await self._adapter.place_order(symbol, action, order_type, quantity, price)
+        method = self._adapter.place_order
+        if client_order_id:
+            if not supports_client_order_id(method):
+                raise RuntimeError("adapter não declara suporte a client_order_id; envio bloqueado para preservar idempotência")
+            return await method(symbol, action, order_type, quantity, price, client_order_id=client_order_id)
+        return await method(symbol, action, order_type, quantity, price)
 
     async def cancel_order(self, order_id: str) -> Dict[str, Any]:
         return await self._adapter.cancel_order(order_id)

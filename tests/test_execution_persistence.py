@@ -23,7 +23,7 @@ class FakeRedis:
 
 
 class FakeExchange:
-    async def place_order(self, symbol, action, order_type, quantity, price=None):
+    async def place_order(self, symbol, action, order_type, quantity, price=None, client_order_id=None):
         return {
             "status": "success",
             "order_id": "order-1",

@@ -12,6 +12,7 @@ from typing import Any, Dict, Optional
 
 import pandas as pd
 from config.settings import Settings
+from execution.live_authorization import live_submission_block_reason
 
 logger = logging.getLogger(__name__)
 
@@ -93,42 +94,22 @@ class MetaTrader5Adapter:
             "timestamp_source": "exchange_tick",
         }
 
-    async def place_order(self, symbol: str, action: str, order_type: str, quantity: float, price: Optional[float] = None, **kwargs) -> Dict[str, Any]:
+    async def place_order(
+        self,
+        symbol: str,
+        action: str,
+        order_type: str,
+        quantity: float,
+        price: Optional[float] = None,
+        client_order_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Executa ordens via MT5 com proteção fail-closed."""
-        if not self.is_connected or not self._mt5:
-            raise RuntimeError("MT5 não conectado para execução")
-            
-        # Refinamento de segurança: Validação de parâmetros antes do envio
-        if quantity <= 0:
-            raise ValueError("Quantidade deve ser positiva")
-            
-        # Mapeamento de ordens MT5 (Simplificado)
-        mt5_action = self._mt5.TRADE_ACTION_DEAL
-        mt5_type = self._mt5.ORDER_TYPE_BUY if action.lower() == "buy" else self._mt5.ORDER_TYPE_SELL
-        
-        request = {
-            "action": mt5_action,
-            "symbol": symbol,
-            "volume": float(quantity),
-            "type": mt5_type,
-            "price": price if price else (self._mt5.symbol_info_tick(symbol).ask if mt5_type == self._mt5.ORDER_TYPE_BUY else self._mt5.symbol_info_tick(symbol).bid),
-            "magic": 234000,
-            "comment": "ZIA-Trader AI Execution",
-            "type_time": self._mt5.ORDER_TIME_GTC,
-            "type_filling": self._mt5.ORDER_FILLING_IOC,
-        }
-        
-        result = self._mt5.order_send(request)
-        if result.retcode != self._mt5.TRADE_RETCODE_DONE:
-            return {"status": "error", "code": result.retcode, "message": f"Falha na ordem: {result.comment}"}
-            
-        return {
-            "status": "success",
-            "order_id": str(result.order),
-            "filled_price": result.price,
-            "filled_quantity": result.volume,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
+        authorization_error = live_submission_block_reason(self.settings)
+        if authorization_error:
+            raise RuntimeError(f"MT5 live bloqueado: {authorization_error}")
+        raise RuntimeError(
+            "MT5 live desabilitado: client_order_id e reconciliação remota não estão homologados"
+        )
 
     async def get_account_balance(self) -> Dict[str, float]:
         if not self.is_connected or not self._mt5:

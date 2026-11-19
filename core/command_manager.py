@@ -33,6 +33,10 @@ class _OfflineNews:
 class CoreCommandManager:
     """Fachada de comandos para CLI/API e automação supervisionada."""
 
+    MAX_SYNC_SYMBOLS = 20
+    MAX_SYNC_CONCURRENCY = 5
+    MAX_SYNC_CANDLES = 1000
+
     def __init__(self, settings: Settings, db_manager: Any, market_connector: Any, news_processor: Any):
         self.settings = settings
         self.db_manager = db_manager
@@ -52,13 +56,41 @@ class CoreCommandManager:
         limit: int = 250,
         offline: bool = False,
     ) -> dict[str, Any]:
-        requested = [str(symbol).strip() for symbol in (symbols or self.settings.SYMBOLS) if str(symbol).strip()]
+        raw_symbols = self.settings.SYMBOLS if symbols is None else symbols
+        if isinstance(raw_symbols, str):
+            raw_symbols = [raw_symbols]
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= self.MAX_SYNC_CANDLES:
+            raise ValueError(f"limit deve estar entre 1 e {self.MAX_SYNC_CANDLES}")
+        requested = []
+        seen = set()
+        for raw_symbol in raw_symbols:
+            if len(requested) >= self.MAX_SYNC_SYMBOLS:
+                raise ValueError(f"no máximo {self.MAX_SYNC_SYMBOLS} símbolos por sincronização")
+            if not isinstance(raw_symbol, str):
+                raise ValueError("cada símbolo deve ser texto")
+            symbol = raw_symbol.strip()
+            if not symbol or len(symbol) > 64:
+                raise ValueError("símbolos não podem ser vazios nem exceder 64 caracteres")
+            key = symbol.casefold()
+            if key in seen:
+                raise ValueError("símbolos duplicados não são permitidos")
+            seen.add(key)
+            requested.append(symbol)
         if not requested:
             raise ValueError("ao menos um símbolo deve ser informado")
-        snapshots = await asyncio.gather(
-            *(self._feed(offline).fetch_snapshot(symbol, limit=limit) for symbol in requested),
-            return_exceptions=True,
-        )
+        feed = self._feed(offline)
+        semaphore = asyncio.Semaphore(min(self.MAX_SYNC_CONCURRENCY, len(requested)))
+
+        async def fetch_snapshot(symbol: str):
+            try:
+                async with semaphore:
+                    return await feed.fetch_snapshot(symbol, limit=limit)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                return exc
+
+        snapshots = await asyncio.gather(*(fetch_snapshot(symbol) for symbol in requested))
         result: dict[str, Any] = {"symbols": requested, "offline": offline, "snapshots": [], "errors": {}}
         for symbol, snapshot in zip(requested, snapshots):
             if isinstance(snapshot, Exception):

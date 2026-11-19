@@ -217,3 +217,10 @@ def test_provider_endpoint_allowlist_rejects_redirect_or_untrusted_host_configur
         UnifiedMarketDataCollector._validate_base_url(
             "http://data-api.binance.vision", "data-api.binance.vision"
         )
+
+
+def test_provider_endpoint_allowlist_rejects_nonstandard_port() -> None:
+    with pytest.raises(ProviderCollectionError, match="provider_endpoint_not_allowlisted"):
+        UnifiedMarketDataCollector._validate_base_url(
+            "https://data-api.binance.vision:8443", "data-api.binance.vision"
+        )

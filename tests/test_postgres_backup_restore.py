@@ -88,11 +88,15 @@ def test_pg_dump_restore_matches_table_counts_and_checksums(tmp_path: Path):
         finally:
             admin_connection.close()
         created = True
-        subprocess.run(
+        restore_result = subprocess.run(
             ["pg_restore", "--dbname", _libpq_url(target_url), "--exit-on-error", "--no-owner", "--no-privileges", str(dump_path)],
-            check=True,
+            check=False,
             capture_output=True,
             text=True,
+        )
+        assert restore_result.returncode == 0, (
+            f"pg_restore failed with exit code {restore_result.returncode}; "
+            f"stdout={restore_result.stdout!r}; stderr={restore_result.stderr!r}"
         )
         assert _fingerprints(target_url) == before
     finally:

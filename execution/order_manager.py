@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict
 
+from execution.live_authorization import live_submission_block_reason, requires_live_authorization
 from execution.market_connector import MarketConnector
 from risk.risk_ai import RiskAI
 from core.risk_guard import evaluate_circuit_breaker
@@ -73,10 +74,7 @@ class OrderManager:
         return [{"token": item.token, "source": item.source, "order_data": dict(item.order_data)} for item in self._pending.values()]
 
     def _live_adapter_selected(self) -> bool:
-        adapter = str(getattr(self.settings, "MARKET_ADAPTER", "binance")).lower()
-        binance_live = adapter in {"binance", "ccxt"} and str(getattr(self.settings, "BINANCE_MODE", "simulated")).lower() == "live"
-        forex_live = adapter in {"forex", "fx"} and str(getattr(self.settings, "FOREX_MODE", "paper")).lower() == "live"
-        return bool(binance_live or forex_live)
+        return requires_live_authorization(self.settings)
 
     def _authorized(self, source: str, order_data: Dict[str, Any]) -> str | None:
         if source == "ai":
@@ -92,14 +90,9 @@ class OrderManager:
             return "negociação manual desabilitada"
 
         if self._live_adapter_selected():
-            if not bool(getattr(self.settings, "MANUAL_TRADING_ENABLED", False)) and source == "manual":
-                return "ordem manual bloqueada para adapter live"
-            if not bool(getattr(self.settings, "AUTONOMOUS_TRADING_ENABLED", False)) and source == "ai":
-                return "ordem autônoma bloqueada para adapter live"
-            if bool(getattr(self.settings, "LIVE_KILL_SWITCH", True)):
-                return "live kill switch ativo"
-            if not bool(getattr(self.settings, "LIVE_TRADING_ENABLED", False)) or not bool(getattr(self.settings, "LIVE_MODE", False)):
-                return "adapter live bloqueado pelos flags de autorização"
+            authorization_error = live_submission_block_reason(self.settings)
+            if authorization_error:
+                return authorization_error
         return None
 
     async def _ensure_execution_ready(self, source: str) -> str | None:
