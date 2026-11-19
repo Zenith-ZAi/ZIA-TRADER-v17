@@ -172,6 +172,7 @@ def test_connectors_never_retry_after_adapter_type_error(connector_type):
         connector = object.__new__(MarketConnector)
         connector._adapter = adapter
         connector.market = "crypto"
+        connector.settings = settings(MARKET_ADAPTER="binance", BINANCE_MODE="simulated")
 
     with pytest.raises(TypeError, match="internal adapter bug"):
         asyncio.run(
@@ -201,6 +202,7 @@ def test_connectors_reject_adapter_without_explicit_idempotency_contract(connect
         connector = object.__new__(MarketConnector)
         connector._adapter = adapter
         connector.market = "crypto"
+        connector.settings = settings(MARKET_ADAPTER="binance", BINANCE_MODE="simulated")
         expected_exception = MarketConnectorError
 
     with pytest.raises(expected_exception, match="client_order_id"):

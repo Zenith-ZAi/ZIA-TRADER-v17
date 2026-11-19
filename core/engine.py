@@ -41,6 +41,7 @@ from core.trend_alignment import TrendAlignmentFilter
 from core.model_voting import aggregate_model_votes
 from learning.model_registry import ModelRegistryStore
 from core.dataset_integrity import sha256_file
+from execution.live_authorization import autonomous_submission_block_reason
 
 
 logger = logging.getLogger(__name__)
@@ -67,13 +68,6 @@ class RoboTraderUnified:
         self.risk_ai = RiskAI(self.settings, self.db_manager)
         self.redis_cache = redis_cache or RedisCache(self.settings.REDIS_URL)
         self.pullback_registry = pullback_registry or PullbackCacheRegistry()
-        self.autonomy_blocked = bool(
-            self.settings.AUTONOMOUS_TRADING_ENABLED
-            and self.settings.REDIS_REQUIRED_FOR_AUTONOMOUS
-            and not self.redis_cache.is_persistent
-        )
-        if self.autonomy_blocked:
-            logger.critical("Autonomia bloqueada: Redis persistente é obrigatório para manter posições live.")
         self.event_guard = EconomicEventGuard(
             self.settings.ECONOMIC_EVENTS_FILE,
             self.settings.EVENT_BLOCK_BEFORE_SECONDS,
@@ -121,6 +115,14 @@ class RoboTraderUnified:
         except Exception as e:
             logger.critical(f"Falha fatal na inicialização dos modelos de IA: {e}")
             raise
+
+    @property
+    def autonomy_blocked(self) -> bool:
+        """Reavalia o gate de autonomia no instante de cada nova entrada."""
+        return autonomous_submission_block_reason(
+            self.settings,
+            getattr(self, "redis_cache", None),
+        ) is not None
 
     def _load_neural_weights(self) -> bool:
         self.neural_model_versions = {}

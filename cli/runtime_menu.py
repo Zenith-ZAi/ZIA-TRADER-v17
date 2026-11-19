@@ -11,6 +11,7 @@ from database_manager import DatabaseManager
 from execution.execution_engine import ExecutionEngine
 from execution.market_connector import MarketConnector
 from execution.order_manager import OrderManager
+from execution.live_authorization import execution_gate_status
 from infra.redis_cache import RedisCache
 
 from cli.console import console, divider, info, menu, success, warn
@@ -32,6 +33,15 @@ def _report(db: DatabaseManager) -> None:
     console.print({"orders": len(orders), **metrics})
 
 
+def inspect_or_disable_live(configuration: Any) -> dict[str, Any]:
+    """The menu can disarm locally, never grant production authorization."""
+    if bool(getattr(configuration, "LIVE_MODE", False)):
+        configuration.LIVE_MODE = False
+        configuration.LIVE_KILL_SWITCH = True
+        return {"action": "live_disabled_locally", "execution_gates": execution_gate_status(configuration)}
+    return {"action": "live_activation_not_supported_by_menu", "execution_gates": execution_gate_status(configuration)}
+
+
 def run(db_session: Any, current_user: Any) -> None:
     db, connector, order_manager = _services()
     connected = False
@@ -45,7 +55,7 @@ def run(db_session: Any, current_user: Any) -> None:
             ("6", "Enviar ordem manual com confirmação"),
             ("11", "Executar reconciliação de posições"),
             ("12", "Executar pipeline de treinamento IA"),
-            ("13", "Preflight/alternar modo mainnet (confirmação dupla)"),
+            ("13", "Inspecionar gates / desativar LIVE (não habilita ordens)"),
             ("0", "Voltar"),
         ])
         if choice == "1":
@@ -122,16 +132,9 @@ def run(db_session: Any, current_user: Any) -> None:
             except Exception as exc:
                 warn(f"Treinamento OOS não aprovado: {exc}")
         elif choice == "13":
-            first = console.input("Digite ATIVAR-MAINNET para continuar: ").strip()
-            second = console.input("Digite ATIVAR-MAINNET novamente para confirmar: ").strip()
-            if first != "ATIVAR-MAINNET" or second != "ATIVAR-MAINNET":
-                warn("Confirmação dupla não concluída; mainnet continua bloqueada.")
-                continue
-            if not settings.LIVE_TRADING_ENABLED:
-                warn("Preflight recusado: LIVE_TRADING_ENABLED=false. Nenhuma flag foi alterada.")
-                continue
-            settings.LIVE_MODE = not bool(settings.LIVE_MODE)
-            success(f"LIVE_MODE alterado apenas no processo atual para {settings.LIVE_MODE}; reinício exige configuração explícita no ambiente.")
+            result = inspect_or_disable_live(settings)
+            console.print(result)
+            info("O menu não autoriza live. Ledger, reconciliação, ambiente e aceite humano continuam obrigatórios.")
         elif choice == "0":
             if connected:
                 asyncio.run(connector.close())

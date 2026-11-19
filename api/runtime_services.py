@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from fastapi import HTTPException
+from execution.live_authorization import execution_gate_status
 
 logger = logging.getLogger(__name__)
 
@@ -98,8 +99,9 @@ def health_payload(application: Any) -> dict[str, Any]:
                 name: bool(task and not task.done())
                 for name, task in engine_tasks_for(application).items()
             },
-            "live_trading_enabled": False,
-            "live_mode": False,
+            "live_trading_enabled": settings.LIVE_TRADING_ENABLED,
+            "live_mode": settings.LIVE_MODE,
+            "execution_gates": execution_gate_status(settings),
         }
     except HTTPException:
         raise

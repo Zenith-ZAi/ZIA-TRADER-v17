@@ -101,6 +101,13 @@ def test_initial_migration_adopts_legacy_create_all_schema(tmp_path, monkeypatch
             "audit_log",
             "market_candles",
             "equity_ledger_v1",
+            # The client-scope revision is deliberately fail-closed for any
+            # pre-existing table; remove these create_all-only tables so this
+            # fixture continues to represent a legacy schema before c3f1e2a9b7d4.
+            "tenant_v1",
+            "principal_v1",
+            "tenant_membership_v1",
+            "broker_account_v1",
         ):
             Base.metadata.tables[table_name].drop(connection, checkfirst=True)
         metadata_indexes = {

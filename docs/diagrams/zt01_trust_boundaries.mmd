@@ -1,0 +1,34 @@
+flowchart TB
+  subgraph Mercado["DADOS E ANÁLISE — implementados, sem ordem"]
+    Public["Binance público / referências diárias Alpha<br/>Premium: chave + opt-in + entitlement"] --> Collector["Coletor read-only<br/>source + asset_class + símbolo + timeframe"]
+    Collector --> MarketDB[("market_candles<br/>upsert idempotente")]
+    Feed["Feed atual do core<br/>validação OHLCV + quote + timeframes"] --> Analyze["/core/analyze sob demanda<br/>data_sufficient + news gate<br/>execution_authorized=false"]
+    MarketDB -. "ponte multiativo ainda pendente" .-> Feed
+    Analyze --> Diagnostic["Sinal candidato / regime / explicação<br/>Nenhuma ordem enviada"]
+  end
+  subgraph Identidade["IDENTIDADE — piloto aditivo, não SaaS completo"]
+    Auth["JWT verificado + RBAC atual<br/>login ainda por ambiente"] -. "binding persistente ainda pendente" .-> Caller["TrustedCaller<br/>issuer/subject exatos"]
+    IdentityDB[("tenant_v1 / principal_v1<br/>membership / broker_account_v1<br/>Sem senhas ou chaves")] --> Scope["ClientScope server-side<br/>JOIN: cliente + principal + conta + role"]
+    Caller --> Scope
+  end
+  subgraph Financeiro["LEDGER — implementação pendente"]
+    Secrets["Secret files / vault futuro<br/>referência, nunca senha no banco"] -.-> Producer["Adapter autenticado read-only<br/>conta/venue/environment verificados"]
+    Scope -.-> Producer
+    Producer -.-> Facts["Fatos imutáveis por trade<br/>fill + fee + funding/cashflow<br/>Decimal/UTC + IDs remotos"]
+    Facts -.-> Manifest["Saldos por ativo + manifesto de cobertura<br/>cursor/watermark + late data"]
+    Manifest -.-> Closure["Reconciliação independente<br/>inicial + fatos = final por ativo"]
+  end
+  subgraph Execucao["EXECUÇÃO — bloqueada"]
+    Diagnostic --> Order["OrderManager<br/>manual + confirmação / AI + Redis persistente<br/>rechecagem dinâmica"]
+    Scope -. "migração das tabelas privadas pendente" .-> Order
+    Order --> Guard["Risco + intents + reconciliação<br/>ledger verificado ausente => bloqueio"]
+    Closure -. "integração futura; getters atuais = None" .-> Guard
+    Guard --> Write["MarketConnector / Mainnet POST<br/>kill + live flags + shadow + client_order_id<br/>proteção/OCO sem bypass"]
+    Write --> Stop["HOLD / bloqueado no estado atual<br/>Live e autostart não habilitados"]
+  end
+  classDef existing fill:#e7f0fa,stroke:#285a86,color:#102c46;
+  classDef planned fill:#fff7e6,stroke:#a77b2b,color:#604614,stroke-dasharray:5 5;
+  classDef blocked fill:#fbe8e8,stroke:#a64747,color:#662b2b;
+  class Public,Collector,MarketDB,Feed,Analyze,Diagnostic,Auth,Caller,IdentityDB,Scope,Order,Guard,Write existing;
+  class Secrets,Producer,Facts,Manifest,Closure planned;
+  class Stop blocked;

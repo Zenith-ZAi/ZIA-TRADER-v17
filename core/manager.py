@@ -11,6 +11,7 @@ from data.news_processor import NewsProcessor
 from execution.exchange_connector import ExchangeConnector
 from execution.market_connector import MarketConnector
 from execution.order_manager import OrderManager
+from execution.live_authorization import execution_gate_status, restore_persisted_kill_state
 from infra.redis_cache import RedisCache
 from infra.async_http import AsyncProviderHTTP
 from core.pullback_registry import PullbackCacheRegistry
@@ -35,6 +36,8 @@ class TradingManager:
         self.db_manager = db_manager
         self.runtime_registry = RuntimeConfigRegistry(db_manager)
         self.runtime_profile = self.runtime_registry.apply_to_settings(settings)
+        self.kill_restore_status = restore_persisted_kill_state(settings, db_manager, "default_account")
+        KILL_SWITCH_ACTIVE.set(int(self.kill_restore_status["live_kill_switch"]))
         self.daily_state = DailyStateManager(max_wins=5, max_losses=2)
         self.http_client = AsyncProviderHTTP(
             connect_timeout=float(getattr(settings, "HTTP_CONNECT_TIMEOUT_SECONDS", 5.0)),
@@ -101,6 +104,11 @@ class TradingManager:
                 "multi_timeframe_enabled": self.settings.MULTI_TIMEFRAME_ENABLED,
                 "sniper_timeframe": self.settings.SNIPER_TIMEFRAME,
                 "autonomous_trading_enabled": self.settings.AUTONOMOUS_TRADING_ENABLED,
+                "manual_trading_enabled": self.settings.MANUAL_TRADING_ENABLED,
+                "live_trading_enabled": self.settings.LIVE_TRADING_ENABLED,
+                "live_mode": self.settings.LIVE_MODE,
+                "live_kill_switch": self.settings.LIVE_KILL_SWITCH,
+                "auto_start_engines": self.settings.AUTO_START_ENGINES,
                 "shadow_mode_enabled": self.settings.SHADOW_MODE_ENABLED,
                 "market_adapter": self.settings.MARKET_ADAPTER,
                 "forex_mode": self.settings.FOREX_MODE,
@@ -110,16 +118,20 @@ class TradingManager:
                 "market_type": self.market_connector.market_type,
                 "daily_state": self.daily_state.status(),
             },
+            "execution_gates": execution_gate_status(self.settings),
+            "kill_restore": getattr(self, "kill_restore_status", {"restore_status": "not_loaded"}),
+            "analysis_capabilities": {"on_demand_supported": True, "independent_continuous_observer_implemented": False},
         }
 
     async def trigger_kill_switch(self, reason: str = "manual", actor: str = "system") -> Dict[str, Any]:
-        result = await self.exchange_connector.trigger_kill_switch(reason)
-        if hasattr(self.settings, "LIVE_KILL_SWITCH"):
-            self.settings.LIVE_KILL_SWITCH = True
+        self.settings.LIVE_KILL_SWITCH = True
         KILL_SWITCH_ACTIVE.set(1)
-        if hasattr(self, "reconciler") and self.reconciler is not None:
-            self.db_manager.record_kill_switch(self.reconciler.account_id, True, reason, actor)
-        return result
+        account_id = getattr(getattr(self, "reconciler", None), "account_id", "default_account")
+        try:
+            self.db_manager.record_kill_switch(account_id, True, reason, actor)
+        except Exception:
+            raise RuntimeError("kill state não persistido; bloqueio local permanece ativo") from None
+        return await self.exchange_connector.trigger_kill_switch(reason)
 
     async def reconcile(self) -> Dict[str, Any]:
         if self.reconciler is None:

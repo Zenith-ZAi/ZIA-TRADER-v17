@@ -1,0 +1,73 @@
+{
+  "analysis": {
+    "action": "hold",
+    "candidate_action": "hold",
+    "confidence": 0.5199032111871865,
+    "execution_authorized": false,
+    "reasons": [
+      "componentes sem dire\u00e7\u00e3o suficientemente convergente",
+      "confian\u00e7a abaixo do limiar operacional",
+      "livro de ofertas indispon\u00edvel; fluxo n\u00e3o usado no score"
+    ],
+    "regime": "lateral",
+    "status": "rejected"
+  },
+  "checks": {
+    "closed_candles_persisted": true,
+    "execution_adapters_imported": false,
+    "feature_frame_valid": true,
+    "idempotent_reimport": true
+  },
+  "decision": {
+    "action": "HOLD",
+    "reasons": [
+      "smoke_only_no_trade_intent",
+      "risk_ledger_news_license_not_verified"
+    ]
+  },
+  "features": {
+    "canonical_match": true,
+    "columns": 10,
+    "rows": 119,
+    "sha256": "c90ac030210cdd7d08a1e89b4c455c620f1888b50efe3c2888dfe8217397b448",
+    "valid": true,
+    "valid_rows": 86
+  },
+  "idempotency": {
+    "count_unchanged": true,
+    "http_calls": 1
+  },
+  "news": {
+    "status": "not_requested"
+  },
+  "orders_sent": 0,
+  "request": {
+    "asset_class": "crypto",
+    "limit": 120,
+    "source": "binance_public",
+    "symbol": "BTC/USDT",
+    "timeframe": "1h"
+  },
+  "rows": {
+    "persisted": 119,
+    "received": 119,
+    "reimported": 119,
+    "stored_after_reimport": 119,
+    "stored_before_reimport": 119
+  },
+  "schema_version": "sandbox_backend_smoke_v1",
+  "source": {
+    "asset_class": "crypto",
+    "error_code": null,
+    "first_timestamp": "2026-11-14T17:00:00+00:00",
+    "last_timestamp": "2026-11-19T15:00:00+00:00",
+    "persisted_rows": 119,
+    "provider": "binance_public",
+    "rows_received": 119,
+    "status": "persisted",
+    "symbol": "BTC/USDT",
+    "timeframe": "1h",
+    "volume_unavailable_rows": 0
+  },
+  "status": "ok"
+}

@@ -15,7 +15,7 @@ import pandas as pd
 
 from config.settings import Settings
 from execution.adapter_contracts import supports_client_order_id
-from execution.live_authorization import live_submission_block_reason
+from execution.live_authorization import live_submission_block_reason, execution_gate_status
 from execution.exchange_connector import ExchangeConnector
 from infra.async_http import AsyncProviderHTTP
 
@@ -458,7 +458,15 @@ class MarketConnector:
     async def normalize_order_values(self, symbol: str, quantity: float, price: Optional[float] = None) -> Dict[str, float]:
         return await self._adapter.normalize_order_values(self.normalize_symbol(symbol), quantity, price)
 
+    def _assert_live_write_gate(self) -> None:
+        if getattr(self, "settings", None) is None:
+            raise MarketConnectorError("submissão bloqueada: configuração do adapter ausente")
+        gates = execution_gate_status(self.settings)
+        if gates["live_adapter_selected"] and not gates["live_flags_passed"]:
+            raise MarketConnectorError(f"submissão live bloqueada: {gates['block_reason']}")
+
     async def place_order(self, symbol: str, action: str, order_type: str, quantity: float, price: Optional[float] = None, client_order_id: Optional[str] = None) -> Dict[str, Any]:
+        self._assert_live_write_gate()
         method = self._adapter.place_order
         normalized = self.normalize_symbol(symbol)
         if client_order_id:
@@ -495,6 +503,7 @@ class MarketConnector:
         return list(await method()) if method is not None else []
 
     async def place_protection_order(self, protection: Dict[str, Any]) -> Dict[str, Any]:
+        self._assert_live_write_gate()
         method = getattr(self._adapter, "place_protection_order", None)
         payload = dict(protection)
         payload["symbol"] = self.normalize_symbol(payload["symbol"])
@@ -503,6 +512,7 @@ class MarketConnector:
         return await self.place_order(payload["symbol"], payload["action"], payload.get("order_type", "market"), float(payload["quantity"]), payload.get("limit_price") or payload.get("stop_price"), payload.get("client_order_id"))
 
     async def place_oco_orders(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        self._assert_live_write_gate()
         method = getattr(self._adapter, "place_oco_orders", None)
         if method is None:
             return {"status": "unsupported", "reason": "adapter sem OCO nativo"}
