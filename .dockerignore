@@ -28,6 +28,10 @@ logs
 *.key
 **/*.pem
 **/*.key
+secrets
+**/secrets
+.secrets
+**/.secrets
 
 # Exclude local datasets/outputs but keep the runtime NewsProcessor module.
 data/*

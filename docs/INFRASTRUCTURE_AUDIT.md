@@ -1,8 +1,8 @@
 # Auditoria de infraestrutura e configuração
 
-**Data:** 2026-10-21. **Resultado:** configuração estrutural revisada; Docker/Compose e VPS **não executados**.
+**Atualizado:** 2026-11-19. O inventário inicial abaixo registra a auditoria de 2026-10-21; build e testes PostgreSQL de CI posteriores constam nos adendos. O hardening da PR #32 foi integrado. O incremento atual valida egress/credenciais e coleta pública no sandbox, não staging VPS/Compose ou restore Redis real.
 
-## Inventário relevante
+## Inventário histórico de 2026-10-21
 
 - `Dockerfile`: base `python:3.12-slim`, instala `requirements.txt`, copia aplicação, cria usuário `nonroot` e executa sem privilégios.
 - `docker-compose.vps.yml`: PostgreSQL 16, Redis 7 com AOF/senha, `db-init`, API, worker, perfis opcionais de coleta, drift, jobs, proxy Nginx e Prometheus; volumes nomeados para estado.
@@ -51,3 +51,12 @@ Status **parcial, somente estático**. Execute o runbook em staging isolado com 
 ### Errata do follow-up independente — 2026-11-10
 
 A revisão independente inicial encontrou dois P2 (hostname TLS e timeout de comandos); o follow-up encontrou que a configuração não chegava ao container API e que checar chave privada exigiria montá-la ali. Foram corrigidos: Compose encaminha apenas as três configurações TLS não secretas; o preflight usa hostname/SNI da URL, conecta ao DNS interno `nginx:443` e verifica handshake CA/hostname sem ler/montar a chave no API. GNU `timeout` envolve cada chamada Docker; testes bloqueiam dump, snapshot e cópias. Suíte local: **310 passed, 4 skipped, 1 warning**. CI `42836399864` no SHA `4893d18` passou com **314 passed, 1 warning** em PostgreSQL 16 e build/smoke do container; incompatibilidade inicial foi resolvida fixando o cliente em 16. PR #32 está aberta sem revisão humana registrada, e CodeRabbit foi ignorado. Certificado público, restore Redis/VPS e staging continuam pendentes; nenhum runtime de produção foi iniciado.
+
+
+## Egress e credenciais do backend — 2026-11-19
+
+O incremento remove herança implícita de HTTP_PROXY/HTTPS_PROXY/ALL_PROXY e CA de ambiente nos clients gerenciados de HTTP compartilhado, coletor unificado, smoke e Spot Testnet/Demo (trust_env=False). O transporte rejeita AsyncClient real injetado com herança habilitada; redirects continuam bloqueados. Um proxy HTTPS não lê payload dentro de TLS válido apenas por encaminhar CONNECT: a ameaça inclui desvio de tráfego e confiança de CA injetada. Proxy/CA legítimo exige configuração explícita e revisão de egress, não bypass por variável do ambiente.
+
+.env, material .pem/.key e diretórios secrets/.secrets estão excluídos do Git e build Docker. Secret files são fonte nativa Pydantic opcional por _secrets_dir; não há mount automático de /run/secrets, KMS, rotação ou vault por cliente. Mount somente leitura e permissões devem ser assegurados no deployment. Nenhuma chave real foi inserida no checkout ou enviada ao repositório nesta rodada.
+
+A validação real é de coleta pública Binance em SQLite isolado, 119 candles, reimportação idempotente e zero ordens. Ela não valida staging persistente, backup/restore VPS, Redis RDB real, TLS ou RPO/RTO. A PR #32 já foi integrada, portanto sua menção como aberta no adendo histórico acima não é o estado atual. O ledger segue audit-only. Suíte local final: **357 passed, 4 skipped, 1 warning**; CI do novo SHA deve ser consultado na PR associada. Limites: `docs/reports/backend_provider_security_2026-11-19.md` e `docs/BACKEND_SANDBOX_GUIDE.md`.

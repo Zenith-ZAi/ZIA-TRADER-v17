@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from api.dependencies import get_admin_user, get_app_settings, get_trader_user, get_trading_manager
 from core.market_data_collector import MarketDataCollectionError, ProviderCollectionError
+from core.provider_catalog import build_provider_catalog
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -139,6 +140,15 @@ async def collect_market_data(
         # Do not log arbitrary provider exceptions: query URLs can contain API keys.
         logger.error("Market-data collection failed (%s)", type(exc).__name__)
         raise HTTPException(status_code=503, detail="coleta indisponível no momento") from exc
+
+
+@router.get("/integrations/catalog")
+async def integrations_catalog(
+    current_user: dict[str, Any] = Depends(get_admin_user),
+    settings: Any = Depends(get_app_settings),
+) -> dict[str, Any]:
+    """Return metadata only; credentials and provider health never cross this API."""
+    return {"providers": build_provider_catalog(settings)}
 
 
 @router.get("/api/optimize_sharpe")

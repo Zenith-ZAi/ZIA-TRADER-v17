@@ -12,9 +12,7 @@ def test_optional_news_providers_are_normalized():
         TWELVE_DATA_API_KEY="twelve-test",
         NEWS_PROVIDER_ARTICLES=5,
         NEWS_MAX_ARTICLES=10,
-        MARKETAUX_BASE_URL="https://test.local/marketaux",
-        FINNHUB_BASE_URL="https://test.local/finnhub",
-        TWELVE_DATA_BASE_URL="https://test.local/twelve",
+        NEWS_ENABLED_KEYED_PROVIDERS=["marketaux", "finnhub", "twelve_data"],
     )
 
     def fake_get(url, params, headers):
@@ -49,7 +47,7 @@ def test_trend_score_uses_directional_change_only():
 
 
 def test_news_provider_errors_degrade_without_fabricating():
-    settings = Settings(MARKETAUX_API_KEY="marketaux-test", MARKETAUX_BASE_URL="https://test.local/marketaux")
+    settings = Settings(MARKETAUX_API_KEY="marketaux-test", NEWS_ENABLED_KEYED_PROVIDERS=["marketaux"])
 
     def failing_get(url, params, headers):
         raise TimeoutError("provider timeout")

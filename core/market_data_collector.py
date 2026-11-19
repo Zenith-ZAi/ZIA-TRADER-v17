@@ -144,6 +144,7 @@ class UnifiedMarketDataCollector:
                 timeout=httpx.Timeout(12.0, connect=4.0),
                 limits=httpx.Limits(max_connections=12, max_keepalive_connections=6),
                 follow_redirects=False,
+                trust_env=False,
             )
             self.http = AsyncProviderHTTP(
                 connect_timeout=4.0,

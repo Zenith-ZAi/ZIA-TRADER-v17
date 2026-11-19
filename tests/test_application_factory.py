@@ -29,6 +29,7 @@ EXPECTED_ROUTES = {
     ("GET", "/core/analyze"),
     ("POST", "/core/sync"),
     ("POST", "/market-data/collect"),
+    ("GET", "/integrations/catalog"),
     ("GET", "/api/optimize_sharpe"),
     ("POST", "/runtime/reload"),
     ("WEBSOCKET", "/ws/dashboard"),

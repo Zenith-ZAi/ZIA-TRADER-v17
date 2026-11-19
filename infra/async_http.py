@@ -1,18 +1,54 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import logging
 import math
 import random
+import secrets
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
 
 import httpx
 
+from infra.provider_security import safe_provider_error
 from monitoring.metrics import PROVIDER_REQUESTS
 
 logger = logging.getLogger(__name__)
+
+
+class _TransportLogFilter(logging.Filter):
+    """HTTP clients log complete URLs at INFO, including query API credentials."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.msg = "HTTP transport event (request details suppressed)"
+        record.args = ()
+        record.exc_info = None
+        record.exc_text = None
+        return True
+
+
+def _protect_transport_logs() -> None:
+    # Filters on ancestors do not apply to descendant loggers. Register on emitters.
+    for name in ("httpx", "httpcore.connection", "httpcore.http11", "httpcore.http2", "httpcore.proxy"):
+        transport_logger = logging.getLogger(name)
+        if not any(isinstance(item, _TransportLogFilter) for item in transport_logger.filters):
+            transport_logger.addFilter(_TransportLogFilter())
+
+
+class ProviderRequestError(RuntimeError):
+    """Public-safe failure without request URL, headers or provider response text."""
+
+
+def _raise_safe_error(exc: Exception) -> None:
+    code = safe_provider_error(exc)
+    if isinstance(exc, (TimeoutError, httpx.TimeoutException)):
+        raise TimeoutError(code) from None
+    if isinstance(exc, ValueError):
+        raise ValueError(code) from None
+    raise ProviderRequestError(code) from None
 
 
 class ProviderCircuitOpen(RuntimeError):
@@ -58,6 +94,7 @@ class AsyncProviderHTTP:
         backoff_max_seconds: float = 2.0,
         jitter_ratio: float = 0.25,
     ):
+        _protect_transport_logs()
         self.failure_threshold = max(1, int(failure_threshold))
         self.cooldown_seconds = max(1.0, float(cooldown_seconds))
         self.max_retries = max(0, min(int(max_retries), 5))
@@ -70,6 +107,8 @@ class AsyncProviderHTTP:
             min(30.0, max(0.0, ceiling if math.isfinite(ceiling) else 2.0)),
         )
         self.jitter_ratio = max(0.0, min(jitter if math.isfinite(jitter) else 0.25, 1.0))
+        if isinstance(client, httpx.AsyncClient) and getattr(client, "_trust_env", True):
+            raise ValueError("http_client_environment_trust_forbidden")
         self._client_owned = client is None
         self.client = client or httpx.AsyncClient(
             timeout=httpx.Timeout(
@@ -83,12 +122,14 @@ class AsyncProviderHTTP:
                 max_connections=max(1, int(max_connections)),
                 max_keepalive_connections=max(1, int(max_keepalive_connections)),
             ),
-            follow_redirects=True,
+            follow_redirects=False,
+            trust_env=False,
         )
         self._provider_concurrency = max(1, int(provider_concurrency))
         self._semaphores: Dict[str, asyncio.Semaphore] = {}
         self._states: Dict[str, _ProviderState] = {}
         self._cache: Dict[str, tuple[float, Any]] = {}
+        self._cache_salt = secrets.token_bytes(32)
         self._state_guard = asyncio.Lock()
 
     def _state(self, provider: str) -> _ProviderState:
@@ -97,10 +138,12 @@ class AsyncProviderHTTP:
     def _semaphore(self, provider: str) -> asyncio.Semaphore:
         return self._semaphores.setdefault(provider, asyncio.Semaphore(self._provider_concurrency))
 
-    @staticmethod
-    def _cache_key(provider: str, url: str, params: Optional[Dict[str, Any]], response_type: str) -> str:
+    def _cache_key(self, provider: str, url: str, params: Optional[Dict[str, Any]], response_type: str,
+                   headers: Optional[Dict[str, str]] = None, method: str = "GET") -> str:
         normalized_params = tuple(sorted((str(key), str(value)) for key, value in (params or {}).items()))
-        return repr((provider, url, normalized_params, response_type))
+        normalized_headers = tuple(sorted((str(key).lower(), str(value)) for key, value in (headers or {}).items()))
+        payload = repr((provider, method.upper(), url, normalized_params, normalized_headers, response_type)).encode()
+        return hmac.new(self._cache_salt, payload, hashlib.sha256).hexdigest()
 
     async def _check_circuit(self, provider: str) -> None:
         async with self._state_guard:
@@ -124,7 +167,7 @@ class AsyncProviderHTTP:
         async with self._state_guard:
             state = self._state(provider)
             state.failures += 1
-            state.last_error = str(exc)
+            state.last_error = safe_provider_error(exc)
             if state.failures >= self.failure_threshold:
                 state.opened_until = time.monotonic() + self.cooldown_seconds
                 logger.warning("Circuit breaker abriu para %s por %.1fs", provider, self.cooldown_seconds)
@@ -166,7 +209,7 @@ class AsyncProviderHTTP:
         ttl_seconds: float = 0.0,
         response_type: str = "json",
     ) -> Any:
-        key = self._cache_key(provider, url, params, response_type)
+        key = self._cache_key(provider, url, params, response_type, headers, method)
         now = time.monotonic()
         cached = self._cache.get(key)
         if cached and cached[0] > now:
@@ -179,7 +222,11 @@ class AsyncProviderHTTP:
             await self._check_circuit(provider)
             try:
                 async with self._semaphore(provider):
-                    response = await self.client.request(method, url, params=params, headers=headers or {})
+                    # Per-request policy overrides injected httpx clients too.
+                    if isinstance(self.client, httpx.AsyncClient):
+                        response = await self.client.request(method, url, params=params, headers=headers or {}, follow_redirects=False)
+                    else:
+                        response = await self.client.request(method, url, params=params, headers=headers or {})
                     response.raise_for_status()
                     value = response.json() if response_type == "json" else response.text
                 await self._success(provider)
@@ -191,7 +238,7 @@ class AsyncProviderHTTP:
                 PROVIDER_REQUESTS.labels(provider=provider, status="error").inc()
                 await self._failure(provider, exc)
                 if attempt >= self.max_retries or not self._retryable(method, exc):
-                    raise
+                    _raise_safe_error(exc)
                 delay = self._retry_delay(attempt, exc)
                 attempt += 1
                 if delay:
@@ -218,7 +265,7 @@ class AsyncProviderHTTP:
                 PROVIDER_REQUESTS.labels(provider=provider, status="error").inc()
                 await self._failure(provider, exc)
                 if attempt >= self.max_retries or not self._retryable_sync(exc):
-                    raise
+                    _raise_safe_error(exc)
                 delay = self._retry_delay(attempt)
                 attempt += 1
                 if delay:

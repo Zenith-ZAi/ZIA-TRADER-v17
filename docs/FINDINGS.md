@@ -1,6 +1,6 @@
 # Findings — ZIA-TRADER v17
 
-Atualizado em 2026-11-10 na branch `fix/phase9-nov9-fail-closed-hardening`, baseada no `master` pós-PR #31 (`ea5dae770c554aa0e759c4610c739af5a0f66a7f`); alterações correntes ainda não foram integradas. As evidências de CI anteriores permanecem datadas em suas entradas. Este registro contém gaps verificados, correções por fase e limitações ainda abertas. Não é uma declaração de ausência de outros defeitos.
+Atualizado em 2026-11-19. A PR #32 da Fase 9 foi squash-merged em `master` (`56c2025`) com branch preservada. O incremento de segurança de provedores/sandbox está em `fix/backend-provider-security-nov19`: 357 testes locais passados, 4 skips e 1 warning; CI/review do novo SHA são gates próprios. As entradas anteriores preservam o estado da data de cada revisão; o adendo final registra as correções atuais. Este registro contém gaps verificados e limitações abertas, não uma declaração de ausência de outros defeitos.
 
 | Arquivo/linha | Evidência observada | Correção sugerida (aguarda revisão/aprovação) |
 | --- | --- | --- |
@@ -233,3 +233,18 @@ Limites: a camada de inteligência do anexo ainda não está completa. Faltam pr
 ### Errata pós-revisão independente — 2026-11-10
 
 A revisão independente inicial encontrou dois P2: hostname TLS incompatível com certificado público e timeout de polling que não limitava comandos Docker bloqueados; ambos foram corrigidos com SNI pelo domínio, destino TCP `nginx:443` e GNU `timeout` por operação. No follow-up foi encontrado outro P2: o `.env.vps` não propagava esses parâmetros ao container API e os checks locais exigiam acesso à chave; Compose agora encaminha só os parâmetros não secretos e o preflight valida o handshake ao Nginx sem montar chave no API. Também foi fechada a lacuna P3 de cobertura de timeout em dump PostgreSQL e cópias; testes fake cobrem todas as operações e o contrato Compose. Local: **310 passed, 4 skipped, 1 warning**. CI `42836399864` no SHA `4893d18`: **314 passed, 1 warning** e build/smoke da imagem aprovados após fixar cliente 16. Revisão humana não registrada; CodeRabbit foi ignorado. Redis, TLS público e VPS/staging não foram testados; live/autonomia continuam OFF.
+
+
+## Incremento backend de provedores e sandbox — 2026-11-19
+
+A Fase 9/PR #32 já foi integrada por squash autorizado (`56c2025`), mantendo a branch. Este incremento usa branch separada e não reabre seu hardening.
+
+- **Corrigido:** Settings exclui 19 campos sensíveis de repr/model_dump e oculta inputs nas mensagens padrão de validação. Secret files nativos são opt-in pelo construtor; nenhum vault ou banco de senhas foi criado.
+- **Corrigido:** logs/health do transporte e de notícias deixam de incluir exceções/URLs brutas. Cache usa HMAC com salt de instância e inclui headers/método, evitando segredos em cache keys e reutilização entre credenciais explícitas diferentes.
+- **Corrigido:** notícias com chave têm host/path HTTPS allowlisted antes da chamada e redirects desabilitados. A revisão independente identificou herança de proxy/CA por trust_env=True; clients gerenciados de HTTP, coletor, smoke e Spot Testnet/Demo usam trust_env=False. O transporte rejeita AsyncClient real injetado com herança habilitada. Não é uma garantia sobre SDKs/clients arbitrários fora desses caminhos.
+- **Corrigido:** chave não autoriza automaticamente notícias pagas. NEWS_ENABLED_KEYED_PROVIDERS=[] é o padrão; CoinGecko Pro exige chave + opt-in, sem enviar chave no acesso público não habilitado. Marketaux usa teto conservador de três artigos e Alpha Vantage usa namespaces CRYPTO/FOREX no NEWS_SENTIMENT, cujo entitlement deve ser confirmado.
+- **Corrigido:** helpers de notícias/tendências usam sessão com context manager também em falha; os dois callers async usam to_thread, mantendo sequência dos writes. Cancelamento do await não desfaz commit já iniciado; demais migrações ORM continuam pendentes.
+- **Implementado:** GET /integrations/catalog exige admin (401/403/200 testados); expõe metadados/gates locais, sem segredo ou URLs. Não é health/entitlement nem permissão de execução. O catálogo de candles reutiliza a classificação do coletor, sem promover CoinGecko/Yahoo a feed executável.
+- **Validado com fonte real:** Binance público → SQLite isolado → features/sinal, 119 linhas e reimportação idempotente, decisão HOLD/zero ordens. O script não carrega .env, não altera os.environ e não constrói adapter de execução.
+
+Suíte local final: **357 passed, 4 skipped, 1 warning**. Relatório: `docs/reports/backend_provider_security_2026-11-19.md`. Guia/checklist: `docs/BACKEND_SANDBOX_GUIDE.md`. Evidência: `docs/reports/evidence/backend_sandbox_smoke_2026-11-19.json`. CI do novo SHA deve ser consultado na PR associada; restore VPS/Redis real, licença/quotas, identidade multiusuário e reconciliação financeira autoritativa permanecem gates abertos.

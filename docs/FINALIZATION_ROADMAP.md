@@ -1,10 +1,10 @@
-# Plano de finalização — ZIA-TRADER v17, Fase 9 em andamento
+# Plano de finalização — ZIA-TRADER v17, backend em validação
 
-**Atualizado:** 2026-11-10. **Base atual:** `master` pós-PR #31, SHA `ea5dae770c554aa0e759c4610c739af5a0f66a7f`; hardening incremental está em `fix/phase9-nov9-fail-closed-hardening` e ainda não foi integrado. As estimativas de prontidão abaixo não foram recalculadas para este diff não integrado. O objetivo segue sendo **pré-produção supervisionada em VPS**, não prometer capital real ou código sem defeitos.
+**Atualizado:** 2026-11-19. **Base atual:** `master` pós-PR #32, SHA `56c20252e28605e3c6568bbcd3ebbf0c3935a6a5`; o hardening da Fase 9 foi integrado por squash autorizado e sua branch preservada. O incremento atual está em `fix/backend-provider-security-nov19`, com 357 testes locais passados, 4 skips e 1 warning. O status CI do novo SHA é um gate próprio da PR. O critério vigente de completo é o checklist de `docs/BACKEND_SANDBOX_GUIDE.md`; não há nova pontuação percentual de produção. O objetivo segue sendo **pré-produção supervisionada**, sem autorização de capital real.
 
-## Onde estamos: pontuação de engenharia, não métrica estatística
+## Estimativas históricas de engenharia — não representam o estado atual
 
-Os percentuais abaixo são uma avaliação de gates/evidências, não uma contagem de linhas implementadas, probabilidade de lucro ou certificação de segurança. Foram atribuídos conforme itens verificados e bloqueios ainda abertos.
+Os percentuais abaixo são mantidos apenas como histórico, não uma medida vigente de prontidão, contagem de linhas, probabilidade de lucro ou certificação. Para aceite atual usar gates verificáveis, relatório de 2026-11-19 e evidência da PR associada.
 
 | Dimensão | Estimativa | Evidência e limitador dominante |
 |---|---:|---|
@@ -125,3 +125,16 @@ Relatório e diagrama de fronteiras: `docs/reports/phase9_architecture_hardening
 ### Follow-up de hardening — revisão independente e P2 corrigidos (2026-11-10)
 
 A revisão independente inicial encontrou dois P2 (hostname TLS incompatível e timeout sem limite por comando); ambos foram corrigidos. O follow-up revelou que as variáveis não eram propagadas ao serviço API pelo Compose e que o preflight não podia inspecionar a chave privada sem montá-la no API; o Compose agora encaminha apenas configurações não secretas, e o handshake contra Nginx ativo substitui os checks locais de arquivo. A cobertura de timeout foi ampliada para dump PostgreSQL, execução Redis e todas as cópias, além de regressão do contrato YAML. Suíte local: **310 passed, 4 skipped, 1 warning**. CI `42836399864` no SHA `4893d18` passou com **314 passed, 1 warning** e build/smoke do container. Revisão humana da PR #32 não está registrada; CodeRabbit foi ignorado. TLS/Redis real e staging seguem pendentes; live/autonomia desligados.
+
+
+## Estado atual — backend, conectores e sandbox (2026-11-19)
+
+A PR #32 foi integrada por squash autorizado em `master` no commit `56c20252e28605e3c6568bbcd3ebbf0c3935a6a5`, preservando `fix/phase9-nov9-fail-closed-hardening`. O CI pós-merge da Fase 9 foi acompanhado na etapa anterior. Notas de PR/CI pendentes de 2026-11-10 acima são histórico, não o estado atual do merge.
+
+O incremento `fix/backend-provider-security-nov19` deriva dessa master e se limita ao backend: catálogo admin-only sem segredos, redaction de Settings/health/logs, cache particionado por autenticação com chaves HMAC, allowlist HTTPS de notícias, ausência de redirects e de proxy/CA herdados, opt-in de provedores com chave, persistência de notícias/tendências fora do loop com sessões próprias e smoke público sem execução. Não modifica pesos, sizing, ledger audit-only ou bloqueios live.
+
+O teste real coletou 119 candles fechados de BTC/USDT 1h, persistiu/reimportou 119 linhas sem duplicação e verificou 10 features com 86 linhas válidas. O core rejeitou a candidata de compra por confiança operacional insuficiente; a decisão permaneceu HOLD, com zero ordens e sem credenciais. Evidência: `docs/reports/evidence/backend_sandbox_smoke_2026-11-19.json`.
+
+Validação integral local final: **357 passed, 4 skipped, 1 warning**. O guia `docs/BACKEND_SANDBOX_GUIDE.md` define conectores/dados, segredo/licença e checklist verificável. O relatório `docs/reports/backend_provider_security_2026-11-19.md` registra os testes e o achado independente de egress corrigido. CI PostgreSQL/container e revisão da PR deste incremento são gates próprios; consultar a PR associada para o SHA e resultado vigentes.
+
+**Ainda pendente:** demais callsites 9.3, ledger autoritativo 8B/C, cotas/custos distribuídos e entitlement, identidade/isolamento por cliente, auth WebSocket público sem token em query, testes manuais frontend/backend, Testnet/shadow prolongado e staging VPS com TLS, restart, restore PostgreSQL/Redis, alertas e runbook. Não houve publicação de servidor ou habilitação live. Os dois callers leaf de persistência de notícias/tendências migrados não encerram o inventário histórico de 59 callsites.
