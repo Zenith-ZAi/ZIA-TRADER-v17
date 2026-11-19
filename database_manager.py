@@ -544,75 +544,71 @@ class DatabaseManager:
 
     # News and trend persistence
     def create_news_article(self, article: Dict[str, object], symbol: Optional[str] = None) -> NewsArticle:
-        db = self.SessionLocal()
-        provider = str(article.get("provider") or article.get("source") or "unknown")
-        title = str(article.get("title") or "Untitled")
-        url = str(article.get("url") or "")
-        external_id = hashlib.sha256(f"{provider}|{url}|{title}".encode("utf-8")).hexdigest()
-        existing = db.query(NewsArticle).filter(NewsArticle.external_id == external_id).first()
-        if existing:
-            existing.sentiment_score = float(article.get("sentiment_score") or 0.0)
+        with self.SessionLocal() as db:
+            provider = str(article.get("provider") or article.get("source") or "unknown")
+            title = str(article.get("title") or "Untitled")
+            url = str(article.get("url") or "")
+            external_id = hashlib.sha256(f"{provider}|{url}|{title}".encode("utf-8")).hexdigest()
+            existing = db.query(NewsArticle).filter(NewsArticle.external_id == external_id).first()
+            if existing:
+                existing.sentiment_score = float(article.get("sentiment_score") or 0.0)
+                db.commit()
+                db.refresh(existing)
+                return existing
+            published_at = article.get("time_published")
+            if isinstance(published_at, str):
+                try:
+                    published_at = datetime.fromisoformat(published_at.replace("Z", "+00:00")).replace(tzinfo=None)
+                except ValueError:
+                    published_at = None
+            news_article = NewsArticle(
+                external_id=external_id,
+                provider=provider,
+                symbol=symbol or article.get("ticker"),
+                title=title,
+                summary=str(article.get("summary") or ""),
+                url=url,
+                published_at=published_at,
+                sentiment_score=float(article.get("sentiment_score") or 0.0),
+                metadata_json={key: value for key, value in article.items() if key not in {"title", "summary", "url", "sentiment_score"}},
+            )
+            db.add(news_article)
             db.commit()
-            db.refresh(existing)
-            db.close()
-            return existing
-        published_at = article.get("time_published")
-        if isinstance(published_at, str):
-            try:
-                published_at = datetime.fromisoformat(published_at.replace("Z", "+00:00")).replace(tzinfo=None)
-            except ValueError:
-                published_at = None
-        news_article = NewsArticle(
-            external_id=external_id,
-            provider=provider,
-            symbol=symbol or article.get("ticker"),
-            title=title,
-            summary=str(article.get("summary") or ""),
-            url=url,
-            published_at=published_at,
-            sentiment_score=float(article.get("sentiment_score") or 0.0),
-            metadata_json={key: value for key, value in article.items() if key not in {"title", "summary", "url", "sentiment_score"}},
-        )
-        db.add(news_article)
-        db.commit()
-        db.refresh(news_article)
-        db.close()
-        return news_article
+            db.refresh(news_article)
+            return news_article
 
     def create_trend_snapshot(self, trend: Dict[str, object]) -> TrendSnapshot:
-        db = self.SessionLocal()
-        provider = str(trend.get("provider") or trend.get("source") or "unknown")
-        symbol = str(trend.get("symbol") or "unknown")
-        trend_score = float(trend.get("trend_score") or 0.0)
-        market_cap_rank = trend.get("market_cap_rank")
-        price_change_24h = trend.get("price_change_24h")
-        metadata = dict(trend)
-        existing = db.query(TrendSnapshot).filter(
-            TrendSnapshot.provider == provider,
-            TrendSnapshot.symbol == symbol,
-            TrendSnapshot.trend_score == trend_score,
-            TrendSnapshot.market_cap_rank == market_cap_rank,
-            TrendSnapshot.price_change_24h == price_change_24h,
-        ).order_by(TrendSnapshot.observed_at.desc()).first()
-        if existing and existing.metadata_json == metadata:
-            existing.observed_at = utc_now()
+        with self.SessionLocal() as db:
+            provider = str(trend.get("provider") or trend.get("source") or "unknown")
+            symbol = str(trend.get("symbol") or "unknown")
+            trend_score = float(trend.get("trend_score") or 0.0)
+            market_cap_rank = trend.get("market_cap_rank")
+            price_change_24h = trend.get("price_change_24h")
+            metadata = dict(trend)
+            existing = db.query(TrendSnapshot).filter(
+                TrendSnapshot.provider == provider,
+                TrendSnapshot.symbol == symbol,
+                TrendSnapshot.trend_score == trend_score,
+                TrendSnapshot.market_cap_rank == market_cap_rank,
+                TrendSnapshot.price_change_24h == price_change_24h,
+            ).order_by(TrendSnapshot.observed_at.desc()).first()
+            if existing and existing.metadata_json == metadata:
+                existing.observed_at = utc_now()
+                db.commit()
+                db.refresh(existing)
+                return existing
+            snapshot = TrendSnapshot(
+                provider=provider,
+                symbol=symbol,
+                trend_score=trend_score,
+                market_cap_rank=market_cap_rank,
+                price_change_24h=price_change_24h,
+                metadata_json=metadata,
+            )
+            db.add(snapshot)
             db.commit()
-            db.refresh(existing)
-            db.close()
-            return existing
-        snapshot = TrendSnapshot(
-            provider=provider,
-            symbol=symbol,
-            trend_score=trend_score,
-            market_cap_rank=market_cap_rank,
-            price_change_24h=price_change_24h,
-            metadata_json=metadata,
-        )
-        db.add(snapshot)
-        db.commit()
-        db.refresh(snapshot)
-        db.close()
-        return snapshot
+            db.refresh(snapshot)
+            return snapshot
 
     # AI shadow observations
     def create_ai_observation(self, observation: Dict[str, object]) -> AIObservation:

@@ -66,7 +66,10 @@ def evaluate_news_gate(
     now_utc = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     article_list = list(articles or [])
     health = provider_health or {}
-    healthy_providers = sum(1 for status in health.values() if isinstance(status, dict) and status.get("ok"))
+    healthy_providers = sum(
+        1 for status in health.values()
+        if isinstance(status, dict) and status.get("enabled", True) is not False and status.get("ok")
+    )
     fresh_article_list, unknown_timestamp_articles, future_timestamp_articles, stale_timestamp_articles = filter_fresh_news_articles(
         article_list, settings, now=now_utc
     )

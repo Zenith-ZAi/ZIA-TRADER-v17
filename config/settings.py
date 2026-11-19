@@ -1,8 +1,22 @@
 import os
 
-from pydantic import ConfigDict, field_validator
+from pydantic import ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings
 from typing import List, Optional, Dict
+
+
+NEWS_KEYED_PROVIDER_NAMES = frozenset(
+    {
+        "alpha_vantage",
+        "marketaux",
+        "finnhub",
+        "twelve_data",
+        "benzinga",
+        "newsapi",
+        "cryptopanic",
+        "coingecko",
+    }
+)
 
 
 def _env_value(*names: str) -> Optional[str]:
@@ -30,19 +44,23 @@ class Settings(BaseSettings):
     LIVE_KILL_SWITCH: bool = os.getenv("LIVE_KILL_SWITCH", "true").lower() == "true"
     NEURAL_MODELS_ENABLED: bool = os.getenv("NEURAL_MODELS_ENABLED", "false").lower() == "true"
     DEMO_AUTH_ENABLED: bool = os.getenv("DEMO_AUTH_ENABLED", "false").lower() == "true"
-    DEMO_USER_PASSWORD: str = os.getenv("DEMO_USER_PASSWORD", "")
-    DEMO_ADMIN_PASSWORD: str = os.getenv("DEMO_ADMIN_PASSWORD", "")
+    DEMO_USER_PASSWORD: str = Field(default=os.getenv("DEMO_USER_PASSWORD", ""), repr=False, exclude=True)
+    DEMO_ADMIN_PASSWORD: str = Field(default=os.getenv("DEMO_ADMIN_PASSWORD", ""), repr=False, exclude=True)
     AUTH_MODE: str = os.getenv("AUTH_MODE", "demo")
     AUTH_USERNAME: str = os.getenv("AUTH_USERNAME", "")
-    AUTH_PASSWORD: str = os.getenv("AUTH_PASSWORD", "")
+    AUTH_PASSWORD: str = Field(default=os.getenv("AUTH_PASSWORD", ""), repr=False, exclude=True)
     
     # Database & Cache
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./data/zia_trader.db")
+    DATABASE_URL: str = Field(
+        default=os.getenv("DATABASE_URL", "sqlite:///./data/zia_trader.db"),
+        repr=False,
+        exclude=True,
+    )
     EQUITY_LEDGER_CAPTURE_ENABLED: bool = os.getenv("EQUITY_LEDGER_CAPTURE_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
     REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
     REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
-    REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    REDIS_URL: str = Field(default=os.getenv("REDIS_URL", "redis://localhost:6379/0"), repr=False, exclude=True)
     REQUIRE_PERSISTENT_DATABASE: bool = os.getenv("REQUIRE_PERSISTENT_DATABASE", "false").lower() == "true"
     REQUIRE_PERSISTENT_REDIS: bool = os.getenv("REQUIRE_PERSISTENT_REDIS", "false").lower() == "true"
     REQUIRE_ALEMBIC_HEAD: bool = os.getenv("REQUIRE_ALEMBIC_HEAD", "false").lower() == "true"
@@ -87,7 +105,7 @@ class Settings(BaseSettings):
     LSTM_WEIGHTS_PATH: str = os.getenv("LSTM_WEIGHTS_PATH", "models/lstm.pt")
 
     # Security Settings
-    SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-only-change-me")
+    SECRET_KEY: str = Field(default=os.getenv("SECRET_KEY", "dev-only-change-me"), repr=False, exclude=True)
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
     CORS_ALLOWED_ORIGINS: str = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173")
@@ -136,11 +154,19 @@ class Settings(BaseSettings):
     TRADING_SYMBOLS: List[str] = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
 
     # News Processor Settings (if applicable)
-    ALPHA_VANTAGE_API_KEY: Optional[str] = _env_value("ALPHA_VANTAGE_API_KEY", "Alphavantage_API_KEY")
-    BENZINGA_API_KEY: Optional[str] = _env_value("BENZINGA_API_KEY")
-    MARKETAUX_API_KEY: Optional[str] = _env_value("MARKETAUX_API_KEY", "Marketaux_API_KEY")
-    FINNHUB_API_KEY: Optional[str] = _env_value("FINNHUB_API_KEY", "Finnhub_API_KEY")
-    TWELVE_DATA_API_KEY: Optional[str] = _env_value("TWELVE_DATA_API_KEY", "Twelvedata_API_KEY")
+    ALPHA_VANTAGE_API_KEY: Optional[str] = Field(
+        default=_env_value("ALPHA_VANTAGE_API_KEY", "Alphavantage_API_KEY"), repr=False, exclude=True
+    )
+    BENZINGA_API_KEY: Optional[str] = Field(default=_env_value("BENZINGA_API_KEY"), repr=False, exclude=True)
+    MARKETAUX_API_KEY: Optional[str] = Field(
+        default=_env_value("MARKETAUX_API_KEY", "Marketaux_API_KEY"), repr=False, exclude=True
+    )
+    FINNHUB_API_KEY: Optional[str] = Field(
+        default=_env_value("FINNHUB_API_KEY", "Finnhub_API_KEY"), repr=False, exclude=True
+    )
+    TWELVE_DATA_API_KEY: Optional[str] = Field(
+        default=_env_value("TWELVE_DATA_API_KEY", "Twelvedata_API_KEY"), repr=False, exclude=True
+    )
 
     # Exchange Connector Settings
     MARKET_ADAPTER: str = os.getenv("MARKET_ADAPTER", "binance")
@@ -163,14 +189,20 @@ class Settings(BaseSettings):
     ) or (BINANCE_BASE_URL_DEMO if BINANCE_MODE.lower() == "demo" else BINANCE_BASE_URL_TESTNET)
     BINANCE_LIVE_BASE_URL: str = os.getenv("BINANCE_LIVE_BASE_URL", "https://api.binance.com/api")
     BINANCE_PUBLIC_BASE_URL: str = os.getenv("BINANCE_PUBLIC_BASE_URL", "https://data-api.binance.vision")
-    BINANCE_DEMO_API_KEY: Optional[str] = os.getenv("BINANCE_DEMO_API_KEY")
-    BINANCE_DEMO_SECRET_KEY: Optional[str] = os.getenv("BINANCE_DEMO_SECRET_KEY")
-    BINANCE_API_KEY: Optional[str] = os.getenv("BINANCE_API_KEY") or BINANCE_DEMO_API_KEY
-    BINANCE_SECRET_KEY: Optional[str] = os.getenv("BINANCE_SECRET_KEY") or BINANCE_DEMO_SECRET_KEY
+    BINANCE_DEMO_API_KEY: Optional[str] = Field(default=os.getenv("BINANCE_DEMO_API_KEY"), repr=False, exclude=True)
+    BINANCE_DEMO_SECRET_KEY: Optional[str] = Field(
+        default=os.getenv("BINANCE_DEMO_SECRET_KEY"), repr=False, exclude=True
+    )
+    BINANCE_API_KEY: Optional[str] = Field(
+        default=os.getenv("BINANCE_API_KEY") or os.getenv("BINANCE_DEMO_API_KEY"), repr=False, exclude=True
+    )
+    BINANCE_SECRET_KEY: Optional[str] = Field(
+        default=os.getenv("BINANCE_SECRET_KEY") or os.getenv("BINANCE_DEMO_SECRET_KEY"), repr=False, exclude=True
+    )
     BINANCE_TIMEOUT_SECONDS: float = float(os.getenv("BINANCE_TIMEOUT_SECONDS", "10"))
     BINANCE_RECV_WINDOW_MS: int = int(os.getenv("BINANCE_RECV_WINDOW_MS", "5000"))
     BINANCE_PRELOAD_EXCHANGE_INFO: bool = os.getenv("BINANCE_PRELOAD_EXCHANGE_INFO", "false").lower() in {"1", "true", "yes"}
-    POLYGON_API_KEY: Optional[str] = os.getenv("POLYGON_API_KEY")
+    POLYGON_API_KEY: Optional[str] = Field(default=os.getenv("POLYGON_API_KEY"), repr=False, exclude=True)
 
     # Whale Detector Settings
     WHALE_ACTIVITY_THRESHOLD: float = float(os.getenv("WHALE_ACTIVITY_THRESHOLD", "0.05"))
@@ -310,6 +342,7 @@ class Settings(BaseSettings):
     NEWS_MAX_ARTICLES: int = int(os.getenv("NEWS_MAX_ARTICLES", "20"))
     NEWS_PROVIDER_ARTICLES: int = int(os.getenv("NEWS_PROVIDER_ARTICLES", "10"))
     NEWS_FAIL_CLOSED_FOR_ENTRY: bool = os.getenv("NEWS_FAIL_CLOSED_FOR_ENTRY", "true").lower() == "true"
+    NEWS_ENABLED_KEYED_PROVIDERS: List[str] = Field(default_factory=list)
     NEWS_MIN_HEALTHY_PROVIDERS: int = int(os.getenv("NEWS_MIN_HEALTHY_PROVIDERS", "1"))
     NEWS_MIN_ARTICLES_FOR_ENTRY: int = int(os.getenv("NEWS_MIN_ARTICLES_FOR_ENTRY", "1"))
     NEWS_SHOCK_SENTIMENT_THRESHOLD: float = float(os.getenv("NEWS_SHOCK_SENTIMENT_THRESHOLD", "-0.65"))
@@ -318,16 +351,18 @@ class Settings(BaseSettings):
     GDELT_BASE_URL: str = os.getenv("GDELT_BASE_URL", "https://api.gdeltproject.org/api/v2/doc/doc")
     NEWS_RSS_URL_TEMPLATE: str = os.getenv("NEWS_RSS_URL_TEMPLATE", "https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en")
     COINGECKO_BASE_URL: str = os.getenv("COINGECKO_BASE_URL", "https://api.coingecko.com/api/v3")
-    COINGECKO_API_KEY: Optional[str] = _env_value("COINGECKO_API_KEY")
+    COINGECKO_API_KEY: Optional[str] = Field(default=_env_value("COINGECKO_API_KEY"), repr=False, exclude=True)
     BENZINGA_NEWS_URL: str = os.getenv("BENZINGA_NEWS_URL", "https://api.benzinga.com/api/v2/news")
     BENZINGA_TRENDS_URL: str = os.getenv("BENZINGA_TRENDS_URL", "https://api.benzinga.com/api/v1/trending-tickers")
-    NEWSAPI_API_KEY: Optional[str] = _env_value("NEWSAPI_API_KEY", "NewsApi_API_KEY")
+    NEWSAPI_API_KEY: Optional[str] = Field(
+        default=_env_value("NEWSAPI_API_KEY", "NewsApi_API_KEY"), repr=False, exclude=True
+    )
     NEWSAPI_BASE_URL: str = os.getenv("NEWSAPI_BASE_URL", "https://newsapi.org/v2/everything")
     MARKETAUX_BASE_URL: str = os.getenv("MARKETAUX_BASE_URL", "https://api.marketaux.com/v1/news/all")
     FINNHUB_BASE_URL: str = os.getenv("FINNHUB_BASE_URL", "https://finnhub.io/api/v1")
     FINNHUB_NEWS_CATEGORY: str = os.getenv("FINNHUB_NEWS_CATEGORY", "crypto")
     TWELVE_DATA_BASE_URL: str = os.getenv("TWELVE_DATA_BASE_URL", "https://api.twelvedata.com")
-    CRYPTOPANIC_API_KEY: Optional[str] = _env_value("CRYPTOPANIC_API_KEY")
+    CRYPTOPANIC_API_KEY: Optional[str] = Field(default=_env_value("CRYPTOPANIC_API_KEY"), repr=False, exclude=True)
     CRYPTOPANIC_BASE_URL: str = os.getenv("CRYPTOPANIC_BASE_URL", "https://cryptopanic.com/api/GROWTH/v2/posts/")
 
     @field_validator(
@@ -340,6 +375,34 @@ class Settings(BaseSettings):
     def _strip_secret_values(cls, value: Optional[str]) -> Optional[str]:
         return value.strip() if isinstance(value, str) else value
 
-    model_config = ConfigDict(env_file=".env", extra="ignore")
+    @field_validator("NEWS_ENABLED_KEYED_PROVIDERS")
+    @classmethod
+    def _validate_news_enabled_keyed_providers(cls, value: List[str]) -> List[str]:
+        normalized: List[str] = []
+        seen: set[str] = set()
+        for provider in value:
+            if not isinstance(provider, str):
+                raise ValueError("NEWS_ENABLED_KEYED_PROVIDERS deve conter apenas nomes de provider")
+            name = provider.strip().lower()
+            if name not in NEWS_KEYED_PROVIDER_NAMES:
+                allowed = ", ".join(sorted(NEWS_KEYED_PROVIDER_NAMES))
+                raise ValueError(f"provider keyed não permitido; permitidos: {allowed}")
+            if name in seen:
+                raise ValueError("provider keyed duplicado")
+            seen.add(name)
+            normalized.append(name)
+        return normalized
+
+    # Built-in pydantic-settings sources: explicit kwargs > environment > _env_file/.env
+    # > _secrets_dir secret files > field defaults. `.env` can be replaced per call with
+    # `Settings(_env_file=...)`; secret files are opt-in per call with `Settings(_secrets_dir=...)`.
+    # No /run/secrets mount is assumed here. Secret files are read by pydantic-settings itself.
+    model_config = ConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        secrets_dir=None,
+        extra="ignore",
+        hide_input_in_errors=True,
+    )
 
 settings = Settings()

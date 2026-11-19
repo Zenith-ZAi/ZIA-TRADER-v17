@@ -61,6 +61,7 @@ class BinanceSpotAdapter:
                 max_keepalive_connections=int(getattr(settings, "HTTP_MAX_KEEPALIVE_CONNECTIONS", 20)),
             ),
             follow_redirects=False,
+            trust_env=False,
         )
         self.is_connected = False
         self.server_time_offset_ms = 0

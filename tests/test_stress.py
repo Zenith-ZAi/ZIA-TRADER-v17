@@ -45,8 +45,6 @@ def make_settings(**overrides):
         "DAILY_LOSS_LIMIT_PERCENT": 0.05,
         "NEWS_CACHE_TTL_SECONDS": 300,
         "NEWS_MAX_ARTICLES": 20,
-        "GDELT_BASE_URL": "https://test.local/gdelt",
-        "COINGECKO_BASE_URL": "https://test.local/coingecko",
     }
     values.update(overrides)
     return Settings(**values)
@@ -165,7 +163,7 @@ def test_news_processor_uses_free_sources_without_mock_news():
 
 
 def test_optional_benzinga_trend_provider():
-    settings = make_settings(BENZINGA_API_KEY="test-token")
+    settings = make_settings(BENZINGA_API_KEY="test-token", NEWS_ENABLED_KEYED_PROVIDERS=["benzinga"])
 
     def fake_get(url, params, headers):
         if "trending-tickers" in url:

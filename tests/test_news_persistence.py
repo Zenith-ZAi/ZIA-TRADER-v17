@@ -10,8 +10,6 @@ from tests.fakes import FakeAsyncHTTP
 def test_news_and_trends_are_persisted_idempotently(tmp_path):
     settings = Settings(
         DATABASE_URL=f"sqlite:///{tmp_path / 'news.db'}",
-        GDELT_BASE_URL="https://test.local/gdelt",
-        COINGECKO_BASE_URL="https://test.local/coingecko",
         NEWS_CACHE_TTL_SECONDS=300,
     )
     db = DatabaseManager(settings.DATABASE_URL)

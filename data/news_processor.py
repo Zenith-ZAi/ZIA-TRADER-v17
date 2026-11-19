@@ -12,6 +12,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from config.settings import Settings
 from infra.async_http import AsyncProviderHTTP, ProviderCircuitOpen
+from infra.provider_security import safe_provider_error, validate_news_endpoint
 
 logger = logging.getLogger(__name__)
 
@@ -55,10 +56,30 @@ class NewsProcessor:
         self._cache[key] = (time.monotonic() + self.settings.NEWS_CACHE_TTL_SECONDS, value)
         return value
 
+    def _keyed_provider_enabled(self, provider: str) -> bool:
+        enabled = provider in getattr(self.settings, "NEWS_ENABLED_KEYED_PROVIDERS", [])
+        if not enabled:
+            self._record_status(provider, False, "provider_disabled")
+            return False
+        key_field = {
+            "benzinga": "BENZINGA_API_KEY", "marketaux": "MARKETAUX_API_KEY",
+            "finnhub": "FINNHUB_API_KEY", "twelve_data": "TWELVE_DATA_API_KEY",
+            "alpha_vantage": "ALPHA_VANTAGE_API_KEY", "newsapi": "NEWSAPI_API_KEY",
+            "cryptopanic": "CRYPTOPANIC_API_KEY",
+        }.get(provider)
+        if key_field is None or not getattr(self.settings, key_field, None):
+            self._record_status(provider, False, "provider_credentials_missing")
+            return False
+        return enabled
+
     def _record_status(self, provider: str, ok: bool, detail: str = "") -> None:
-        transport_health = self.http_client.health(provider).get(provider, {})
+        enabled = detail != "provider_disabled"
+        transport_health = self.http_client.health(provider).get(provider, {}) if enabled else {}
+        healthy = enabled and ok and bool(transport_health.get("ok", True))
         self.provider_status[provider] = {
-            "ok": ok and bool(transport_health.get("ok", True)),
+            "enabled": enabled,
+            "state": "disabled" if not enabled else ("healthy" if healthy else "unhealthy"),
+            "ok": healthy,
             "detail": detail or str(transport_health.get("last_error", "")),
             "checked_at": datetime.now(timezone.utc).isoformat(),
             "failures": int(transport_health.get("failures", 0)),
@@ -73,6 +94,7 @@ class NewsProcessor:
         headers: Optional[Dict[str, str]] = None,
     ) -> Any:
         try:
+            validate_news_endpoint(provider, url)
             payload = await self.http_client.get_json(
                 provider,
                 url,
@@ -83,27 +105,22 @@ class NewsProcessor:
             if isinstance(payload, dict) and (
                 payload.get("Error Message")
                 or payload.get("Note")
+                or payload.get("Information")
                 or payload.get("error")
                 or payload.get("status") == "error"
             ):
-                raise ValueError(
-                    str(
-                        payload.get("Error Message")
-                        or payload.get("Note")
-                        or payload.get("error")
-                        or payload.get("message")
-                        or "provider error"
-                    )
-                )
+                raise ValueError("provider_invalid_response")
             self._record_status(provider, True)
             return payload
         except (ProviderCircuitOpen, Exception) as exc:
-            self._record_status(provider, False, str(exc))
-            logger.warning("Falha no provedor %s: %s", provider, exc)
+            code = safe_provider_error(exc)
+            self._record_status(provider, False, code)
+            logger.warning("Falha no provedor %s: %s", provider, code)
             return {}
 
     async def _request_text(self, provider: str, url: str) -> str:
         try:
+            validate_news_endpoint(provider, url)
             value = await self.http_client.get_text(
                 provider,
                 url,
@@ -112,8 +129,9 @@ class NewsProcessor:
             self._record_status(provider, True)
             return value
         except (ProviderCircuitOpen, Exception) as exc:
-            self._record_status(provider, False, str(exc))
-            logger.warning("Falha no provedor %s: %s", provider, exc)
+            code = safe_provider_error(exc)
+            self._record_status(provider, False, code)
+            logger.warning("Falha no provedor %s: %s", provider, code)
             return ""
 
     async def aclose(self) -> None:
@@ -126,6 +144,24 @@ class NewsProcessor:
     @staticmethod
     def _base_symbols(tickers: Iterable[str]) -> List[str]:
         return sorted({str(ticker).split("/")[0].strip().upper() for ticker in tickers if str(ticker).strip()})
+
+    @classmethod
+    def _alpha_news_symbols(cls, tickers: Iterable[str]) -> List[str]:
+        forex_currencies = {"USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD"}
+        names = set()
+        for symbol in cls._symbols(tickers):
+            if "/" not in symbol:
+                names.add(symbol)
+                continue
+            parts = symbol.split("/")
+            if len(parts) != 2 or not all(parts):
+                raise ValueError("invalid_news_symbol")
+            base, quote = parts
+            if base in forex_currencies and quote in forex_currencies:
+                names.update({f"FOREX:{base}", f"FOREX:{quote}"})
+            else:
+                names.add(f"CRYPTO:{base}")
+        return sorted(names)
 
     @staticmethod
     def _normalize(
@@ -220,7 +256,7 @@ class NewsProcessor:
         return self._cache_set(cache_key, articles)
 
     async def fetch_benzinga_trends(self, tickers: List[str]) -> List[Dict[str, Any]]:
-        if not self.settings.BENZINGA_API_KEY:
+        if not self._keyed_provider_enabled("benzinga") or not self.settings.BENZINGA_API_KEY:
             return []
         symbols = self._base_symbols(tickers)
         cache_key = f"benzinga-trends:{','.join(symbols)}"
@@ -260,8 +296,16 @@ class NewsProcessor:
         if cached is not None:
             return cached
         headers = {}
-        if self.settings.COINGECKO_API_KEY:
-            headers["x-cg-pro-api-key"] = self.settings.COINGECKO_API_KEY
+        pro_host = self.settings.COINGECKO_BASE_URL.startswith("https://pro-api.coingecko.com/")
+        credential_enabled = "coingecko" in getattr(self.settings, "NEWS_ENABLED_KEYED_PROVIDERS", [])
+        if pro_host and (not credential_enabled or not self.settings.COINGECKO_API_KEY):
+            detail = "provider_disabled" if not credential_enabled else "provider_credentials_missing"
+            self._record_status("coingecko", False, detail)
+            return []
+        if credential_enabled and self.settings.COINGECKO_API_KEY:
+            # Demo and Pro use different hosts/headers; never silently fall back tiers.
+            header = "x-cg-demo-api-key" if self.settings.COINGECKO_BASE_URL.startswith("https://api.coingecko.com/") else "x-cg-pro-api-key"
+            headers[header] = self.settings.COINGECKO_API_KEY
         payload = await self._request_json(
             "coingecko",
             f"{self.settings.COINGECKO_BASE_URL.rstrip('/')}/search/trending",
@@ -290,13 +334,14 @@ class NewsProcessor:
         if self.db_manager:
             for trend in trends:
                 try:
-                    self.db_manager.create_trend_snapshot(trend)
+                    # Each DB helper creates/closes its own session inside the worker.
+                    await asyncio.to_thread(self.db_manager.create_trend_snapshot, trend)
                 except Exception as exc:
-                    logger.warning("Não foi possível persistir tendência: %s", exc)
+                    logger.warning("Não foi possível persistir tendência: %s", safe_provider_error(exc))
         return self._cache_set(cache_key, trends)
 
     async def fetch_marketaux_news(self, tickers: List[str]) -> List[Dict[str, Any]]:
-        if not self.settings.MARKETAUX_API_KEY:
+        if not self._keyed_provider_enabled("marketaux") or not self.settings.MARKETAUX_API_KEY:
             return []
         symbols = self._base_symbols(tickers)
         if not symbols:
@@ -315,7 +360,7 @@ class NewsProcessor:
                 "must_have_entities": "true",
                 "group_similar": "true",
                 "language": "en",
-                "limit": min(self.settings.NEWS_PROVIDER_ARTICLES, self.settings.NEWS_MAX_ARTICLES),
+                "limit": min(self.settings.NEWS_PROVIDER_ARTICLES, self.settings.NEWS_MAX_ARTICLES, 3),
             },
         )
         articles = []
@@ -342,7 +387,7 @@ class NewsProcessor:
         return self._cache_set(cache_key, articles)
 
     async def fetch_finnhub_news(self, tickers: List[str]) -> List[Dict[str, Any]]:
-        if not self.settings.FINNHUB_API_KEY:
+        if not self._keyed_provider_enabled("finnhub") or not self.settings.FINNHUB_API_KEY:
             return []
         symbols = self._base_symbols(tickers)
         if not symbols:
@@ -385,7 +430,7 @@ class NewsProcessor:
         return self._cache_set(cache_key, articles[: self.settings.NEWS_PROVIDER_ARTICLES])
 
     async def fetch_twelve_data_news(self, tickers: List[str]) -> List[Dict[str, Any]]:
-        if not self.settings.TWELVE_DATA_API_KEY:
+        if not self._keyed_provider_enabled("twelve_data") or not self.settings.TWELVE_DATA_API_KEY:
             return []
         symbols = self._symbols(tickers)
         if not symbols:
@@ -423,7 +468,7 @@ class NewsProcessor:
         return self._cache_set(cache_key, articles)
 
     async def fetch_alpha_vantage_news(self, tickers: List[str]) -> List[Dict[str, Any]]:
-        if not self.settings.ALPHA_VANTAGE_API_KEY:
+        if not self._keyed_provider_enabled("alpha_vantage") or not self.settings.ALPHA_VANTAGE_API_KEY:
             return []
         symbols = self._symbols(tickers)
         cache_key = f"alpha:{','.join(symbols)}"
@@ -435,7 +480,7 @@ class NewsProcessor:
             "https://www.alphavantage.co/query",
             {
                 "function": "NEWS_SENTIMENT",
-                "tickers": ",".join(self._base_symbols(symbols)),
+                "tickers": ",".join(self._alpha_news_symbols(symbols)),
                 "limit": min(self.settings.NEWS_MAX_ARTICLES, 1000),
                 "apikey": self.settings.ALPHA_VANTAGE_API_KEY,
             },
@@ -455,7 +500,7 @@ class NewsProcessor:
         return self._cache_set(cache_key, articles)
 
     async def fetch_benzinga_news(self, symbols: List[str]) -> List[Dict[str, Any]]:
-        if not self.settings.BENZINGA_API_KEY:
+        if not self._keyed_provider_enabled("benzinga") or not self.settings.BENZINGA_API_KEY:
             return []
         normalized = self._symbols(symbols)
         cache_key = f"benzinga:{','.join(normalized)}"
@@ -486,7 +531,7 @@ class NewsProcessor:
         return self._cache_set(cache_key, articles)
 
     async def fetch_newsapi_news(self, tickers: List[str]) -> List[Dict[str, Any]]:
-        if not self.settings.NEWSAPI_API_KEY:
+        if not self._keyed_provider_enabled("newsapi") or not self.settings.NEWSAPI_API_KEY:
             return []
         query = " OR ".join(self._base_symbols(tickers))
         cache_key = f"newsapi:{query}"
@@ -518,7 +563,7 @@ class NewsProcessor:
         return self._cache_set(cache_key, articles)
 
     async def fetch_cryptopanic_news(self, tickers: List[str]) -> List[Dict[str, Any]]:
-        if not self.settings.CRYPTOPANIC_API_KEY:
+        if not self._keyed_provider_enabled("cryptopanic") or not self.settings.CRYPTOPANIC_API_KEY:
             return []
         cache_key = f"cryptopanic:{','.join(self._base_symbols(tickers))}"
         cached = self._cache_get(cache_key)
@@ -566,7 +611,12 @@ class NewsProcessor:
         buckets: Dict[str, List[Dict[str, Any]]] = {name: [] for name, _ in provider_calls}
         seen = set()
         for (provider, _), result in zip(provider_calls, results):
+            if isinstance(result, asyncio.CancelledError):
+                raise result
             if isinstance(result, Exception):
+                code = safe_provider_error(result)
+                self._record_status(provider, False, code)
+                logger.warning("Falha ao normalizar notícias de %s: %s", provider, code)
                 continue
             for article in result if isinstance(result, list) else []:
                 key = article.get("url") or article.get("external_id") or article.get("title")
@@ -582,9 +632,9 @@ class NewsProcessor:
         if self.db_manager:
             for article in processed:
                 try:
-                    self.db_manager.create_news_article(article)
+                    await asyncio.to_thread(self.db_manager.create_news_article, article)
                 except Exception as exc:
-                    logger.warning("Não foi possível persistir notícia: %s", exc)
+                    logger.warning("Não foi possível persistir notícia: %s", safe_provider_error(exc))
         return processed
 
     async def process_news_sentiment(self, news_articles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

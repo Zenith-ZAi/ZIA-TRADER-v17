@@ -1,0 +1,94 @@
+{
+  "schema_version": "engineering_gates_v1",
+  "phase": "pr33-readiness-fix-before-merge",
+  "metric": "accepted_checklist_gates_only_not_production_authorization",
+  "criteria_sha256": "cb0ca2299c1f1db5641e01015f14466341a841f029eac8abf427eb3939a99c73",
+  "accepted_gates": 6,
+  "total_gates": 16,
+  "progress_percent": 37.5,
+  "grants_live_authorization": false,
+  "criteria": [
+    {
+      "id": "4fcfe458318d",
+      "accepted": true,
+      "criterion": "Manter live/autostart/autonomia bloqueados por padrão; nenhuma liberação foi feita nesta rodada."
+    },
+    {
+      "id": "3290e7a6c5c3",
+      "accepted": true,
+      "criterion": "Ter coletor unificado com identidade de dados e teste de reimportação idempotente no sandbox."
+    },
+    {
+      "id": "8a1ed3e1d6ef",
+      "accepted": true,
+      "criterion": "Ter autenticação e RBAC no endpoint de catálogo; testar 401, 403 e 200 sem bypass de auth."
+    },
+    {
+      "id": "605fe8f7d698",
+      "accepted": true,
+      "criterion": "Proteger serialização de configurações, diagnósticos HTTP/cache e destinos de notícias com chave."
+    },
+    {
+      "id": "5a6f62f3332a",
+      "accepted": true,
+      "criterion": "Ter persistência de notícias/tendências e cleanup de sessão também em falha; migrar esses dois callsites async para worker."
+    },
+    {
+      "id": "605d9367c700",
+      "accepted": true,
+      "criterion": "Executar teste de integração de dados reais até leitura do core sem enviar ordens."
+    },
+    {
+      "id": "b4e591559135",
+      "accepted": false,
+      "criterion": "Aprovar requisitos e contrato de API com o frontend, incluindo testes manuais de login, expiração, reconexão e erros."
+    },
+    {
+      "id": "84efb26e0a48",
+      "accepted": false,
+      "criterion": "Implementar identidade persistente por cliente, isolamento por tenant, recuperação/revogação de acesso, rotação e auditoria de credenciais. O auth por ambiente atual não é uma plataforma SaaS multiusuário homologada."
+    },
+    {
+      "id": "58e56b1434f0",
+      "accepted": false,
+      "criterion": "Resolver autenticação de WebSocket sem token em query de URL em ambiente público; não registrar tokens nos access logs/proxy/APM."
+    },
+    {
+      "id": "83743735a304",
+      "accepted": false,
+      "criterion": "Verificar entitlement e direitos comerciais de cada fonte, além de orçamento persistente de quota/custo, retenção e descarte. Cache e retry limitado não são orçamento diário distribuído."
+    },
+    {
+      "id": "b06d5a00d3e7",
+      "accepted": false,
+      "criterion": "Completar a migração das demais chamadas ORM síncronas; não declarar concluído o inventário histórico de 59 callsites."
+    },
+    {
+      "id": "cd44f7644bec",
+      "accepted": false,
+      "criterion": "Homologar reconciliação financeira autoritativa de fill, fee e funding. O ledger audit-only não alimenta sizing/risco como fonte verificada."
+    },
+    {
+      "id": "e2269b2d81aa",
+      "accepted": false,
+      "criterion": "Executar Testnet/shadow prolongado, fault injection, restart, recuperação de intents e teste fora da amostra com custos reais estimados."
+    },
+    {
+      "id": "c71dec0aa091",
+      "accepted": false,
+      "criterion": "Executar staging Compose/VPS com PostgreSQL/TimescaleDB e Redis, TLS, health/readiness, restarts e backup/restauração reais. Teste PostgreSQL efêmero de CI não substitui restore no staging escolhido."
+    },
+    {
+      "id": "ff08e1f28b6b",
+      "accepted": false,
+      "criterion": "Configurar métricas e alertas com responsáveis, retenção de logs sem segredos, runbook de incidentes, RPO/RTO, capacidade e custos de operação aprovados."
+    },
+    {
+      "id": "df4848cc8af7",
+      "accepted": false,
+      "criterion": "Concluir review/CI e aceite do incremento atual antes de integrar a branch; publicar o servidor exige uma etapa operacional separada."
+    }
+  ],
+  "observed_at": "2026-11-19T16:19:37.312350+00:00",
+  "checklist": "docs/BACKEND_SANDBOX_GUIDE.md"
+}
