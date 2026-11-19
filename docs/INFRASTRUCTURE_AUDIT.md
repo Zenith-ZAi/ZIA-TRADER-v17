@@ -60,3 +60,10 @@ O incremento remove herança implícita de HTTP_PROXY/HTTPS_PROXY/ALL_PROXY e CA
 .env, material .pem/.key e diretórios secrets/.secrets estão excluídos do Git e build Docker. Secret files são fonte nativa Pydantic opcional por _secrets_dir; não há mount automático de /run/secrets, KMS, rotação ou vault por cliente. Mount somente leitura e permissões devem ser assegurados no deployment. Nenhuma chave real foi inserida no checkout ou enviada ao repositório nesta rodada.
 
 A validação real é de coleta pública Binance em SQLite isolado, 119 candles, reimportação idempotente e zero ordens. Ela não valida staging persistente, backup/restore VPS, Redis RDB real, TLS ou RPO/RTO. A PR #32 já foi integrada, portanto sua menção como aberta no adendo histórico acima não é o estado atual. O ledger segue audit-only. Suíte local final: **357 passed, 4 skipped, 1 warning**; CI do novo SHA deve ser consultado na PR associada. Limites: `docs/reports/backend_provider_security_2026-11-19.md` e `docs/BACKEND_SANDBOX_GUIDE.md`.
+
+
+## ZT01 — latch/restart e escopo (2026-11-19)
+
+PR33 integrada em 10168db e CI pós-merge verde. A nova branch restaura kill state limitado/determinístico por conta antes do adapter; estado ausente/falho/ativo fecha, e registro false não rearma live automaticamente. Ativação bloqueia localmente e persiste antes do await externo; autostart live é recusado também fora de production/staging. Hook final no transporte reduz a corrida reproduzida no worker legado; request já despachada não é atomicamente revogável na exchange e exige reconciliação/recuperação.
+
+Migration aditiva c3f1e2a9b7d4 e quatro tabelas de identidade/escopo foram testadas em SQLite; o teste PG de constraints/cross-tenant roda somente com TEST_DATABASE_URL/CI. Não foram ativadas políticas RLS, roles de produção, vault por cliente, API multi-tenant, reverse proxy ou serviço VPS. Nenhuma credencial pertence aos modelos novos. 421 testes locais, 5 skips, um warning; não é homologação operacional. Restore Redis/TLS/Compose/soak e controle distribuído de incidente/rearm continuam pendentes. Detalhes: `docs/reports/zt01_backend_control_plane_scope_2026-11-19.md`.

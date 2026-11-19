@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 from urllib.parse import urlparse
+from execution.live_authorization import requires_live_authorization
 
 
 _PLACEHOLDER_MARKERS = (
@@ -77,6 +78,8 @@ def production_configuration_errors(config: Any) -> list[str]:
 
 def validate_startup_configuration(config: Any) -> None:
     """Fail closed before initializing DB, providers, or engine tasks."""
+    if bool(getattr(config, "AUTO_START_ENGINES", False)) and requires_live_authorization(config):
+        raise RuntimeError("autostart live bloqueado: rearm durável ainda não homologado")
     errors = production_configuration_errors(config)
     if errors:
         raise RuntimeError("configuração de produção insegura: " + "; ".join(errors))

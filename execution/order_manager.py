@@ -8,7 +8,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict
 
-from execution.live_authorization import live_submission_block_reason, requires_live_authorization
+from execution.live_authorization import (
+    autonomous_submission_block_reason,
+    live_submission_block_reason,
+    requires_live_authorization,
+)
 from execution.market_connector import MarketConnector
 from risk.risk_ai import RiskAI
 from core.risk_guard import evaluate_circuit_breaker
@@ -24,6 +28,7 @@ class PendingOrder:
     order_data: Dict[str, Any]
     source: str
     market_context: Dict[str, Any] = field(default_factory=dict)
+    signal_validated: bool = False
 
 
 class OrderManager:
@@ -76,14 +81,19 @@ class OrderManager:
     def _live_adapter_selected(self) -> bool:
         return requires_live_authorization(self.settings)
 
+    def _autonomous_entry_block_reason(self) -> str | None:
+        redis_cache = getattr(self.execution_engine, "redis_cache", None)
+        return autonomous_submission_block_reason(self.settings, redis_cache)
+
     def _authorized(self, source: str, order_data: Dict[str, Any]) -> str | None:
         if source == "ai":
             if self.mode != "auto":
                 return "OrderManager está em modo manual"
-            if not bool(getattr(self.settings, "AUTONOMOUS_TRADING_ENABLED", False)):
-                return "execução autônoma desabilitada"
             if order_data.get("signal_validated") is not True:
                 return "decisão de IA sem autorização de sinal validada pelo motor"
+            autonomous_error = self._autonomous_entry_block_reason()
+            if autonomous_error:
+                return autonomous_error
         elif self.mode != "manual":
             return "OrderManager está em modo auto"
         elif not bool(getattr(self.settings, "MANUAL_TRADING_ENABLED", False)):
@@ -202,7 +212,13 @@ class OrderManager:
                 if pending.source == source and same_symbol and same_action:
                     return {"status": "pending_confirmation", "confirmation_required": True, "confirmation_token": pending.token, "order": pending.order_data, "deduplicated": True}
             token = secrets.token_urlsafe(18)
-            self._pending[token] = PendingOrder(token, normalized, source, context)
+            self._pending[token] = PendingOrder(
+                token,
+                normalized,
+                source,
+                context,
+                signal_validated=signal_validated is True,
+            )
             return {"status": "pending_confirmation", "confirmation_required": True, "confirmation_token": token, "order": normalized}
         return await self._execute(normalized, source)
 
@@ -215,6 +231,8 @@ class OrderManager:
         # Revalida autorização, saldo, risco, circuito e reconciliação no instante da confirmação.
         order = dict(pending.order_data)
         order.pop("source", None)
+        if pending.source == "ai" and pending.signal_validated:
+            order["signal_validated"] = True
         return await self.submit(order, source=pending.source, confirmed=True, market_context=pending.market_context)
 
     async def submit_exit(

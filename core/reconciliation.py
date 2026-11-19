@@ -7,6 +7,7 @@ import logging
 import uuid
 from typing import Any, Awaitable, Callable, Dict, Iterable, Optional
 
+from infra.intent_identity import assert_same_intent, IntentIdempotencyConflict
 from monitoring.metrics import RECONCILIATION_DIVERGENCE
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,7 @@ class OrderReconciler:
     def reserve(self, order_data: Dict[str, Any], client_order_id: str | None = None) -> Dict[str, Any]:
         client_id = client_order_id or str(order_data.get("client_order_id") or self.new_client_order_id(order_data["symbol"], order_data["action"]))
         reserved = self.db_manager.reserve_order_intent(self.account_id, client_id, {**order_data, "client_order_id": client_id})
+        assert_same_intent(reserved, self.account_id, order_data)
         return {**order_data, "client_order_id": client_id, "intent": reserved}
 
     async def _cached_intent(self, client_order_id: str) -> Optional[Dict[str, Any]]:
@@ -162,7 +164,10 @@ class OrderReconciler:
         client_order_id: str | None = None,
     ) -> Dict[str, Any]:
         """Envia uma intenção com o mesmo clientOrderId e backoff exponencial."""
-        prepared = self.reserve(order_data, client_order_id)
+        try:
+            prepared = self.reserve(order_data, client_order_id)
+        except IntentIdempotencyConflict:
+            return {"status": "idempotency_conflict", "reason": "client_order_id já reservado para conta/parâmetros diferentes"}
         client_id = prepared["client_order_id"]
         existing = self.db_manager.get_order_intent(client_id) or await self._cached_intent(client_id)
         existing_status = str(existing.get("status") or "").lower() if existing else ""

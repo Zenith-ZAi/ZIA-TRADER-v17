@@ -1,6 +1,6 @@
 # Plano de finalização — ZIA-TRADER v17, backend em validação
 
-**Atualizado:** 2026-11-19. **Base atual:** `master` pós-PR #32, SHA `56c20252e28605e3c6568bbcd3ebbf0c3935a6a5`; o hardening da Fase 9 foi integrado por squash autorizado e sua branch preservada. O incremento atual está em `fix/backend-provider-security-nov19`, com 357 testes locais passados, 4 skips e 1 warning. O status CI do novo SHA é um gate próprio da PR. O critério vigente de completo é o checklist de `docs/BACKEND_SANDBOX_GUIDE.md`; não há nova pontuação percentual de produção. O objetivo segue sendo **pré-produção supervisionada**, sem autorização de capital real.
+**Atualizado:** 2026-11-19. **Base atual:** master pós-PR #33, SHA `10168db2bf49ebdf47c1c1fbb0f25ea6e463591d`; PR33 squash-merged, branch preservada e CI pós-merge verde. O incremento ZT01 está em `fix/zt01-control-plane-and-client-scope`: 421 testes locais, 5 skips e 1 warning; CI/review/aceite da nova PR são gates próprios. Métrica cumulativa: 7/16 gates aceitos, 43,75%, vinculados à baseline PR33; não é percentual de segurança, lucro ou autorização operacional. O objetivo segue pré-produção supervisionada, com live desabilitado.
 
 ## Estimativas históricas de engenharia — não representam o estado atual
 
@@ -144,3 +144,15 @@ Validação integral local final: **357 passed, 4 skipped, 1 warning**. O guia `
 A revisão automatizada apontou o P2 de providers Premium intencionalmente disabled degradando readiness. O fix separa enabled/state/ok, exclui apenas opt-out explícito da agregação e mantém erro de fonte habilitada/credencial ausente como unhealthy. O gate de entrada não conta disabled como fonte saudável. Validação integral do fix e do gerador de progresso: **368 passed, 4 skipped, 1 warning**; CI do novo head deve ser verificado antes do merge autorizado.
 
 Status por checklist antes do merge: **6/16 gates aceitos, 37,5%**, com denominador e hash versionados em `docs/progress/pr33_readiness_fix_before_merge_2026-11-19.json`. Esse percentual é de aceites do checklist, não código completo, segurança certificada, lucro ou autorização de negociação. `scripts/backend_progress_status.py` registra cada incremento sem inflar o indicador por corrigir um gate já aceito. Relatório corretivo: `docs/reports/pr33_readiness_fix_2026-11-19.md`.
+
+## ZT01 — control-plane e fundação de escopo por cliente (2026-11-19)
+
+PR33 integrada em 10168db, branch preservada e CI pós-merge verde. Nova branch ZT01 implementa diagnóstico real de flags/menu disable-only, veto de ordem/proteção/OCO, hook pré-dispatch POST signed/ID, kill local+persistência antes de await e restauração conservadora antes do adapter; autostart live não rearma em qualquer ambiente. Autonomia/Redis é reavaliada em engine/Sniper/OrderManager/confirm. Reuso de client_order_id com conta/parâmetros diferentes é conflito explícito, sem consulta/envio da ordem divergente.
+
+A análise sob demanda fecha dados/notícias incompletos e declara execution_authorized=false; regime inválido retorna unknown/bad_data. Migration aditiva c3f1e2a9b7d4 cria quatro tabelas de tenant/principal/membership/conta, com FKs/constraints/roles e Scope por JOIN explícito. Não há auth/RLS/API multi-tenant completa ou ledger autoritativo. Nenhum dado legado foi atribuído por adivinhação a cliente/conta.
+
+Suíte final após follow-up: **421 passed, 5 skipped, 1 warning**. As três reproduções da revisão independente foram fechadas para refinamento com defaults OFF; aceite operacional/Mainnet segue **não aprovado**. PG/CI do novo head é gate separado. Smoke público repetido: 119 candles fechados, 10 features, 86 linhas válidas, HOLD e zero ordens.
+
+Progresso cumulativo baseline: **7/16, 43,75%**, não segurança/lucro/autorização. O novo PR tem checks/aceite próprios e não está automaticamente autorizado pelo merge anterior. Relatório detalhado e plano financeiro: `docs/reports/zt01_backend_control_plane_scope_2026-11-19.md`; snapshot `docs/progress/zt01_current_2026-11-19.json`; diagrama `docs/diagrams/zt01_trust_boundaries.mmd`/PNG.
+
+Próximos gates: binding JWT/membership e repositories privados com RLS PostgreSQL; observer read-only idempotente default OFF e ponte class-aware; produtor financeiro autenticado/fills/fees/cursors/manifesta/closure independente; OOS/licenças/cotas; staging real com restore/alertas/incidentes. Getters verified permanecem None e live/manual/autonomia/autostart OFF.

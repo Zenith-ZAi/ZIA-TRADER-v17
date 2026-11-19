@@ -8,7 +8,9 @@ from decimal import Decimal, InvalidOperation
 from typing import Dict, List, Optional
 
 from sqlalchemy import create_engine, event
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from infra.intent_identity import assert_same_intent, intent_identity
 
 from database import (
     AIObservation,
@@ -1114,8 +1116,8 @@ class DatabaseManager:
         }
 
     def reserve_order_intent(self, account_id: str, client_order_id: str, order_data: Dict) -> Dict:
-        db = self.SessionLocal()
-        try:
+        intent_identity(account_id, order_data)
+        with self.SessionLocal() as db:
             intent = db.query(OrderIntent).filter(OrderIntent.client_order_id == client_order_id).first()
             if intent is None:
                 safe_payload = {
@@ -1133,11 +1135,17 @@ class DatabaseManager:
                     payload_json=safe_payload,
                 )
                 db.add(intent)
-                db.commit()
+                try:
+                    db.commit()
+                except IntegrityError:
+                    db.rollback()
+                    intent = db.query(OrderIntent).filter(OrderIntent.client_order_id == client_order_id).first()
+                    if intent is None:
+                        raise
                 db.refresh(intent)
-            return self._intent_dict(intent)
-        finally:
-            db.close()
+            result = self._intent_dict(intent)
+            assert_same_intent(result, account_id, order_data)
+            return result
 
     def update_order_intent(self, client_order_id: str, **changes) -> Optional[Dict]:
         db = self.SessionLocal()
@@ -1243,6 +1251,16 @@ class DatabaseManager:
             return {"id": row.id, "account_id": account_id, "enabled": enabled, "reason": reason, "actor": actor}
         finally:
             db.close()
+
+    def get_latest_kill_switch(self, account_id: str) -> Optional[Dict]:
+        with self.SessionLocal() as db:
+            row = (
+                db.query(KillSwitchEvent.enabled, KillSwitchEvent.id)
+                .filter(KillSwitchEvent.account_id == account_id)
+                .order_by(KillSwitchEvent.created_at.desc().nullslast(), KillSwitchEvent.id.desc())
+                .limit(1).first()
+            )
+            return {"enabled": bool(row.enabled), "event_id": row.id} if row else None
 
     @staticmethod
     def _json_safe(value):

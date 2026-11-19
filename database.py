@@ -19,6 +19,7 @@ from sqlalchemy.orm import DeclarativeBase
 from datetime import datetime, timezone
 import enum
 import os
+from uuid import uuid4
 
 class Base(DeclarativeBase):
     pass
@@ -512,3 +513,129 @@ class AdminAuditLog(Base):
     details_json = Column(JSON, nullable=False, default=dict)
     created_at = Column(DateTime, nullable=False, default=utc_now, index=True)
     __table_args__ = (Index("ix_audit_log_actor_created_at", "actor", "created_at"),)
+
+
+class TenantV1(Base):
+    """Tenant identity for the additive client-scope foundation.
+
+    The identifier is deliberately stored as a canonical UUID string so the
+    same metadata and migration work on SQLite and PostgreSQL.  This table is
+    identity metadata only; it is not an authorization policy or an order
+    permission grant.
+    """
+
+    __tablename__ = "tenant_v1"
+    __table_args__ = (
+        CheckConstraint(
+            "length(id) = 36 AND lower(id) = id "
+            "AND substr(id, 9, 1) = '-' AND substr(id, 14, 1) = '-' "
+            "AND substr(id, 19, 1) = '-' AND substr(id, 24, 1) = '-'",
+            name="ck_tenant_v1_id_canonical_uuid",
+        ),
+        CheckConstraint("length(trim(name)) > 0", name="ck_tenant_v1_name_nonempty"),
+        CheckConstraint("status IN ('active', 'inactive')", name="ck_tenant_v1_status"),
+    )
+
+    id = Column(String(36), primary_key=True, nullable=False, default=lambda: str(uuid4()))
+    name = Column(String(128), nullable=False, unique=True)
+    status = Column(String(16), nullable=False, default="active", server_default="active")
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class PrincipalV1(Base):
+    """Persisted issuer/subject identity; it intentionally has no password."""
+
+    __tablename__ = "principal_v1"
+    __table_args__ = (
+        UniqueConstraint("issuer", "subject", name="uq_principal_v1_issuer_subject"),
+        CheckConstraint(
+            "length(id) = 36 AND lower(id) = id "
+            "AND substr(id, 9, 1) = '-' AND substr(id, 14, 1) = '-' "
+            "AND substr(id, 19, 1) = '-' AND substr(id, 24, 1) = '-'",
+            name="ck_principal_v1_id_canonical_uuid",
+        ),
+        CheckConstraint(
+            "length(trim(issuer)) > 0 AND length(trim(subject)) > 0",
+            name="ck_principal_v1_identity_nonempty",
+        ),
+        CheckConstraint("status IN ('active', 'inactive')", name="ck_principal_v1_status"),
+    )
+
+    id = Column(String(36), primary_key=True, nullable=False, default=lambda: str(uuid4()))
+    issuer = Column(String(255), nullable=False)
+    subject = Column(String(255), nullable=False)
+    status = Column(String(16), nullable=False, default="active", server_default="active")
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class TenantMembershipV1(Base):
+    """Active membership connecting one persisted principal to one tenant."""
+
+    __tablename__ = "tenant_membership_v1"
+    __table_args__ = (
+        CheckConstraint("role IN ('viewer', 'trader', 'admin')", name="ck_tenant_membership_v1_role"),
+        CheckConstraint("status IN ('active', 'inactive')", name="ck_tenant_membership_v1_status"),
+    )
+
+    tenant_id = Column(
+        String(36),
+        ForeignKey("tenant_v1.id", name="fk_tenant_membership_v1_tenant", ondelete="RESTRICT"),
+        primary_key=True,
+        nullable=False,
+    )
+    principal_id = Column(
+        String(36),
+        ForeignKey("principal_v1.id", name="fk_tenant_membership_v1_principal", ondelete="RESTRICT"),
+        primary_key=True,
+        nullable=False,
+    )
+    role = Column(String(16), nullable=False, default="viewer", server_default="viewer")
+    status = Column(String(16), nullable=False, default="active", server_default="active")
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class BrokerAccountV1(Base):
+    """Opaque broker account reference owned by exactly one tenant.
+
+    ``account_ref`` is an application-level opaque identifier only.  No API
+    key, secret, token, passphrase, or other credential belongs in this table.
+    """
+
+    __tablename__ = "broker_account_v1"
+    __table_args__ = (
+        UniqueConstraint(
+            "venue",
+            "environment",
+            "account_ref",
+            name="uq_broker_account_v1_venue_environment_ref",
+        ),
+        CheckConstraint(
+            "length(id) = 36 AND lower(id) = id "
+            "AND substr(id, 9, 1) = '-' AND substr(id, 14, 1) = '-' "
+            "AND substr(id, 19, 1) = '-' AND substr(id, 24, 1) = '-'",
+            name="ck_broker_account_v1_id_canonical_uuid",
+        ),
+        CheckConstraint(
+            "length(trim(venue)) > 0 AND length(trim(environment)) > 0 "
+            "AND length(trim(account_ref)) > 0",
+            name="ck_broker_account_v1_identity_nonempty",
+        ),
+        CheckConstraint(
+            "environment IN ('paper', 'testnet', 'demo', 'live')",
+            name="ck_broker_account_v1_environment",
+        ),
+        CheckConstraint("status IN ('active', 'inactive')", name="ck_broker_account_v1_status"),
+    )
+
+    id = Column(String(36), primary_key=True, nullable=False, default=lambda: str(uuid4()))
+    tenant_id = Column(
+        String(36),
+        ForeignKey("tenant_v1.id", name="fk_broker_account_v1_tenant", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    venue = Column(String(64), nullable=False)
+    environment = Column(String(16), nullable=False)
+    account_ref = Column(String(255), nullable=False)
+    status = Column(String(16), nullable=False, default="active", server_default="active")
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)

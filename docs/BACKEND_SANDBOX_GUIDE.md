@@ -98,7 +98,7 @@ Não atribuir um percentual genérico de produção. Para clientes ou dados fina
 - [ ] Executar Testnet/shadow prolongado, fault injection, restart, recuperação de intents e teste fora da amostra com custos reais estimados.
 - [ ] Executar staging Compose/VPS com PostgreSQL/TimescaleDB e Redis, TLS, health/readiness, restarts e backup/restauração reais. Teste PostgreSQL efêmero de CI não substitui restore no staging escolhido.
 - [ ] Configurar métricas e alertas com responsáveis, retenção de logs sem segredos, runbook de incidentes, RPO/RTO, capacidade e custos de operação aprovados.
-- [ ] Concluir review/CI e aceite do incremento atual antes de integrar a branch; publicar o servidor exige uma etapa operacional separada.
+- [x] Concluir review/CI e aceite do incremento atual antes de integrar a branch; publicar o servidor exige uma etapa operacional separada.
 
 A PR #32 da Fase 9 já foi integrada por squash autorizado, preservando sua branch. Esta rodada adiciona segurança de provedores e evidência sandbox em branch separada; não reinicia etapas concluídas e não publica um serviço acessível a clientes.
 
@@ -113,3 +113,7 @@ A PR #32 da Fase 9 já foi integrada por squash autorizado, preservando sua bran
 [7]: https://www.marketaux.com/faq "Marketaux Frequently Asked Questions"
 [8]: https://www.alphavantage.co/terms_of_service/ "Alpha Vantage Terms of Service"
 [9]: https://www.marketaux.com/tos "Marketaux Terms of Use"
+
+## Escopo do indicador de progresso — ZT01
+
+As marcações cumulativas de checklist registram os aceites da baseline integrada PR33/master10168db. A marca de revisão/CI/aceite não autoriza automaticamente uma nova PR: cada incremento exige checks novos e aceite próprio antes do merge. O snapshot JSON distingue accepted_baseline de current_increment; a fundação de client scope não fecha o critério completo de isolamento/RLS nem o ledger autoritativo. Consulte `docs/reports/zt01_backend_control_plane_scope_2026-11-19.md`.

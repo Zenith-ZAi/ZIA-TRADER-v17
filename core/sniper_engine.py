@@ -23,6 +23,7 @@ from core.risk_guard import evaluate_circuit_breaker, evaluate_emergency_exit
 from core.position_policy import evaluate_position_exit
 from core.microstructure import estimate_entry_costs
 from execution.cost_aware_executor import CostAwareExecutor
+from execution.live_authorization import autonomous_submission_block_reason
 from monitoring.metrics import AI_LOCAL_DECISION_LATENCY
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,12 @@ class SniperEngine:
         self.is_running = False
         self.symbols = self.settings.SYMBOLS
         self.volatility_threshold = self.settings.SNIPER_VOLATILITY_THRESHOLD  # Ex: 2% de variação em 1 minuto
+
+    def _autonomous_entry_block_reason(self) -> str | None:
+        redis_cache = getattr(self.execution_engine, "redis_cache", None)
+        if redis_cache is None:
+            redis_cache = self.redis_cache
+        return autonomous_submission_block_reason(self.settings, redis_cache)
 
     def refresh_runtime_config(self) -> None:
         self.symbols = self.settings.SYMBOLS
@@ -235,8 +242,9 @@ class SniperEngine:
                             microstructure["cost_aware"] = cost_estimate
                             spot_direction_allowed = bool(self.settings.ALLOW_SHORT or action == "buy")
                             entry_allowed = live_position is None
+                            autonomous_block_reason = self._autonomous_entry_block_reason()
                             confirmed_event = bool(
-                                self.settings.AUTONOMOUS_TRADING_ENABLED
+                                autonomous_block_reason is None
                                 and spot_direction_allowed
                                 and entry_allowed
                                 and whale_detected

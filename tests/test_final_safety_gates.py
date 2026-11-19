@@ -16,6 +16,9 @@ from execution.order_manager import OrderManager
 
 
 class FakeRedis:
+    # Positive execution tests model the persistence contract explicitly.
+    is_persistent = True
+
     def __init__(self):
         self.states = {}
 

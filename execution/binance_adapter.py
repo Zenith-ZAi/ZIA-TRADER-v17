@@ -131,6 +131,10 @@ class BinanceSpotAdapter:
             raise BinanceAdapterError(f"Binance error code={code}: {message}")
         return payload
 
+    def _before_transport_request(self, method: str, path: str, params: Optional[Dict[str, Any]]) -> None:
+        """Hook for stricter adapters at the last application dispatch boundary."""
+        return None
+
     def _request_legacy_session(
         self,
         method: str,
@@ -148,6 +152,7 @@ class BinanceSpotAdapter:
             query = urlencode({key: value for key, value in params.items() if value is not None}, doseq=True)
         url = f"{self.base_url}{path}"
         is_body_method = method.upper() in {"POST", "DELETE"}
+        self._before_transport_request(method, path, params)
         response = self.session.request(
             method.upper(),
             url,
@@ -173,6 +178,7 @@ class BinanceSpotAdapter:
         if self.session is not None:
             # Compatibilidade exclusiva com FakeSession em testes; produção usa httpx.AsyncClient.
             return await asyncio.to_thread(self._request_legacy_session, method, path, params, signed)
+        self._before_transport_request(method, path, params)
         response = await self.http_client.request(
             method.upper(),
             url,

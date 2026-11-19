@@ -12,6 +12,8 @@ from core.data_feeds import MultiTimeframeFeed
 from core.learning_layer import SignalLearningLayer
 from core.market_data_collector import UnifiedMarketDataCollector
 from core.market_signals import calculate_market_signal
+from core.multi_timeframe import parse_timeframes
+from core.news_gate import evaluate_news_gate
 
 
 class _OfflineNews:
@@ -27,7 +29,13 @@ class _OfflineNews:
 
     @staticmethod
     def health() -> dict[str, Any]:
-        return {"offline": {"ok": True, "detail": "provedores externos desabilitados no comando offline"}}
+        return {
+            "offline": {
+                "enabled": False,
+                "ok": False,
+                "detail": "provedores externos desabilitados no comando offline",
+            }
+        }
 
 
 class CoreCommandManager:
@@ -131,13 +139,89 @@ class CoreCommandManager:
             flow_ratio_threshold=float(self.settings.ORDER_FLOW_RATIO_THRESHOLD),
             require_flow_confirmation=bool(self.settings.ORDER_FLOW_CONFIRMATION_REQUIRED),
         )
+
+        primary_timeframe = str(getattr(self.settings, "TIMEFRAME", "1h"))
+        configured_timeframes = parse_timeframes(
+            getattr(self.settings, "ANALYSIS_TIMEFRAMES", primary_timeframe),
+            primary_timeframe,
+        )
+        required_timeframes = (
+            configured_timeframes
+            if bool(getattr(self.settings, "MULTI_TIMEFRAME_ENABLED", False))
+            else [primary_timeframe]
+        )
+        historical = getattr(snapshot, "historical", {}) or {}
+        snapshot_errors = getattr(snapshot, "errors", {}) or {}
+        required_history_errors = [
+            timeframe
+            for timeframe in required_timeframes
+            if timeframe not in historical or f"history:{timeframe}" in snapshot_errors
+        ]
+        optional_history_errors = [
+            timeframe
+            for timeframe in configured_timeframes
+            if timeframe not in required_timeframes
+            and (timeframe not in historical or f"history:{timeframe}" in snapshot_errors)
+        ]
+        data_sufficient = not required_history_errors and signal.status != "bad_data"
+
+        news_health: dict[str, Any] = {}
+        health = getattr(feed.news_processor, "health", None)
+        if callable(health):
+            try:
+                candidate_health = health()
+                if isinstance(candidate_health, dict):
+                    news_health = candidate_health
+            except Exception:
+                # A provider health failure is not evidence of healthy news.
+                news_health = {}
+        news_gate = evaluate_news_gate(snapshot.news, news_health, self.settings)
+        if offline:
+            news_gate = {
+                **news_gate,
+                "entry_allowed": False,
+                "reason": "notícias offline não autorizam entradas",
+            }
+        elif "news" in snapshot_errors:
+            news_gate = {
+                **news_gate,
+                "entry_allowed": False,
+                "reason": "provedor de notícias indisponível; gate de entrada fechado",
+            }
+
+        reasons = list(signal.reasons)
+        if required_history_errors:
+            reasons.append(
+                "histórico obrigatório indisponível para: "
+                + ", ".join(required_history_errors)
+            )
+        if optional_history_errors:
+            reasons.append(
+                "histórico secundário opcional indisponível; candidato mantido apenas para diagnóstico"
+            )
+        if "order_book" in snapshot_errors:
+            reasons.append("livro de ofertas opcional indisponível; nenhum dado foi fabricado")
+        if not news_gate.get("entry_allowed", False):
+            reasons.append(str(news_gate.get("reason") or "gate de notícias fechado"))
+
+        entry_allowed = bool(
+            data_sufficient
+            and signal.action in {"buy", "sell"}
+            and signal.status == "good"
+            and news_gate.get("entry_allowed", False)
+        )
         return {
             "symbol": symbol,
             "snapshot": snapshot.to_dict(),
             "signal": signal.to_dict(),
-            "entry_allowed": bool(signal.action in {"buy", "sell"} and signal.status == "good"),
+            "status": "ok" if entry_allowed else "attention",
+            "data_sufficient": data_sufficient,
+            "candidate_action": signal.candidate_action,
+            "entry_allowed": entry_allowed,
+            "execution_authorized": False,
             "orders_sent": 0,
-            "explanation": signal.reasons,
+            "news_gate": news_gate,
+            "explanation": reasons,
         }
 
     def label_learning_dataset(

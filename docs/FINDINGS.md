@@ -1,6 +1,6 @@
 # Findings — ZIA-TRADER v17
 
-Atualizado em 2026-11-19. A PR #32 da Fase 9 foi squash-merged em `master` (`56c2025`) com branch preservada. O incremento de segurança de provedores/sandbox está em `fix/backend-provider-security-nov19`: 357 testes locais passados, 4 skips e 1 warning; CI/review do novo SHA são gates próprios. As entradas anteriores preservam o estado da data de cada revisão; o adendo final registra as correções atuais. Este registro contém gaps verificados e limitações abertas, não uma declaração de ausência de outros defeitos.
+Atualizado em 2026-11-19. PR #33 integrada por squash em master (`10168db`), branch preservada, CI pós-merge verde. Novo incremento ZT01 em `fix/zt01-control-plane-and-client-scope`: 421 testes locais, 5 skips, 1 warning; 7/16 gates cumulativos aceitos (43,75%), sem autorização operacional. O follow-up independente fechou três reproduções de transporte/kill durável/ID divergente para refinamento default OFF. Entradas anteriores são histórico; o adendo final mantém limites e bloqueadores atuais.
 
 | Arquivo/linha | Evidência observada | Correção sugerida (aguarda revisão/aprovação) |
 | --- | --- | --- |
@@ -255,3 +255,14 @@ Suíte local final: **357 passed, 4 skipped, 1 warning**. Relatório: `docs/repo
 A sugestão inline de Codex foi validada: opt-out de notícias com chave produzia ok=false indistinguível de falha ativa e degradava /healthz no setup gratuito. Corrigido com enabled/state/ok separados e agregação que ignora somente enabled=false explícito. Credencial ausente em fonte selecionada, falhas reais e status legado continuam degradando; disabled não conta como fonte saudável no news entry gate, mesmo se um status inconsistente trouxer ok=true. Nenhum gate de dados/risco/ordem foi relaxado.
 
 Regressões e suite integral: **368 passed, 4 skipped, 1 warning**. Novo status mensurável por checklist: 6/16 gates aceitos antes do merge (37,5%), calculado por script, sem reivindicar prontidão de produção. Relatório: `docs/reports/pr33_readiness_fix_2026-11-19.md`; snapshot: `docs/progress/pr33_readiness_fix_before_merge_2026-11-19.json`. Novo head/CI precisam de validação na PR antes da integração autorizada.
+
+
+## ZT01 — bugs e fronteiras corrigidos (2026-11-19)
+
+Implementados: flags reais em status/health (sem falso live=false literal), menu não habilita live, veto em proteção/OCO e POST Mainnet com signed/ID/flags/shadow, hook no worker e HTTPX antes de dispatch; autostart live bloqueado também em development. Kill é latch local antes de SQL/await, gravado duravelmente e restaurado antes do adapter; falha/ausência fecha e evento false legado não rearma live. Client ID com outra conta/símbolo/ação/tipo/quantidade/preço gera conflito, incluindo corrida de insert, sem recuperar/retornar a intent divergente.
+
+Autonomia/Redis é dinâmica em engine/Sniper/OrderManager/confirm sem impor veto de novas entradas ao caminho dedicado de saída. /core/analyze trata timeframes obrigatórios ausentes/notícias offline como bloqueio e execution_authorized=false. Regime com dados inválidos não vira normal. Fundação de cliente adiciona quatro tabelas sem credenciais e Scope com membership/role/ownership; issuer/subject não colapsam por trimming.
+
+Revisão inicial encontrou dois P1 e um P2 adicionais; follow-up confirmou suas três reproduções fechadas para código default OFF, sem novo P1 específico. **421 passed, 5 skipped, 1 warning**; PG/CI é verificado separadamente. As reproduções/pareceres estão em `docs/reports/zt01_audit/`. Request já despachada pode ter aceite remoto ambíguo; nenhum hook prova atomicidade com exchange. Não houve operação real.
+
+Continuam abertos: RLS/role não-superuser, JWT/membership ligado às APIs legadas single-account, scopes em todos os dados privados/cache/intents/proteções, ledger financeiro autoritativo e emergência reduce-only/rearm homologados, observer idempotente/ponte multiativo/OOS/licença, staging/restore/soak. A base não é SaaS multi-cliente homologado. Relatório: `docs/reports/zt01_backend_control_plane_scope_2026-11-19.md`; métrica 7/16 gates, 43,75%, limitada à baseline de aceites.
