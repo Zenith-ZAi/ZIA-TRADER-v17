@@ -60,12 +60,26 @@ class NewsProcessor:
         enabled = provider in getattr(self.settings, "NEWS_ENABLED_KEYED_PROVIDERS", [])
         if not enabled:
             self._record_status(provider, False, "provider_disabled")
+            return False
+        key_field = {
+            "benzinga": "BENZINGA_API_KEY", "marketaux": "MARKETAUX_API_KEY",
+            "finnhub": "FINNHUB_API_KEY", "twelve_data": "TWELVE_DATA_API_KEY",
+            "alpha_vantage": "ALPHA_VANTAGE_API_KEY", "newsapi": "NEWSAPI_API_KEY",
+            "cryptopanic": "CRYPTOPANIC_API_KEY",
+        }.get(provider)
+        if key_field is None or not getattr(self.settings, key_field, None):
+            self._record_status(provider, False, "provider_credentials_missing")
+            return False
         return enabled
 
     def _record_status(self, provider: str, ok: bool, detail: str = "") -> None:
-        transport_health = self.http_client.health(provider).get(provider, {})
+        enabled = detail != "provider_disabled"
+        transport_health = self.http_client.health(provider).get(provider, {}) if enabled else {}
+        healthy = enabled and ok and bool(transport_health.get("ok", True))
         self.provider_status[provider] = {
-            "ok": ok and bool(transport_health.get("ok", True)),
+            "enabled": enabled,
+            "state": "disabled" if not enabled else ("healthy" if healthy else "unhealthy"),
+            "ok": healthy,
             "detail": detail or str(transport_health.get("last_error", "")),
             "checked_at": datetime.now(timezone.utc).isoformat(),
             "failures": int(transport_health.get("failures", 0)),
@@ -285,7 +299,8 @@ class NewsProcessor:
         pro_host = self.settings.COINGECKO_BASE_URL.startswith("https://pro-api.coingecko.com/")
         credential_enabled = "coingecko" in getattr(self.settings, "NEWS_ENABLED_KEYED_PROVIDERS", [])
         if pro_host and (not credential_enabled or not self.settings.COINGECKO_API_KEY):
-            self._record_status("coingecko", False, "provider_disabled")
+            detail = "provider_disabled" if not credential_enabled else "provider_credentials_missing"
+            self._record_status("coingecko", False, detail)
             return []
         if credential_enabled and self.settings.COINGECKO_API_KEY:
             # Demo and Pro use different hosts/headers; never silently fall back tiers.

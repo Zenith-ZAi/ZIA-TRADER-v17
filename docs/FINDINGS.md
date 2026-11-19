@@ -248,3 +248,10 @@ A Fase 9/PR #32 já foi integrada por squash autorizado (`56c2025`), mantendo a 
 - **Validado com fonte real:** Binance público → SQLite isolado → features/sinal, 119 linhas e reimportação idempotente, decisão HOLD/zero ordens. O script não carrega .env, não altera os.environ e não constrói adapter de execução.
 
 Suíte local final: **357 passed, 4 skipped, 1 warning**. Relatório: `docs/reports/backend_provider_security_2026-11-19.md`. Guia/checklist: `docs/BACKEND_SANDBOX_GUIDE.md`. Evidência: `docs/reports/evidence/backend_sandbox_smoke_2026-11-19.json`. CI do novo SHA deve ser consultado na PR associada; restore VPS/Redis real, licença/quotas, identidade multiusuário e reconciliação financeira autoritativa permanecem gates abertos.
+
+
+## P2 de readiness e status por gates — 2026-11-19, revisão pré-merge PR #33
+
+A sugestão inline de Codex foi validada: opt-out de notícias com chave produzia ok=false indistinguível de falha ativa e degradava /healthz no setup gratuito. Corrigido com enabled/state/ok separados e agregação que ignora somente enabled=false explícito. Credencial ausente em fonte selecionada, falhas reais e status legado continuam degradando; disabled não conta como fonte saudável no news entry gate, mesmo se um status inconsistente trouxer ok=true. Nenhum gate de dados/risco/ordem foi relaxado.
+
+Regressões e suite integral: **368 passed, 4 skipped, 1 warning**. Novo status mensurável por checklist: 6/16 gates aceitos antes do merge (37,5%), calculado por script, sem reivindicar prontidão de produção. Relatório: `docs/reports/pr33_readiness_fix_2026-11-19.md`; snapshot: `docs/progress/pr33_readiness_fix_before_merge_2026-11-19.json`. Novo head/CI precisam de validação na PR antes da integração autorizada.

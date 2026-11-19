@@ -77,7 +77,11 @@ def health_payload(application: Any) -> dict[str, Any]:
             else None
         )
         provider_degraded = (
-            any(not bool(value.get("ok", False)) for value in providers.values())
+            any(
+                not bool(value.get("ok", False))
+                for value in providers.values()
+                if value.get("enabled", True) is not False
+            )
             if providers
             else False
         )
