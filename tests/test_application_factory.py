@@ -88,6 +88,10 @@ def test_factory_defers_runtime_creation_to_lifespan_and_uses_injected_jwt_secre
         REQUIRE_ALEMBIC_HEAD=True,
         DATABASE_URL="postgresql+psycopg2://user:pass@localhost/db",
         REDIS_URL="redis://localhost:6379/0",
+        CREDENTIAL_VAULT_ENABLED=True,
+        CREDENTIAL_VAULT_KMS_PROVIDER="aws",
+        CREDENTIAL_VAULT_AWS_REGION="us-east-1",
+        CREDENTIAL_VAULT_KMS_KEY_ARN="arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012",
     )
     calls: list[str] = []
 

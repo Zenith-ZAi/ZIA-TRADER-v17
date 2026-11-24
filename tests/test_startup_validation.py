@@ -31,6 +31,10 @@ def safe_production_settings(**overrides) -> Settings:
         "DATABASE_URL": "postgresql+psycopg2://zia:secret@db:5432/zia",
         "REDIS_URL": "redis://:secret@redis:6379/0",
         "BINANCE_MODE": "simulated",
+        "CREDENTIAL_VAULT_ENABLED": True,
+        "CREDENTIAL_VAULT_KMS_PROVIDER": "aws",
+        "CREDENTIAL_VAULT_AWS_REGION": "us-east-1",
+        "CREDENTIAL_VAULT_KMS_KEY_ARN": "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012",
     }
     values.update(overrides)
     return Settings(**values)
@@ -63,6 +67,11 @@ def test_auth_mode_normalization_matches_production_startup_gate():
         ({"AUTO_START_ENGINES": True}, "AUTO_START_ENGINES"),
         ({"REQUIRE_PERSISTENT_DATABASE": False}, "REQUIRE_PERSISTENT_DATABASE"),
         ({"BINANCE_MODE": "mainnet"}, "BINANCE_MODE"),
+        ({"CREDENTIAL_VAULT_ENABLED": False}, "CREDENTIAL_VAULT_ENABLED"),
+        ({"CREDENTIAL_VAULT_KMS_PROVIDER": "local"}, "CREDENTIAL_VAULT_KMS_PROVIDER"),
+        ({"CREDENTIAL_VAULT_AWS_REGION": "invalid"}, "CREDENTIAL_VAULT_AWS_REGION"),
+        ({"CREDENTIAL_VAULT_AWS_REGION": "us-west-2"}, "CREDENTIAL_VAULT_KMS_KEY_ARN"),
+        ({"CREDENTIAL_VAULT_KMS_KEY_ARN": "alias/not-a-key-arn"}, "CREDENTIAL_VAULT_KMS_KEY_ARN"),
     ],
 )
 def test_unsafe_production_configuration_is_rejected(override, expected):

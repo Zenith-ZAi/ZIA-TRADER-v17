@@ -297,7 +297,7 @@ def test_client_scope_migration_is_additive_and_downgrade_requires_empty_tables(
     monkeypatch.setenv("DATABASE_URL", database_url)
     monkeypatch.setenv("ENABLE_TIMESCALEDB_HYPERTABLES", "false")
     cfg = Config(str(ROOT / "alembic.ini"))
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, "c3f1e2a9b7d4")
 
     engine = create_engine(database_url)
     try:
@@ -337,7 +337,7 @@ def test_client_scope_migration_refuses_preexisting_new_table(tmp_path, monkeypa
         with engine.begin() as connection:
             connection.execute(text("CREATE TABLE tenant_v1 (id TEXT PRIMARY KEY)"))
         with pytest.raises(RuntimeError, match="already exist before their Alembic revision"):
-            command.upgrade(cfg, "head")
+            command.upgrade(cfg, "c3f1e2a9b7d4")
         with engine.connect() as connection:
             assert [row[1] for row in connection.exec_driver_sql("PRAGMA table_info(tenant_v1)")] == ["id"]
             assert not set(_SCOPE_TABLE_NAMES[1:]).intersection(inspect(engine).get_table_names())

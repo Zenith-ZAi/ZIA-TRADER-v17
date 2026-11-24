@@ -108,6 +108,16 @@ class Settings(BaseSettings):
     SECRET_KEY: str = Field(default=os.getenv("SECRET_KEY", "dev-only-change-me"), repr=False, exclude=True)
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+    CREDENTIAL_VAULT_ENABLED: bool = os.getenv("CREDENTIAL_VAULT_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
+    CREDENTIAL_VAULT_KMS_PROVIDER: str = os.getenv("CREDENTIAL_VAULT_KMS_PROVIDER", "aws").strip().lower()
+    CREDENTIAL_VAULT_AWS_REGION: str = os.getenv(
+        "CREDENTIAL_VAULT_AWS_REGION", os.getenv("AWS_REGION", "")
+    ).strip()
+    CREDENTIAL_VAULT_KMS_KEY_ARN: str = Field(
+        default=os.getenv("CREDENTIAL_VAULT_KMS_KEY_ARN", "").strip(),
+        repr=False,
+        exclude=True,
+    )
     CORS_ALLOWED_ORIGINS: str = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173")
     CORS_ALLOW_CREDENTIALS: bool = os.getenv("CORS_ALLOW_CREDENTIALS", "false").lower() == "true"
 
