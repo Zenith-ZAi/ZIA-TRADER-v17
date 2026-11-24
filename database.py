@@ -8,6 +8,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     JSON,
     Numeric,
     String,
@@ -28,6 +29,19 @@ class Base(DeclarativeBase):
 def utc_now() -> datetime:
     """Retorna UTC sem tzinfo para compatibilidade com DateTime legado do schema."""
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _canonical_uuid_check(column: str = "id") -> str:
+    remaining = column
+    for character in "0123456789abcdef-":
+        remaining = f"replace({remaining}, '{character}', '')"
+    return (
+        f"length({column}) = 36 AND lower({column}) = {column} "
+        f"AND substr({column}, 9, 1) = '-' AND substr({column}, 14, 1) = '-' "
+        f"AND substr({column}, 19, 1) = '-' AND substr({column}, 24, 1) = '-' "
+        f"AND length({remaining}) = 0"
+    )
+
 
 class MarketType(enum.Enum):
     CRYPTO = "crypto"
@@ -639,3 +653,92 @@ class BrokerAccountV1(Base):
     account_ref = Column(String(255), nullable=False)
     status = Column(String(16), nullable=False, default="active", server_default="active")
     created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class CredentialVaultV1(Base):
+    """One encrypted credential envelope per broker account; never plaintext."""
+
+    __tablename__ = "credential_vault_v1"
+    __table_args__ = (
+        CheckConstraint(
+            _canonical_uuid_check(),
+            name="ck_credential_vault_v1_id_canonical_uuid",
+        ),
+        UniqueConstraint("broker_account_id", name="uq_credential_vault_v1_account"),
+        CheckConstraint("version >= 1", name="ck_credential_vault_v1_version_positive"),
+        CheckConstraint("status IN ('active', 'revoked')", name="ck_credential_vault_v1_status"),
+        CheckConstraint(
+            "(status = 'active' AND encrypted_data_key IS NOT NULL "
+            "AND length(encrypted_data_key) > 0 AND nonce IS NOT NULL AND length(nonce) = 12 "
+            "AND ciphertext IS NOT NULL AND length(ciphertext) >= 16) "
+            "OR (status = 'revoked' AND encrypted_data_key IS NULL "
+            "AND nonce IS NULL AND ciphertext IS NULL)",
+            name="ck_credential_vault_v1_envelope_state",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True, nullable=False, default=lambda: str(uuid4()))
+    broker_account_id = Column(
+        String(36),
+        ForeignKey("broker_account_v1.id", name="fk_credential_vault_v1_account", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    version = Column(Integer, nullable=False, default=1, server_default="1")
+    status = Column(String(16), nullable=False, default="active", server_default="active")
+    kms_key_arn = Column(String(512), nullable=False)
+    encrypted_data_key = Column(LargeBinary, nullable=True)
+    nonce = Column(LargeBinary, nullable=True)
+    ciphertext = Column(LargeBinary, nullable=True)
+    updated_by_principal_id = Column(
+        String(36),
+        ForeignKey("principal_v1.id", name="fk_credential_vault_v1_updated_by", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+
+    def __repr__(self) -> str:
+        return "<CredentialVaultV1 redacted>"
+
+
+class CredentialVaultAuditV1(Base):
+    """Metadata-only audit records for credential lifecycle and access."""
+
+    __tablename__ = "credential_vault_audit_v1"
+    __table_args__ = (
+        CheckConstraint(
+            _canonical_uuid_check(),
+            name="ck_credential_vault_audit_v1_id_canonical_uuid",
+        ),
+        CheckConstraint(
+            "event_type IN ('created', 'rotated', 'accessed', 'revoked')",
+            name="ck_credential_vault_audit_v1_event_type",
+        ),
+        CheckConstraint(
+            "credential_version >= 1",
+            name="ck_credential_vault_audit_v1_version_positive",
+        ),
+        Index(
+            "ix_credential_vault_audit_v1_account_time",
+            "broker_account_id",
+            "occurred_at",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True, nullable=False, default=lambda: str(uuid4()))
+    broker_account_id = Column(
+        String(36),
+        ForeignKey("broker_account_v1.id", name="fk_credential_vault_audit_v1_account", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    actor_principal_id = Column(
+        String(36),
+        ForeignKey("principal_v1.id", name="fk_credential_vault_audit_v1_actor", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    event_type = Column(String(16), nullable=False)
+    credential_version = Column(Integer, nullable=False)
+    occurred_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+    def __repr__(self) -> str:
+        return "<CredentialVaultAuditV1 metadata-only>"

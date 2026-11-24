@@ -31,6 +31,10 @@ def _exercise_migrations(database_url: str, monkeypatch) -> None:
     try:
         inspector = inspect(engine)
         assert set(Base.metadata.tables).issubset(set(inspector.get_table_names()))
+        vault_columns = {column["name"] for column in inspector.get_columns("credential_vault_v1")}
+        assert {"encrypted_data_key", "nonce", "ciphertext", "kms_key_arn", "version", "status"} <= vault_columns
+        assert not {"api_key", "api_secret", "passphrase"}.intersection(vault_columns)
+        assert "credential_vault_audit_v1" in inspector.get_table_names()
         assert "ix_decision_snapshots_symbol_timeframe_observed_at" in {
             index["name"] for index in inspector.get_indexes("decision_snapshots")
         }
@@ -95,6 +99,8 @@ def test_initial_migration_adopts_legacy_create_all_schema(tmp_path, monkeypatch
     Base.metadata.create_all(legacy_engine)
     with legacy_engine.begin() as connection:
         for table_name in (
+            "credential_vault_audit_v1",
+            "credential_vault_v1",
             "model_metrics",
             "model_registry",
             "data_gaps",

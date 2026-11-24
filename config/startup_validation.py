@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlparse
 from execution.live_authorization import requires_live_authorization
+from core.vault_config import valid_aws_kms_key_arn, valid_aws_region
 
 
 _PLACEHOLDER_MARKERS = (
@@ -72,6 +73,17 @@ def production_configuration_errors(config: Any) -> list[str]:
 
     if str(getattr(config, "BINANCE_MODE", "simulated")).strip().lower() in {"live", "mainnet"}:
         errors.append("BINANCE_MODE live/mainnet não permitido neste estágio")
+
+    if not bool(getattr(config, "CREDENTIAL_VAULT_ENABLED", False)):
+        errors.append("CREDENTIAL_VAULT_ENABLED deve ser true fora de desenvolvimento")
+    if str(getattr(config, "CREDENTIAL_VAULT_KMS_PROVIDER", "")).strip().lower() != "aws":
+        errors.append("CREDENTIAL_VAULT_KMS_PROVIDER deve ser aws")
+    kms_region = getattr(config, "CREDENTIAL_VAULT_AWS_REGION", "")
+    kms_key_arn = getattr(config, "CREDENTIAL_VAULT_KMS_KEY_ARN", "")
+    if not valid_aws_region(kms_region):
+        errors.append("CREDENTIAL_VAULT_AWS_REGION inválida")
+    if not valid_aws_kms_key_arn(kms_key_arn, region=kms_region):
+        errors.append("CREDENTIAL_VAULT_KMS_KEY_ARN deve ser um ARN completo na região configurada")
 
     return errors
 

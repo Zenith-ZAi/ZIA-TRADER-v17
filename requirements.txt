@@ -25,3 +25,5 @@ ccxt>=4.4.0
 forex-python>=1.8
 yfinance>=0.2.40
 passlib[bcrypt]
+boto3==1.43.62
+cryptography==50.0.0
