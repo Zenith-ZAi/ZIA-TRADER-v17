@@ -87,9 +87,44 @@ async def get_current_user(
     username = payload.get("sub")
     if not isinstance(username, str) or not username:
         raise credentials_exception
+    if payload.get("token_use") == "passkey_preauth":
+        raise credentials_exception
+    if getattr(settings, "PASSKEY_MFA_REQUIRED", False) and payload.get("mfa_verified") is not True:
+        raise credentials_exception
     user = users.get(username)
     if user is None:
         raise credentials_exception
+    return user
+
+
+async def get_passkey_registration_user(
+    request: Request,
+    token: str = Depends(oauth2_scheme),
+) -> dict[str, Any]:
+    """Password-session/preauth access is confined to first-time enrollment routes."""
+    unauthorized = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    settings = request.app.state.settings
+    payload = verify_token(
+        token, unauthorized, secret_key=settings.SECRET_KEY, algorithm=settings.ALGORITHM
+    )
+    username = payload.get("sub")
+    if not isinstance(username, str) or not username:
+        raise unauthorized
+    user = auth_users(settings).get(username)
+    if user is None:
+        raise unauthorized
+    if getattr(settings, "PASSKEY_MFA_REQUIRED", False):
+        if payload.get("mfa_verified") is not True and not (
+            payload.get("token_use") == "passkey_preauth"
+            and payload.get("scope") == "passkey:register"
+        ):
+            raise unauthorized
+    elif payload.get("token_use") == "passkey_preauth":
+        raise unauthorized
     return user
 
 
@@ -129,6 +164,10 @@ def authenticate_websocket(websocket: WebSocket) -> dict[str, Any]:
     )
     username = payload.get("sub")
     if not isinstance(username, str) or not username:
+        raise unauthorized
+    if payload.get("token_use") == "passkey_preauth":
+        raise unauthorized
+    if getattr(settings, "PASSKEY_MFA_REQUIRED", False) and payload.get("mfa_verified") is not True:
         raise unauthorized
     user = auth_users(settings).get(username)
     if not user or not is_trader(user.get("roles", [])):

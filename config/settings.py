@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     AUTH_MODE: str = os.getenv("AUTH_MODE", "demo")
     AUTH_USERNAME: str = os.getenv("AUTH_USERNAME", "")
     AUTH_PASSWORD: str = Field(default=os.getenv("AUTH_PASSWORD", ""), repr=False, exclude=True)
+    PASSKEY_MFA_REQUIRED: bool = os.getenv("PASSKEY_MFA_REQUIRED", "false").strip().lower() in {"1", "true", "yes"}
+    PASSKEY_ENROLLMENT_ENABLED: bool = os.getenv("PASSKEY_ENROLLMENT_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
+    WEBAUTHN_RP_ID: str = os.getenv("WEBAUTHN_RP_ID", "")
+    WEBAUTHN_ALLOWED_ORIGINS: str = os.getenv("WEBAUTHN_ALLOWED_ORIGINS", "")
     
     # Database & Cache
     DATABASE_URL: str = Field(

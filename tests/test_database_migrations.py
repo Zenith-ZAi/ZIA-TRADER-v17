@@ -108,6 +108,8 @@ def test_initial_migration_adopts_legacy_create_all_schema(tmp_path, monkeypatch
             "principal_v1",
             "tenant_membership_v1",
             "broker_account_v1",
+            "passkey_credentials",
+            "passkey_challenges",
         ):
             Base.metadata.tables[table_name].drop(connection, checkfirst=True)
         metadata_indexes = {
