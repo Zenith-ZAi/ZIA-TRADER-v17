@@ -89,7 +89,7 @@
       "criterion": "Concluir review/CI e aceite do incremento atual antes de integrar a branch; publicar o servidor exige uma etapa operacional separada."
     }
   ],
-  "observed_at": "2026-11-24T20:20:00+00:00",
+  "observed_at": "2026-11-24T20:25:03+00:00",
   "checklist": "docs/BACKEND_SANDBOX_GUIDE.md",
   "current_increment": {
     "local_test_command": "pytest -q -rs (venv sincronizado de requirements.lock, torch-backend cpu)",
@@ -97,7 +97,9 @@
     "local_skipped": 5,
     "local_test_failures": 0,
     "local_skip_reason": "Todos os cinco skips exigem TEST_DATABASE_URL; workflow de CI provisiona PostgreSQL.",
-    "ci_reference": "pendente; consultar PR do incremento antes de aceitar",
+    "ci_reference": "https://github.com/Zenith-ZAi/ZIA-TRADER-v17/pull/35",
+    "ci_status": "passed",
+    "ci_checks_passed": ["test", "container"],
     "merge_authorized": false,
     "deployed": false,
     "passkey_gate_accepted": false
