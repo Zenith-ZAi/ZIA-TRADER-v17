@@ -11,6 +11,7 @@ def test_execution_defaults_are_fail_closed(monkeypatch):
         "AUTO_START_ENGINES",
         "NEURAL_MODELS_ENABLED",
         "SHADOW_MODE_ENABLED",
+        "EXCHANGE_GATEWAY_READ_ONLY_ENABLED",
         "ENVIRONMENT",
     ):
         monkeypatch.delenv(name, raising=False)
@@ -25,3 +26,4 @@ def test_execution_defaults_are_fail_closed(monkeypatch):
     assert settings.AUTO_START_ENGINES is False
     assert settings.NEURAL_MODELS_ENABLED is False
     assert settings.SHADOW_MODE_ENABLED is True
+    assert settings.EXCHANGE_GATEWAY_READ_ONLY_ENABLED is False

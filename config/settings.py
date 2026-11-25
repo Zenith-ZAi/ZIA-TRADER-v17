@@ -118,6 +118,10 @@ class Settings(BaseSettings):
         repr=False,
         exclude=True,
     )
+    EXCHANGE_GATEWAY_READ_ONLY_ENABLED: bool = (
+        os.getenv("EXCHANGE_GATEWAY_READ_ONLY_ENABLED", "false").strip().lower()
+        in {"1", "true", "yes"}
+    )
     CORS_ALLOWED_ORIGINS: str = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173")
     CORS_ALLOW_CREDENTIALS: bool = os.getenv("CORS_ALLOW_CREDENTIALS", "false").lower() == "true"
 
