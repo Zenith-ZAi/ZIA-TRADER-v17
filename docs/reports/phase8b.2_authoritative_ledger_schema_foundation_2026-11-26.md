@@ -3,7 +3,7 @@
 **Data:** 2026-11-26
 **Branch:** `feature/gate-authoritative-ledger-foundation`
 **Base:** `master` pós-PR #34 (`360073b`)
-**Estado:** implementação inicial / **NOT ACCEPTED**. Esta subfase não conclui o gate financeiro e não autoriza sizing, entrada, deploy ou operação.
+**Estado:** PR [#38](https://github.com/Zenith-ZAi/ZIA-TRADER-v17/pull/38) aberta / **OPEN / NOT ACCEPTED**. Esta subfase não conclui o gate financeiro e não autoriza sizing, entrada, deploy ou operação.
 
 ## O que foi implementado
 

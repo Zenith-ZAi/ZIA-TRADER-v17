@@ -1,6 +1,6 @@
 # Plano de finalização — ZIA-TRADER v17, backend em validação
 
-**Base histórica:** 2026-11-19, master pós-PR #33 (`10168db2bf49ebdf47c1c1fbb0f25ea6e463591d`), com 7/16 gates aceitos naquela baseline. **Adendo de estado em 2026-11-26:** master pós-PR #34 está em `360073b`; PRs #35–#37 seguem em drafts/estados não integrados e não são aceites. A branch `feature/gate-authoritative-ledger-foundation` inicia apenas schema para a Fase 8B.2; seu relatório registra cinco testes direcionados passando. Nenhuma contagem de gates foi recalculada: a captura 7/16 continua histórica e não autoriza operação.
+**Base histórica:** 2026-11-19, master pós-PR #33 (`10168db2bf49ebdf47c1c1fbb0f25ea6e463591d`), com 7/16 gates aceitos naquela baseline. **Adendo de estado em 2026-11-26:** master pós-PR #34 está em `360073b`; PRs #35–#37 seguem em drafts/estados não integrados e não são aceites. A PR #38 (`feature/gate-authoritative-ledger-foundation`) inicia apenas schema para a Fase 8B.2; a rodada local combinada registra 43 passed e 2 skipped. CI da PR e aceite do gate são verificações distintas. Nenhuma contagem de gates foi recalculada: a captura 7/16 continua histórica e não autoriza operação.
 
 ## Estimativas históricas de engenharia — não representam o estado atual
 
