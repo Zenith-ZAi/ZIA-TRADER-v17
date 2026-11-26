@@ -297,7 +297,7 @@ def test_client_scope_migration_is_additive_and_downgrade_requires_empty_tables(
     monkeypatch.setenv("DATABASE_URL", database_url)
     monkeypatch.setenv("ENABLE_TIMESCALEDB_HYPERTABLES", "false")
     cfg = Config(str(ROOT / "alembic.ini"))
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, "c3f1e2a9b7d4")
 
     engine = create_engine(database_url)
     try:

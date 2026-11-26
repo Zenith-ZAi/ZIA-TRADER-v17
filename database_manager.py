@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Dict, List, Optional
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from infra.intent_identity import assert_same_intent, intent_identity
@@ -42,6 +42,8 @@ from database import (
     TrendSnapshot,
     WeeklyPNL,
     WhaleActivity,
+    configure_sqlite_engine,
+    install_sqlite_append_only_guards,
     utc_now,
 )
 
@@ -89,14 +91,7 @@ class DatabaseManager:
                 pool_recycle=max(60, int(os.getenv("DB_POOL_RECYCLE_SECONDS", "1800"))),
             )
         self.engine = create_engine(database_url, **engine_options)
-        if self.engine.dialect.name == "sqlite":
-            @event.listens_for(self.engine, "connect")
-            def _enable_sqlite_recursive_triggers(dbapi_connection, _connection_record):
-                cursor = dbapi_connection.cursor()
-                try:
-                    cursor.execute("PRAGMA recursive_triggers = ON")
-                finally:
-                    cursor.close()
+        configure_sqlite_engine(self.engine)
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
 
     def set_equity_ledger_capture_enabled(self, enabled: bool) -> None:
@@ -118,17 +113,7 @@ class DatabaseManager:
                 raise RuntimeError("SQLite/create_all não é permitido em produção; configure PostgreSQL e execute Alembic")
             # Compatibilidade histórica de desenvolvimento e testes locais.
             Base.metadata.create_all(self.engine)
-            with self.engine.begin() as connection:
-                connection.exec_driver_sql(
-                    "CREATE TRIGGER IF NOT EXISTS trg_equity_ledger_v1_no_update "
-                    "BEFORE UPDATE ON equity_ledger_v1 BEGIN "
-                    "SELECT RAISE(ABORT, 'equity_ledger_v1 is append-only'); END"
-                )
-                connection.exec_driver_sql(
-                    "CREATE TRIGGER IF NOT EXISTS trg_equity_ledger_v1_no_delete "
-                    "BEFORE DELETE ON equity_ledger_v1 BEGIN "
-                    "SELECT RAISE(ABORT, 'equity_ledger_v1 is append-only'); END"
-                )
+            install_sqlite_append_only_guards(self.engine)
             return
         if self.engine.dialect.name != "postgresql":
             raise RuntimeError(f"Dialeto de banco não suportado para migrações: {self.engine.dialect.name}")

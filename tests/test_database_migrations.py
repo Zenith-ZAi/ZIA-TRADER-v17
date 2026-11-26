@@ -101,6 +101,13 @@ def test_initial_migration_adopts_legacy_create_all_schema(tmp_path, monkeypatch
             "audit_log",
             "market_candles",
             "equity_ledger_v1",
+            # The authoritative-ledger revision is likewise fail-closed for
+            # pre-existing tables; exclude its schema from this legacy fixture.
+            "ledger_period_closure_v1",
+            "ledger_balance_snapshot_v1",
+            "ledger_fact_v1",
+            "ledger_coverage_manifest_v1",
+            "ledger_scope_v1",
             # The client-scope revision is deliberately fail-closed for any
             # pre-existing table; remove these create_all-only tables so this
             # fixture continues to represent a legacy schema before c3f1e2a9b7d4.

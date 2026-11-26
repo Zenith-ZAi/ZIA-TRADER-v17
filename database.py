@@ -6,6 +6,8 @@ from sqlalchemy import (
     Enum,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
+    BigInteger,
     Index,
     Integer,
     JSON,
@@ -14,6 +16,8 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     create_engine,
+    event,
+    inspect,
 )
 from sqlalchemy.orm import DeclarativeBase
 from datetime import datetime, timezone
@@ -300,7 +304,9 @@ class SystemLog(Base):
     timestamp = Column(DateTime, default=utc_now)
 
 def get_engine(database_url: str):
-    return create_engine(database_url)
+    engine = create_engine(database_url)
+    configure_sqlite_engine(engine)
+    return engine
 
 def get_session_local(engine):
     return sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -309,13 +315,66 @@ def init_db(engine):
     if engine.dialect.name == "sqlite":
         if os.getenv("ENVIRONMENT", "development").strip().lower() in {"prod", "production"}:
             raise RuntimeError("SQLite/create_all não é permitido em produção; configure PostgreSQL e execute Alembic")
+        configure_sqlite_engine(engine)
+        with engine.connect() as connection:
+            connection.exec_driver_sql("PRAGMA foreign_keys = ON")
+            connection.exec_driver_sql("PRAGMA recursive_triggers = ON")
         Base.metadata.create_all(engine)
+        install_sqlite_append_only_guards(engine)
         return
     if engine.dialect.name != "postgresql":
         raise RuntimeError(f"Dialeto de banco não suportado para migrações: {engine.dialect.name}")
     from infra.db_migrations import upgrade_database
 
     upgrade_database(engine)
+
+
+_SQLITE_APPEND_ONLY_TABLES = (
+    "equity_ledger_v1",
+    "ledger_scope_v1",
+    "ledger_coverage_manifest_v1",
+    "ledger_balance_snapshot_v1",
+    "ledger_fact_v1",
+    "ledger_period_closure_v1",
+)
+
+
+def configure_sqlite_engine(engine):
+    """Enable SQLite FK and recursive-trigger enforcement on every pooled connection."""
+    if engine.dialect.name != "sqlite":
+        return
+    if not getattr(engine, "_zia_sqlite_integrity_configured", False):
+        def _enable_sqlite_integrity(dbapi_connection, _connection_record):
+            cursor = dbapi_connection.cursor()
+            try:
+                cursor.execute("PRAGMA foreign_keys = ON")
+                cursor.execute("PRAGMA recursive_triggers = ON")
+            finally:
+                cursor.close()
+
+        event.listen(engine, "connect", _enable_sqlite_integrity)
+        engine._zia_sqlite_integrity_configured = True
+
+
+def install_sqlite_append_only_guards(engine):
+    """Install development/test SQLite guards for every ledger evidence table present."""
+    if engine.dialect.name != "sqlite":
+        return
+    existing_tables = set(inspect(engine).get_table_names())
+    with engine.begin() as connection:
+        for table in _SQLITE_APPEND_ONLY_TABLES:
+            if table not in existing_tables:
+                continue
+            connection.exec_driver_sql(
+                f"CREATE TRIGGER IF NOT EXISTS trg_{table}_no_update "
+                f"BEFORE UPDATE ON {table} BEGIN "
+                "SELECT RAISE(ABORT, 'ledger evidence is append-only'); END"
+            )
+            connection.exec_driver_sql(
+                f"CREATE TRIGGER IF NOT EXISTS trg_{table}_no_delete "
+                f"BEFORE DELETE ON {table} BEGIN "
+                "SELECT RAISE(ABORT, 'ledger evidence is append-only'); END"
+            )
 
 
 class OrderIntent(Base):
@@ -639,3 +698,226 @@ class BrokerAccountV1(Base):
     account_ref = Column(String(255), nullable=False)
     status = Column(String(16), nullable=False, default="active", server_default="active")
     created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class LedgerScopeV1(Base):
+    """Escopo financeiro separado por conta persistida; não atesta autenticidade."""
+
+    __tablename__ = "ledger_scope_v1"
+    __table_args__ = (
+        UniqueConstraint("broker_account_id", name="uq_ledger_scope_v1_broker_account"),
+        CheckConstraint(
+            "length(id) = 36 AND lower(id) = id AND substr(id, 9, 1) = '-' "
+            "AND substr(id, 14, 1) = '-' AND substr(id, 19, 1) = '-' AND substr(id, 24, 1) = '-'",
+            name="ck_ledger_scope_v1_id_uuid",
+        ),
+        CheckConstraint("length(trim(base_asset)) > 0", name="ck_ledger_scope_v1_base_asset"),
+    )
+
+    id = Column(String(36), primary_key=True, nullable=False, default=lambda: str(uuid4()))
+    broker_account_id = Column(
+        String(36),
+        ForeignKey("broker_account_v1.id", name="fk_ledger_scope_v1_broker_account", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    base_asset = Column(String(32), nullable=False)
+    created_at_utc = Column(DateTime(timezone=True), nullable=False)
+
+
+class LedgerCoverageManifestV1(Base):
+    """Manifesto append-only de cobertura; complete não é autoautorização."""
+
+    __tablename__ = "ledger_coverage_manifest_v1"
+    __table_args__ = (
+        UniqueConstraint("scope_id", "manifest_id", name="uq_ledger_coverage_manifest_scope_id"),
+        CheckConstraint("length(trim(endpoint)) > 0", name="ck_ledger_coverage_endpoint"),
+        CheckConstraint(
+            "reconciliation_status IN ('pending', 'attention')",
+            name="ck_ledger_coverage_reconciliation_status",
+        ),
+        CheckConstraint(
+            "coverage_start_utc < coverage_end_utc",
+            name="ck_ledger_coverage_interval",
+        ),
+        CheckConstraint(
+            "complete = false",
+            name="ck_ledger_coverage_not_verified_in_foundation",
+        ),
+    )
+
+    manifest_id = Column(String(36), primary_key=True, nullable=False, default=lambda: str(uuid4()))
+    scope_id = Column(
+        String(36),
+        ForeignKey("ledger_scope_v1.id", name="fk_ledger_coverage_scope", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    endpoint = Column(String(128), nullable=False)
+    requested_at_utc = Column(DateTime(timezone=True), nullable=False)
+    received_at_utc = Column(DateTime(timezone=True), nullable=False)
+    cursor_start = Column(String(255))
+    cursor_end = Column(String(255))
+    coverage_start_utc = Column(DateTime(timezone=True), nullable=False)
+    coverage_end_utc = Column(DateTime(timezone=True), nullable=False)
+    expected_assets_json = Column(JSON, nullable=False)
+    complete = Column(Boolean, nullable=False, default=False, server_default="false")
+    reconciliation_status = Column(String(16), nullable=False, default="pending", server_default="pending")
+
+
+class LedgerBalanceSnapshotV1(Base):
+    """Saldo observado por ativo, ligado a um manifesto de cobertura persistido."""
+
+    __tablename__ = "ledger_balance_snapshot_v1"
+    __table_args__ = (
+        UniqueConstraint(
+            "scope_id", "snapshot_id", "asset", name="uq_ledger_balance_scope_snapshot_asset"
+        ),
+        ForeignKeyConstraint(
+            ["scope_id", "coverage_manifest_id"],
+            ["ledger_coverage_manifest_v1.scope_id", "ledger_coverage_manifest_v1.manifest_id"],
+            name="fk_ledger_balance_coverage_manifest",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("length(trim(asset)) > 0", name="ck_ledger_balance_asset"),
+        CheckConstraint(
+            "free_amount >= 0 AND locked_amount >= 0 AND total_amount >= 0",
+            name="ck_ledger_balance_nonnegative",
+        ),
+        CheckConstraint("length(trim(source_cursor)) > 0", name="ck_ledger_balance_cursor"),
+    )
+
+    id = Column(String(36), primary_key=True, nullable=False, default=lambda: str(uuid4()))
+    scope_id = Column(String(36), nullable=False)
+    snapshot_id = Column(String(36), nullable=False)
+    asset = Column(String(32), nullable=False)
+    free_amount = Column(Numeric(38, 18), nullable=False)
+    locked_amount = Column(Numeric(38, 18), nullable=False)
+    total_amount = Column(Numeric(38, 18), nullable=False)
+    as_of_utc = Column(DateTime(timezone=True), nullable=False)
+    ingested_at_utc = Column(DateTime(timezone=True), nullable=False)
+    source_cursor = Column(String(255), nullable=False)
+    coverage_manifest_id = Column(String(36), nullable=False)
+
+
+class LedgerFactV1(Base):
+    """Fato financeiro append-only; preenchimento não significa verificação."""
+
+    __tablename__ = "ledger_fact_v1"
+    __table_args__ = (
+        UniqueConstraint(
+            "scope_id", "fact_type", "source_event_id", "source_line_no",
+            name="uq_ledger_fact_scope_event_line",
+        ),
+        CheckConstraint(
+            "fact_type IN ('fill', 'fee', 'funding', 'cashflow')",
+            name="ck_ledger_fact_type",
+        ),
+        CheckConstraint(
+            "length(trim(source_event_id)) > 0 AND length(trim(asset)) > 0 "
+            "AND length(trim(adapter_name)) > 0 AND length(trim(adapter_version)) > 0",
+            name="ck_ledger_fact_identity_nonempty",
+        ),
+        CheckConstraint("source_line_no >= 0", name="ck_ledger_fact_line_no"),
+        CheckConstraint("amount <> 0", name="ck_ledger_fact_nonzero_amount"),
+        CheckConstraint(
+            "(fact_type = 'fill' AND venue_order_id IS NOT NULL AND length(trim(venue_order_id)) > 0 "
+            "AND venue_trade_id IS NOT NULL AND length(trim(venue_trade_id)) > 0 "
+            "AND symbol IS NOT NULL AND length(trim(symbol)) > 0 AND side IS NOT NULL "
+            "AND side IN ('buy', 'sell') AND quantity IS NOT NULL AND quantity > 0 "
+            "AND price IS NOT NULL AND price > 0) OR "
+            "(fact_type = 'fee' AND fee_asset IS NOT NULL AND length(trim(fee_asset)) > 0 "
+            "AND fee_amount IS NOT NULL AND fee_amount <> 0) OR "
+            "(fact_type = 'funding' AND funding_period_start_utc IS NOT NULL "
+            "AND funding_period_end_utc IS NOT NULL AND funding_period_start_utc < funding_period_end_utc) OR "
+            "(fact_type = 'cashflow' AND cashflow_kind IS NOT NULL "
+            "AND cashflow_kind IN ('deposit', 'withdrawal', 'transfer') "
+            "AND external_reference IS NOT NULL AND length(trim(external_reference)) > 0)",
+            name="ck_ledger_fact_type_required_fields",
+        ),
+        CheckConstraint(
+            "raw_evidence_sha256 IS NULL OR length(raw_evidence_sha256) = 64",
+            name="ck_ledger_fact_raw_digest_length",
+        ),
+        Index("ix_ledger_fact_scope_occurred", "scope_id", "occurred_at_utc", "id"),
+    )
+
+    id = Column(String(36), primary_key=True, nullable=False, default=lambda: str(uuid4()))
+    scope_id = Column(
+        String(36),
+        ForeignKey("ledger_scope_v1.id", name="fk_ledger_fact_scope", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    fact_type = Column(String(16), nullable=False)
+    source_event_id = Column(String(255), nullable=False)
+    source_line_no = Column(Integer, nullable=False, default=0, server_default="0")
+    source_sequence = Column(BigInteger)
+    asset = Column(String(32), nullable=False)
+    amount = Column(Numeric(38, 18), nullable=False)
+    occurred_at_utc = Column(DateTime(timezone=True), nullable=False)
+    ingested_at_utc = Column(DateTime(timezone=True), nullable=False)
+    client_order_id = Column(String(160))
+    venue_order_id = Column(String(160))
+    venue_trade_id = Column(String(160))
+    symbol = Column(String(64))
+    side = Column(String(8))
+    quantity = Column(Numeric(38, 18))
+    price = Column(Numeric(38, 18))
+    fee_asset = Column(String(32))
+    fee_amount = Column(Numeric(38, 18))
+    funding_period_start_utc = Column(DateTime(timezone=True))
+    funding_period_end_utc = Column(DateTime(timezone=True))
+    funding_rate = Column(Numeric(38, 18))
+    cashflow_kind = Column(String(16))
+    external_reference = Column(String(255))
+    adapter_name = Column(String(64), nullable=False)
+    adapter_version = Column(String(64), nullable=False)
+    raw_evidence_ref = Column(String(512))
+    raw_evidence_sha256 = Column(String(64))
+
+
+class LedgerPeriodClosureV1(Base):
+    """Tentativa imutável de fechamento; somente reconciliador futuro poderá produzi-la."""
+
+    __tablename__ = "ledger_period_closure_v1"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["scope_id", "opening_manifest_id"],
+            ["ledger_coverage_manifest_v1.scope_id", "ledger_coverage_manifest_v1.manifest_id"],
+            name="fk_ledger_closure_opening_manifest",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["scope_id", "closing_manifest_id"],
+            ["ledger_coverage_manifest_v1.scope_id", "ledger_coverage_manifest_v1.manifest_id"],
+            name="fk_ledger_closure_closing_manifest",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("period_start_utc < period_end_utc", name="ck_ledger_closure_period"),
+        CheckConstraint("fact_count >= 0 AND missing_count >= 0 AND late_count >= 0", name="ck_ledger_closure_counts"),
+        CheckConstraint(
+            "status IN ('open', 'attention')",
+            name="ck_ledger_closure_not_verified_in_foundation",
+        ),
+        CheckConstraint(
+            "closed_at_utc IS NULL",
+            name="ck_ledger_closure_no_verified_timestamp_in_foundation",
+        ),
+        Index("ix_ledger_closure_scope_period", "scope_id", "period_start_utc", "period_end_utc"),
+    )
+
+    id = Column(String(36), primary_key=True, nullable=False, default=lambda: str(uuid4()))
+    scope_id = Column(String(36), nullable=False)
+    period_start_utc = Column(DateTime(timezone=True), nullable=False)
+    period_end_utc = Column(DateTime(timezone=True), nullable=False)
+    opening_manifest_id = Column(String(36), nullable=False)
+    closing_manifest_id = Column(String(36), nullable=False)
+    fact_watermark_utc = Column(DateTime(timezone=True), nullable=False)
+    fact_count = Column(Integer, nullable=False)
+    missing_count = Column(Integer, nullable=False)
+    late_count = Column(Integer, nullable=False)
+    fees_included = Column(Boolean, nullable=False)
+    funding_included = Column(Boolean, nullable=False)
+    cashflows_reconciled = Column(Boolean, nullable=False)
+    balances_reconciled = Column(Boolean, nullable=False)
+    status = Column(String(16), nullable=False)
+    recorded_at_utc = Column(DateTime(timezone=True), nullable=False)
+    closed_at_utc = Column(DateTime(timezone=True))
