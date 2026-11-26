@@ -165,3 +165,11 @@ Suíte final após follow-up: **421 passed, 5 skipped, 1 warning**. As três rep
 Progresso cumulativo baseline: **7/16, 43,75%**, não segurança/lucro/autorização. O novo PR tem checks/aceite próprios e não está automaticamente autorizado pelo merge anterior. Relatório detalhado e plano financeiro: `docs/reports/zt01_backend_control_plane_scope_2026-11-19.md`; snapshot `docs/progress/zt01_current_2026-11-19.json`; diagrama `docs/diagrams/zt01_trust_boundaries.mmd`/PNG.
 
 Próximos gates: binding JWT/membership e repositories privados com RLS PostgreSQL; observer read-only idempotente default OFF e ponte class-aware; produtor financeiro autenticado/fills/fees/cursors/manifesta/closure independente; OOS/licenças/cotas; staging real com restore/alertas/incidentes. Getters verified permanecem None e live/manual/autonomia/autostart OFF.
+
+## Auditoria de integração das PRs abertas — 2026-11-26
+
+Foi feita uma consulta às PRs #35–#38 e seus heads em 2026-11-26. **Nenhuma está integrada em `master` e nenhuma recebeu decisão de revisão humana**: #35 Passkey e #36 Vault permanecem drafts com `test`/`container` verdes; #37 gateway read-only permanece draft, empilhada sobre #36 e sem checks registrados; #38 ledger schema-only permanece aberta, com `test`/`container` verdes e CodeRabbit `SKIPPED`. `mergeStateStatus=CLEAN` e CI verde não significam revisão, integração nem aceite de gate.
+
+As migrations `e8c4b70d2a91` (#35), `f72c4a8e1d90` (#36) e `d8a11c4e52f0` (#38) são heads irmãos sobre `c3f1e2a9b7d4`. Antes de integrar o conjunto, é obrigatório consolidar deliberadamente a cadeia Alembic e testar upgrade/downgrade em uma branch que contenha as mudanças combinadas. #37 deve receber CI sobre a base do Vault que de fato será integrada. Nenhuma migration pode ser integrada por simples retitulação ou confiança em checks executados em branches isoladas.
+
+O estado exato, hashes, checks, limitações e ordem recomendada estão em `docs/reports/open_pr_integration_audit_2026-11-26.md`. Os quatro PRs continuam fora da base final e não alteram a baseline histórica de gates. A próxima implementação financeira segue em código sandbox, separada de homologação posterior em VPS; getters de risco continuam fail-closed e live/manual/autonomia/autostart OFF.
