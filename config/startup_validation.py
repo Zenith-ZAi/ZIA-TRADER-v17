@@ -53,6 +53,10 @@ def production_configuration_errors(config: Any) -> list[str]:
     enabled = [name for name in required_false if bool(getattr(config, name, False))]
     if enabled:
         errors.append(f"flags de execução devem permanecer false: {', '.join(enabled)}")
+    if bool(getattr(config, "EXCHANGE_GATEWAY_READ_ONLY_ENABLED", False)):
+        errors.append(
+            "EXCHANGE_GATEWAY_READ_ONLY_ENABLED deve permanecer false até homologação"
+        )
     if not bool(getattr(config, "LIVE_KILL_SWITCH", False)):
         errors.append("LIVE_KILL_SWITCH deve permanecer true")
     if not bool(getattr(config, "SHADOW_MODE_ENABLED", False)):
