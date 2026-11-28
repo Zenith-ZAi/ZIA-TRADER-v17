@@ -8,7 +8,11 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from api.dependencies import auth_users, get_passkey_registration_user
+from api.dependencies import (
+    auth_users,
+    get_passkey_authentication_user,
+    get_passkey_registration_user,
+)
 from security.jwt_utils import create_access_token
 from security.passkey_service import (
     PREAUTH_TTL_SECONDS,
@@ -105,9 +109,12 @@ def finish_registration(
 def begin_authentication(
     body: UsernameRequest,
     request: Request,
+    current_user: dict[str, Any] = Depends(get_passkey_authentication_user),
 ) -> dict[str, Any]:
     settings = request.app.state.settings
     user = _configured_identity(settings, body.username)
+    if normalized_username(user["username"]) != normalized_username(current_user["username"]):
+        raise HTTPException(status_code=401, detail="passkey_authentication_unavailable")
     manager = _database_manager(request)
     return authentication_options(manager, settings, user["username"])
 
@@ -116,9 +123,12 @@ def begin_authentication(
 def finish_authentication(
     body: CredentialRequest,
     request: Request,
+    current_user: dict[str, Any] = Depends(get_passkey_authentication_user),
 ) -> dict[str, str]:
     settings = request.app.state.settings
     user = _configured_identity(settings, body.username)
+    if normalized_username(user["username"]) != normalized_username(current_user["username"]):
+        raise HTTPException(status_code=401, detail="passkey_authentication_unavailable")
     manager = _database_manager(request)
     verify_authentication(manager, settings, user["username"], body.credential)
     access_token = create_access_token(

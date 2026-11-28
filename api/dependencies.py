@@ -128,6 +128,37 @@ async def get_passkey_registration_user(
     return user
 
 
+async def get_passkey_authentication_user(
+    request: Request,
+    token: str = Depends(oauth2_scheme),
+) -> dict[str, Any]:
+    """Require the password-authenticated preauth token for the MFA ceremony."""
+    unauthorized = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    settings = request.app.state.settings
+    if not getattr(settings, "PASSKEY_MFA_REQUIRED", False):
+        raise HTTPException(status_code=403, detail="passkey_mfa_disabled")
+    payload = verify_token(
+        token, unauthorized, secret_key=settings.SECRET_KEY, algorithm=settings.ALGORITHM
+    )
+    username = payload.get("sub")
+    if (
+        not isinstance(username, str)
+        or not username
+        or payload.get("token_use") != "passkey_preauth"
+        or payload.get("scope") != "passkey:authenticate"
+        or payload.get("mfa_verified") is not False
+    ):
+        raise unauthorized
+    user = auth_users(settings).get(username)
+    if user is None:
+        raise unauthorized
+    return user
+
+
 async def get_current_active_user(
     current_user: dict[str, Any] = Depends(get_current_user),
 ) -> dict[str, Any]:

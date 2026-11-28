@@ -111,7 +111,19 @@ def test_required_mfa_enrollment_then_authentication_only_finalizes_after_passke
         second_login = client.post("/token", data={"username": "alice", "password": "a-long-test-password"})
         assert second_login.status_code == 200
         assert second_login.json()["next"] == "passkey_authentication"
-        auth_options = client.post("/passkey/authentication/options", json={"username": "ALICE"})
+        second = second_login.json()
+        assert "access_token" not in second
+        auth_headers = {"Authorization": f"Bearer {second['preauth_token']}"}
+        assert client.post("/passkey/authentication/options", json={"username": "alice"}).status_code == 401
+        assert client.post(
+            "/passkey/authentication/options", headers=headers, json={"username": "alice"}
+        ).status_code == 401
+        assert client.post(
+            "/passkey/authentication/options", headers=auth_headers, json={"username": "bob"}
+        ).status_code == 401
+        auth_options = client.post(
+            "/passkey/authentication/options", headers=auth_headers, json={"username": "ALICE"}
+        )
         assert auth_options.status_code == 200
         assert auth_options.json()["rpId"] == "login.example.com"
         challenge_text = auth_options.json()["challenge"]
@@ -123,12 +135,18 @@ def test_required_mfa_enrollment_then_authentication_only_finalizes_after_passke
                      "authenticatorData": "AA", "signature": "AA", "userHandle": None}}
         # An invalid cryptographic result consumes the challenge and must never create an access token.
         monkeypatch.setattr(service, "verify_authentication_response", lambda **_kwargs: (_ for _ in ()).throw(ValueError()))
-        bad = client.post("/passkey/authentication/verify", json={"username": "alice", "credential": assertion})
+        bad = client.post(
+            "/passkey/authentication/verify",
+            headers=auth_headers,
+            json={"username": "alice", "credential": assertion},
+        )
         assert bad.status_code == 401
         assert "access_token" not in bad.json()
 
         # A fresh assertion verified by the pinned library boundary is the only final-token path.
-        auth_options = client.post("/passkey/authentication/options", json={"username": "alice"}).json()
+        auth_options = client.post(
+            "/passkey/authentication/options", headers=auth_headers, json={"username": "alice"}
+        ).json()
         auth_client_data = b64url(json.dumps({
             "type": "webauthn.get", "challenge": auth_options["challenge"], "origin": "https://login.example.com"
         }).encode())
@@ -136,11 +154,19 @@ def test_required_mfa_enrollment_then_authentication_only_finalizes_after_passke
         monkeypatch.setattr(service, "verify_authentication_response", lambda **_kwargs: SimpleNamespace(
             credential_id=b"alice-credential-id", new_sign_count=0
         ))
-        verified = client.post("/passkey/authentication/verify", json={"username": "alice", "credential": assertion})
+        verified = client.post(
+            "/passkey/authentication/verify",
+            headers=auth_headers,
+            json={"username": "alice", "credential": assertion},
+        )
         assert verified.status_code == 200, verified.text
         final_token = verified.json()["access_token"]
         assert client.get("/users/me", headers={"Authorization": f"Bearer {final_token}"}).status_code == 200
-        replayed = client.post("/passkey/authentication/verify", json={"username": "alice", "credential": assertion})
+        replayed = client.post(
+            "/passkey/authentication/verify",
+            headers=auth_headers,
+            json={"username": "alice", "credential": assertion},
+        )
         assert replayed.status_code in {400, 401}
 
 
@@ -164,7 +190,7 @@ def test_challenges_expire_and_are_consumed_once(tmp_path):
 def test_passkey_credential_isolation_rejects_other_users(tmp_path, monkeypatch):
     import security.passkey_service as service
 
-    app, manager = app_and_manager(tmp_path, AUTH_USERNAME="alice")
+    app, manager = app_and_manager(tmp_path, AUTH_USERNAME="alice", PASSKEY_MFA_REQUIRED=True)
     with manager.SessionLocal() as db:
         db.add_all([
             PasskeyCredential(credential_id=b"alice-id", username="alice", public_key=b"alice-key", sign_count=0, transports=[]),
@@ -178,11 +204,20 @@ def test_passkey_credential_isolation_rejects_other_users(tmp_path, monkeypatch)
         raise AssertionError("credential from another user must be rejected before cryptographic verification")
     monkeypatch.setattr(service, "verify_authentication_response", forbidden)
     with TestClient(app) as client:
-        opts = client.post("/passkey/authentication/options", json={"username": "alice"})
+        login = client.post("/token", data={"username": "alice", "password": "a-long-test-password"})
+        assert login.status_code == 200
+        auth_headers = {"Authorization": f"Bearer {login.json()['preauth_token']}"}
+        opts = client.post(
+            "/passkey/authentication/options", headers=auth_headers, json={"username": "alice"}
+        )
         assert opts.status_code == 200
         credential = {"id": b64url(b"bob-id"), "rawId": b64url(b"bob-id"), "type": "public-key",
                       "response": {"clientDataJSON": "e30", "authenticatorData": "AA", "signature": "AA"}}
-        result = client.post("/passkey/authentication/verify", json={"username": "alice", "credential": credential})
+        result = client.post(
+            "/passkey/authentication/verify",
+            headers=auth_headers,
+            json={"username": "alice", "credential": credential},
+        )
         assert result.status_code == 401
         assert called is False
 
