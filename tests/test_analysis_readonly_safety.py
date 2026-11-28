@@ -135,7 +135,9 @@ def test_offline_news_can_never_open_the_news_entry_gate():
     assert result["orders_sent"] == 0
 
 
-@pytest.mark.parametrize("kind", ["nan", "inf", "missing", "inverted"])
+@pytest.mark.parametrize(
+    "kind", ["nan", "inf", "missing", "inverted", "close_below_low", "close_above_high"]
+)
 def test_regime_invalid_ohlc_is_unknown_bad_data_with_finite_values(kind):
     frame = closed_frame(20).loc[:, ["high", "low", "close"]].copy()
     if kind == "nan":
@@ -144,8 +146,12 @@ def test_regime_invalid_ohlc_is_unknown_bad_data_with_finite_values(kind):
         frame.iloc[-1, frame.columns.get_loc("high")] = np.inf
     elif kind == "missing":
         frame = frame.drop(columns=["low"])
-    else:
+    elif kind == "inverted":
         frame.iloc[-1, frame.columns.get_loc("high")] = frame.iloc[-1]["low"] - 1.0
+    elif kind == "close_below_low":
+        frame.iloc[-1, frame.columns.get_loc("close")] = frame.iloc[-1]["low"] - 1.0
+    else:
+        frame.iloc[-1, frame.columns.get_loc("close")] = frame.iloc[-1]["high"] + 1.0
 
     result = MarketRegimeDetector(lookback=20).detect(frame)
 

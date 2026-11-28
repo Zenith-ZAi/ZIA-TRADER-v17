@@ -101,6 +101,22 @@ def test_artifact_hash_changes_with_model_bytes(tmp_path):
     assert artifact_sha256(model_dir) != first
 
 
+@pytest.mark.parametrize("missing", ["rf_model.joblib", "xgb_model.joblib", "ensemble_metadata.json"])
+def test_artifact_hash_rejects_incomplete_bundle(tmp_path, missing):
+    model_dir = tmp_path / "models"
+    model_dir.mkdir()
+    for name, content in (
+        ("rf_model.joblib", b"rf"),
+        ("xgb_model.joblib", b"xgb"),
+        ("ensemble_metadata.json", b"{}"),
+    ):
+        (model_dir / name).write_bytes(content)
+    (model_dir / missing).unlink()
+
+    with pytest.raises(FileNotFoundError, match="artefatos obrigatórios ausentes"):
+        artifact_sha256(model_dir)
+
+
 def test_registry_postgresql_promotion_and_rollback_when_configured():
     database_url = os.getenv("TEST_DATABASE_URL")
     if not database_url:

@@ -20,7 +20,7 @@ MODEL_FEATURE_COLUMNS = [
     "macd_norm",
     "atr_pct",
 ]
-FEATURE_SCHEMA_VERSION = "ohlcv_features_v1"
+FEATURE_SCHEMA_VERSION = "ohlcv_features_v2"
 
 
 def _numeric(frame: pd.DataFrame, column: str) -> pd.Series:
@@ -48,7 +48,10 @@ def build_feature_frame(ohlcv: pd.DataFrame) -> pd.DataFrame:
     delta = close.diff()
     gain = delta.clip(lower=0).rolling(14, min_periods=14).mean()
     loss = (-delta.clip(upper=0)).rolling(14, min_periods=14).mean()
-    rsi = (100 - (100 / (1 + (gain / loss.replace(0, np.nan))))).fillna(50.0)
+    rsi = 100 - (100 / (1 + (gain / loss.replace(0, np.nan))))
+    rsi = rsi.mask((gain > 0) & (loss == 0), 100.0)
+    rsi = rsi.mask((gain == 0) & (loss > 0), 0.0)
+    rsi = rsi.mask((gain == 0) & (loss == 0), 50.0)
     previous_close = close.shift(1)
     true_range = pd.concat(
         [frame["high"] - frame["low"], (frame["high"] - previous_close).abs(), (frame["low"] - previous_close).abs()],

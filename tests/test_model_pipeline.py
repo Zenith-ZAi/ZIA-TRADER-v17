@@ -31,6 +31,34 @@ def test_feature_pipeline_has_stable_causal_schema():
     pd.testing.assert_frame_equal(features.iloc[:-1], changed_features.iloc[:-1])
 
 
+@pytest.mark.parametrize(
+    ("direction", "expected"),
+    [("up", 1.0), ("down", -1.0), ("flat", 0.0)],
+)
+def test_rsi_handles_monotonic_and_flat_series(direction, expected):
+    index = pd.date_range("2025-01-01", periods=80, freq="h")
+    if direction == "up":
+        close = np.linspace(100.0, 180.0, len(index))
+    elif direction == "down":
+        close = np.linspace(180.0, 100.0, len(index))
+    else:
+        close = np.full(len(index), 100.0)
+    data = pd.DataFrame(
+        {
+            "open": close,
+            "high": close + 1.0,
+            "low": close - 1.0,
+            "close": close,
+            "volume": 1000.0 + (np.arange(len(index)) % 9) * 10.0,
+        },
+        index=index,
+    )
+
+    result = build_feature_frame(data)
+
+    assert result["rsi_norm"].iloc[-1] == pytest.approx(expected)
+
+
 def test_supervised_dataset_uses_future_only_for_labels():
     data = make_fixture()
     X, y = build_supervised_dataset(data, horizon=3)
@@ -125,6 +153,30 @@ def test_ensemble_rejects_invalid_raw_class_probabilities(probabilities):
 
     with pytest.raises(ValueError):
         EnsembleModel._aligned_proba_matrix(BrokenModel(), pd.DataFrame([{}]))
+
+
+def test_legacy_feature_schema_model_is_rejected(tmp_path):
+    model_dir = tmp_path / "legacy-model"
+    model_dir.mkdir()
+    (model_dir / "rf_model.joblib").write_bytes(b"not-loaded")
+    (model_dir / "xgb_model.joblib").write_bytes(b"not-loaded")
+    (model_dir / "ensemble_metadata.json").write_text(
+        json.dumps(
+            {
+                "feature_columns": MODEL_FEATURE_COLUMNS,
+                "classes": {"sell": 0, "hold": 1, "buy": 2},
+                "feature_schema_version": "ohlcv_features_v1",
+                "inference_contract_version": "sell_hold_buy_v1",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    model = EnsembleModel(str(model_dir))
+
+    assert not model.is_trained
+    assert model.load_status == "rejected_incompatible_or_unapproved"
+    assert "schema de features" in model.load_error
 
 
 def test_runtime_ensemble_requires_active_registry_version_and_matching_hash(tmp_path):

@@ -20,18 +20,16 @@ _ARTIFACT_FILES = ("rf_model.joblib", "xgb_model.joblib", "ensemble_metadata.jso
 def artifact_sha256(model_dir: str | Path) -> str:
     """Hash ordenado dos artefatos de inferência do Ensemble."""
     root = Path(model_dir)
+    missing = [name for name in _ARTIFACT_FILES if not (root / name).is_file()]
+    if missing:
+        raise FileNotFoundError(f"artefatos obrigatórios ausentes em {root}: {', '.join(missing)}")
     digest = hashlib.sha256()
-    found = False
     for name in _ARTIFACT_FILES:
         path = root / name
-        if path.is_file():
-            found = True
-            digest.update(name.encode("utf-8"))
-            with path.open("rb") as handle:
-                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                    digest.update(chunk)
-    if not found:
-        raise FileNotFoundError(f"nenhum artefato conhecido em {root}")
+        digest.update(name.encode("utf-8"))
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
     return digest.hexdigest()
 
 
