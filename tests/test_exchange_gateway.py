@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import threading
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -435,6 +436,59 @@ def test_credential_lease_is_closed_even_if_adapter_cleanup_is_cancelled(gateway
     assert adapters[0].closed is True
     with pytest.raises(CredentialVaultUnavailableError, match="^credential lease is closed$"):
         _ = leases[0].api_key
+
+
+def test_cancellation_during_scope_and_kms_resolution_closes_abandoned_lease(gateway_env):
+    env = gateway_env
+    gateway = _gateway(env)
+    worker_started = threading.Event()
+    release_worker = threading.Event()
+    leases = []
+    original_resolver = gateway._resolve_scope_and_retrieve
+
+    def delayed_resolver(**kwargs):
+        worker_started.set()
+        if not release_worker.wait(timeout=5):
+            raise TimeoutError("test worker release timed out")
+        result = original_resolver(**kwargs)
+        leases.append(result[1])
+        return result
+
+    gateway._resolve_scope_and_retrieve = delayed_resolver
+
+    async def exercise_cancellation():
+        operation = asyncio.create_task(
+            gateway.fetch_balance(
+                caller=env.trader_caller,
+                tenant_id=env.tenant_id,
+                account_id=env.account_id,
+            )
+        )
+        for _ in range(200):
+            if worker_started.is_set():
+                break
+            await asyncio.sleep(0.005)
+        assert worker_started.is_set()
+        operation.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await operation
+        release_worker.set()
+        for _ in range(200):
+            if leases:
+                try:
+                    _ = leases[0].api_key
+                except CredentialVaultUnavailableError as exc:
+                    assert str(exc) == "credential lease is closed"
+                    return
+            await asyncio.sleep(0.005)
+        pytest.fail("cancelled resolution returned a lease that was not wiped")
+
+    try:
+        asyncio.run(exercise_cancellation())
+    finally:
+        release_worker.set()
+
+    assert env.adapters == []
 
 
 def test_exchange_timeout_closes_adapter_and_credential_lease(gateway_env):

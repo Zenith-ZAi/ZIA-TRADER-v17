@@ -165,12 +165,21 @@ class ExchangeGateway:
         material: CredentialMaterial | None = None
         adapter: ReadOnlyExchangeAdapter | None = None
         try:
-            scope, material = await asyncio.to_thread(
-                self._resolve_scope_and_retrieve,
-                caller=caller,
-                tenant_id=tenant_id,
-                account_id=account_id,
+            resolution = asyncio.create_task(
+                asyncio.to_thread(
+                    self._resolve_scope_and_retrieve,
+                    caller=caller,
+                    tenant_id=tenant_id,
+                    account_id=account_id,
+                )
             )
+            try:
+                # Cancelling this coroutine cannot stop a running worker thread.
+                # Keep the task alive so its returned lease can be wiped below.
+                scope, material = await asyncio.shield(resolution)
+            except asyncio.CancelledError:
+                resolution.add_done_callback(self._close_cancelled_resolution)
+                raise
             factory = self._adapter_factories.get(
                 (scope.venue.lower(), scope.environment.lower())
             )
@@ -214,6 +223,18 @@ class ExchangeGateway:
             finally:
                 if material is not None:
                     material.close()
+
+    @staticmethod
+    def _close_cancelled_resolution(
+        task: asyncio.Task[tuple[ClientScope, CredentialMaterial]],
+    ) -> None:
+        """Wipe a credential lease returned by a worker after its caller left."""
+        try:
+            _scope, material = task.result()
+        except BaseException:
+            # Retrieving the exception also prevents an unobserved-task warning.
+            return
+        material.close()
 
     def _resolve_scope_and_retrieve(
         self, *, caller: TrustedCaller, tenant_id: str, account_id: str
