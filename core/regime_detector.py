@@ -48,6 +48,8 @@ class MarketRegimeDetector:
             return self._bad_data("preços OHLC devem ser positivos")
         if (recent["high"] < recent["low"]).any():
             return self._bad_data("high/low invertidos")
+        if ((recent["close"] < recent["low"]) | (recent["close"] > recent["high"])).any():
+            return self._bad_data("close fora da faixa high/low")
 
         
         # 1. Volatilidade Relativa (ATR normalizado)

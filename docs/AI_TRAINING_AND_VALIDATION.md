@@ -105,3 +105,8 @@ O monitor é um comando invocável, não um agendamento ativo nesta entrega. Uma
 ## Transformer e compatibilidade
 
 A camada Transformer agora usa `batch_first=True` internamente para evitar o aviso/caminho menos eficiente, mas mantém o contrato público `(seq_len, batch, input_dim)` consumido pelo engine. Um teste compara saída e shape com a implementação anterior usando os mesmos pesos. Nenhum cálculo de sinal, indicador, sizing, risco ou execução foi alterado.
+
+
+## Atualização de contrato — 2026-11-28
+
+A feature `rsi_norm` passou a tratar explicitamente os casos sem perda média (alta monotônica → RSI 100), sem ganho médio (baixa monotônica → RSI 0) e sem variação (série plana → RSI 50); o aquecimento continua sem valor até completar a janela. Por essa mudança de semântica, o schema agora é `ohlcv_features_v2`. O loader rejeita artefatos `v1`; não os converta nem os reutilize: retreino e validação walk-forward OOS com dataset verificado são necessários. O registry também exige o bundle completo RF + XGBoost + metadata ao gerar o hash. Estes são hardenings de contrato, não evidência de um modelo aprovado ou de melhoria de performance. O relatório do incremento e seus limites está em [`docs/reports/model_code_completion_2026-11-28.md`](reports/model_code_completion_2026-11-28.md).
