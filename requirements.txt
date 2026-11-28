@@ -25,3 +25,4 @@ ccxt>=4.4.0
 forex-python>=1.8
 yfinance>=0.2.40
 passlib[bcrypt]
+webauthn==3.0.1

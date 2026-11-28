@@ -89,8 +89,8 @@ Não atribuir um percentual genérico de produção. Para clientes ou dados fina
 - [x] Proteger serialização de configurações, diagnósticos HTTP/cache e destinos de notícias com chave.
 - [x] Ter persistência de notícias/tendências e cleanup de sessão também em falha; migrar esses dois callsites async para worker.
 - [x] Executar teste de integração de dados reais até leitura do core sem enviar ordens.
-- [ ] Aprovar requisitos e contrato de API com o frontend, incluindo testes manuais de login, expiração, reconexão e erros.
-- [ ] Implementar identidade persistente por cliente, isolamento por tenant, recuperação/revogação de acesso, rotação e auditoria de credenciais. O auth por ambiente atual não é uma plataforma SaaS multiusuário homologada.
+- [ ] Aprovar requisitos e contrato de API com o frontend, incluindo testes manuais de login, expiração, reconexão e erros, e executar cerimônias reais de registro/autenticação MFA/passkey em navegador sobre TLS; endpoints backend não comprovam interoperabilidade nem aceite `ACCEPTED`.
+- [ ] Implementar identidade persistente por cliente, isolamento por tenant, autenticação MFA/passkey, recuperação/revogação de acesso, rotação e auditoria de credenciais. Homologar recuperação out-of-band de passkey antes de exigir MFA em produção; o auth por ambiente atual não é uma plataforma SaaS multiusuário homologada.
 - [ ] Resolver autenticação de WebSocket sem token em query de URL em ambiente público; não registrar tokens nos access logs/proxy/APM.
 - [ ] Verificar entitlement e direitos comerciais de cada fonte, além de orçamento persistente de quota/custo, retenção e descarte. Cache e retry limitado não são orçamento diário distribuído.
 - [ ] Completar a migração das demais chamadas ORM síncronas; não declarar concluído o inventário histórico de 59 callsites.

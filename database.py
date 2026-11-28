@@ -1,5 +1,6 @@
 from sqlalchemy import (
     Boolean,
+    BigInteger,
     CheckConstraint,
     Column,
     DateTime,
@@ -9,6 +10,7 @@ from sqlalchemy import (
     Index,
     Integer,
     JSON,
+    LargeBinary,
     Numeric,
     String,
     Text,
@@ -298,6 +300,31 @@ class SystemLog(Base):
     message = Column(String)
     module = Column(String)
     timestamp = Column(DateTime, default=utc_now)
+
+
+class PasskeyCredential(Base):
+    """Public WebAuthn key material only; one non-replaceable credential per env user."""
+    __tablename__ = "passkey_credentials"
+    __table_args__ = (UniqueConstraint("username", name="uq_passkey_credentials_username"),)
+    credential_id = Column(LargeBinary, primary_key=True, nullable=False)
+    username = Column(String(256), nullable=False, index=True)
+    public_key = Column(LargeBinary, nullable=False)
+    sign_count = Column(BigInteger, nullable=False, default=0)
+    transports = Column(JSON, nullable=False, default=list)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class PasskeyChallenge(Base):
+    """Single-use, short-lived WebAuthn challenge shared across API workers via SQL."""
+    __tablename__ = "passkey_challenges"
+    __table_args__ = (CheckConstraint("ceremony IN ('registration', 'authentication')", name="ck_passkey_challenges_ceremony"),)
+    challenge_hash = Column(LargeBinary, primary_key=True, nullable=False)
+    challenge = Column(LargeBinary, nullable=False)
+    username = Column(String(256), nullable=False, index=True)
+    ceremony = Column(String(16), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
 
 def get_engine(database_url: str):
     return create_engine(database_url)
